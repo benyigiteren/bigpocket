@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#00000000" android:pathData="M0,0h108v108h-108z"/>
+    <!-- Big Pocket Logo -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 34 30 L 74 30 C 78.4 30 82 33.6 82 38 L 82 54 C 82 72.8 68.8 86 54 86 C 39.2 86 26 72.8 26 54 L 26 38 C 26 33.6 29.6 30 34 30 Z" />
+    <path
+        android:fillColor="#1A237E"
+        android:pathData="M 44 40 L 64 40 C 66.2 40 68 41.8 68 44 L 68 54 C 68 64.4 60.4 72 54 72 C 47.6 72 40 64.4 40 54 L 40 44 C 40 41.8 41.8 40 44 40 Z" />
+    <!-- Signal dot -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M 54 48 A 3 3 0 1 0 54 54 A 3 3 0 1 0 54 48 Z" />
+</vector>

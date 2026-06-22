@@ -1,0 +1,26 @@
+# IDEs and System files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# Android build and local files
+android/.gradle/
+android/local.properties
+android/app/build/
+android/.cxx/
+android/build/
+android/captures/
+.externalNativeBuild/
+
+# Desktop compiled binaries
+desktop/BigPocket.exe
+desktop/Setup.exe
+
+# Local data and configuration files
+config.json
+SharedFiles/
+.agents/

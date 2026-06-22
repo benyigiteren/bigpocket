@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BigPocket — Kontrol Paneli</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700&family=Instrument+Serif:ital,wght@0,400;0,900;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <img src="/logo.svg" alt="BP" style="width: 28px; height: 28px; border-radius: 4px;" id="sidebar-brand-logo">
+                <span class="brand-name">BigPocket</span>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <button class="nav-item active" data-tab="dashboard">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                    <span>Gösterge Paneli</span>
+                </button>
+                <button class="nav-item" data-tab="streamdeck">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>
+                    <span>Stream Deck</span>
+                </button>
+                <button class="nav-item" data-tab="monitor">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                    <span>2. Monitör</span>
+                </button>
+                <button class="nav-item" data-tab="webcam">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                    <span>Kamera Akışı</span>
+                </button>
+                <button class="nav-item" data-tab="files">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    <span>Dosya Transferi</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button class="btn-shutdown" id="btn-shutdown">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                    <span>Sunucuyu Kapat</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-title-container">
+                    <h1 id="tab-title">Gösterge Paneli</h1>
+                    <p id="tab-subtitle" class="serif-subtitle">Bağlantı durumunu izleyin ve telefonunuzu eşleştirin.</p>
+                </div>
+                <div class="status-indicator">
+                    <div class="status-dot" id="status-pulse"></div>
+                    <span id="status-text" class="mono-text">BAĞLANTI BEKLENİYOR</span>
+                </div>
+            </header>
+
+            <!-- TAB CONTENT: Dashboard -->
+            <section class="tab-panel active" id="panel-dashboard">
+                <div class="bento-grid">
+                    <!-- Pairing Card -->
+                    <div class="card card-span-2 animate-slide-in" style="--index: 1;">
+                        <div class="card-header">
+                            <span class="meta-tag">KABLOSUZ EŞLEŞTİRME</span>
+                            <h2>Mobil Cihaz Eşleştirme</h2>
+                        </div>
+                        <div class="pairing-container">
+                            <div class="pairing-qr">
+                                <img id="qr-code" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=BigPocket" alt="QR Code">
+                                <p class="qr-desc">Telefon kamerasından taratın</p>
+                            </div>
+                            <div class="pairing-info">
+                                <div class="info-group">
+                                    <label class="info-label">Bilgisayar IP Adresi</label>
+                                    <div class="value-copy">
+                                        <select id="pc-ip-select" class="highlight-ip font-mono" style="background: transparent; border: none; color: var(--text-main); font-family: inherit; font-size: inherit; outline: none; cursor: pointer; width: calc(100% - 24px);"></select>
+                                        <button class="btn-icon" id="btn-copy-ip" title="IP Adresini Kopyala">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="info-group">
+                                    <label class="info-label">Sunucu Servis Portları</label>
+                                    <div class="ports-list">
+                                        <div class="port-item"><span class="port-label">Web / Kontrol:</span> <span class="port-val font-mono" id="port-ws">8085</span></div>
+                                        <div class="port-item"><span class="port-label">Kamera (TCP):</span> <span class="port-val font-mono" id="port-cam">8083</span></div>
+                                        <div class="port-item"><span class="port-label">Ses (TCP):</span> <span class="port-val font-mono" id="port-audio">8084</span></div>
+                                        <div class="port-item"><span class="port-label">Ekran (TCP):</span> <span class="port-val font-mono" id="port-screen">8086</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- USB Tethering Guide Card -->
+                    <div class="card animate-slide-in" style="--index: 2;">
+                        <div class="card-header">
+                            <span class="meta-tag color-tag-blue">KABLOLU BAĞLANTI</span>
+                            <h2>Sıfır Gecikmeli USB</h2>
+                        </div>
+                        <div class="guide-steps">
+                            <div class="step">
+                                <div class="step-badge">1</div>
+                                <div class="step-content">
+                                    <h3>Kabloyu Bağlayın</h3>
+                                    <p>Telefonunuzu USB kablosuyla bilgisayara takın.</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <div class="step-badge">2</div>
+                                <div class="step-content">
+                                    <h3>Paylaşımı Açın</h3>
+                                    <p>Ayarlar > Bağlantılar > USB İnternet Paylaşımı (Tethering) özelliğini etkinleştirin.</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <div class="step-badge">3</div>
+                                <div class="step-content">
+                                    <h3>QR'ı Okutun</h3>
+                                    <p>Uygulamadan yukarıdaki QR kodu okutarak sıfır gecikmenin keyfini çıkarın.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Status Card -->
+                    <div class="card animate-slide-in" style="--index: 3;">
+                        <div class="card-header">
+                            <span class="meta-tag">HİZMET DURUMLARI</span>
+                            <h2>Servis Durumları</h2>
+                        </div>
+                        <div class="stats-list">
+                            <div class="stat-item">
+                                <span class="stat-label">Sanal Ekran Sürücüsü</span>
+                                <span class="status-pill status-red" id="driver-badge">HATA</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Pano Senkronizasyonu</span>
+                                <span class="status-pill status-green">AKTİF</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Ses Çıkışı (Oto v3)</span>
+                                <span class="status-pill status-green">HAZIR</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Sanal Mikrofon Sürücüsü</span>
+                                <span class="status-pill status-red" id="mic-driver-badge">EKSİK</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Arka Plan Go Servisi</span>
+                                <span class="status-pill status-green">AKTİF</span>
+                            </div>
+                        </div>
+                    </div>
+ 
+                    <!-- Password Settings Card -->
+                    <div class="card animate-slide-in" style="--index: 4;">
+                        <div class="card-header">
+                            <span class="meta-tag">GÜVENLİK AYARLARI</span>
+                            <h2>Bağlantı Şifresi</h2>
+                        </div>
+                        <div class="form-group" style="margin-top: 16px;">
+                            <label for="settings-password">Erişim Şifresi</label>
+                            <input type="password" id="settings-password" placeholder="Şifresiz (Önerilmez)" style="width: 100%;">
+                        </div>
+                        <div class="card-actions" style="margin-top: 16px;">
+                            <button class="btn btn-primary" id="btn-save-password" style="width: 100%;">Şifreyi Güncelle</button>
+                        </div>
+                    </div>
+ 
+                    <!-- Virtual Mic Installation Card -->
+                    <div class="card animate-slide-in" style="--index: 5;">
+                        <div class="card-header">
+                            <span class="meta-tag">SES YÖNLENDİRME</span>
+                            <h2>Sanal Mikrofon Kurulumu</h2>
+                        </div>
+                        <p class="card-text text-muted" style="font-size: 12.5px; line-height: 1.5; margin-bottom: 12px;">
+                            Telefon sesini bilgisayarda doğrudan hoparlörden çalmak yerine Discord, Zoom, OBS vb. programlara mikrofon olarak tanıtmak için VB-Cable sürücüsünü kurun.
+                        </p>
+                        <div class="driver-status-details" style="margin-bottom: 12px; font-size: 12px;">
+                            <span class="mono-text" style="color: var(--text-muted);">Durum: </span>
+                            <span id="mic-driver-status-text" class="status-pill status-red">EKSİK</span>
+                        </div>
+                        <button class="btn btn-primary" id="btn-install-mic-driver" style="width: 100%; height: 38px;">Sanal Mikrofonu Kur</button>
+                        <button class="btn btn-secondary" id="btn-open-sound-settings" style="width: 100%; height: 38px; margin-top: 8px; display: none;">Ses Kontrol Panelini Aç</button>
+                        
+                        <div class="mic-guide-box" style="margin-top: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 10px; border-radius: 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted);">
+                            <strong>Kurulum Sonrası Adımlar:</strong><br>
+                            1. Sürücüyü kurduktan sonra bilgisayarı yeniden başlatın.<br>
+                            2. Windows Volume Mixer ayarlarından BigPocket çıkışını "CABLE Input" yapın.<br>
+                            3. Discord/OBS üzerinde giriş cihazı olarak "CABLE Output" seçin.
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB CONTENT: Stream Deck -->
+            <section class="tab-panel" id="panel-streamdeck">
+                <div class="card animate-slide-in" style="--index: 1;">
+                    <div class="card-header">
+                        <span class="meta-tag">STREAM DECK ÖZELLEŞTİRME</span>
+                        <h2>Buton Matrisi</h2>
+                        <p class="section-desc text-muted">Telefonunuz yatay konumdayken gösterilecek butonları buradan yapılandırın.</p>
+                    </div>
+
+                    <div class="deck-settings-bar" style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; background: var(--bg-main); padding: 16px; border-radius: 6px; border: 1px solid var(--border-color); align-items: flex-end;">
+                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 120px;">
+                            <label for="deck-rows">Satır Sayısı</label>
+                            <select id="deck-rows" style="width: 100%;">
+                                <option value="1">1 Satır</option>
+                                <option value="2" selected>2 Satır</option>
+                                <option value="3">3 Satır</option>
+                                <option value="4">4 Satır</option>
+                                <option value="5">5 Satır</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 120px;">
+                            <label for="deck-cols">Sütun Sayısı</label>
+                            <select id="deck-cols" style="width: 100%;">
+                                <option value="2">2 Sütun</option>
+                                <option value="3">3 Sütun</option>
+                                <option value="4" selected>4 Sütun</option>
+                                <option value="5">5 Sütun</option>
+                                <option value="6">6 Sütun</option>
+                                <option value="7">7 Sütun</option>
+                                <option value="8">8 Sütun</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; flex: 1.5; min-width: 180px;">
+                            <label for="deck-preset">Hazır Şablon Yükle</label>
+                            <select id="deck-preset" style="width: 100%;">
+                                <option value="">-- Şablon Seçin --</option>
+                                <option value="media">Medya Kontrolleri</option>
+                                <option value="obs">OBS Studio</option>
+                                <option value="windows">Windows Hızlı Araçlar</option>
+                                <option value="developer">Yazılımcı Araçları</option>
+                                <option value="gaming">Oyun & Discord</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-apply-grid-settings" style="height: 38px;">Düzeni Uygula</button>
+                    </div>
+
+                    <div class="buttons-grid" id="deck-buttons-list">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div class="card-actions">
+                        <button class="btn btn-primary" id="btn-save-config">Değişiklikleri Kaydet</button>
+                    </div>
+                </div>
+
+                <!-- Edit Button Modal -->
+                <div class="modal" id="edit-button-modal">
+                    <div class="modal-content card">
+                        <div class="card-header">
+                            <span class="meta-tag">KART DÜZENLEYİCİ</span>
+                            <h2>Buton Yapılandırması</h2>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-label">Buton İsmi</label>
+                            <input type="text" id="edit-label" placeholder="Örn. Mikrofonu Kapat">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-type">Eylem Türü</label>
+                            <select id="edit-type">
+                                <option value="hotkey">Klavye Kısayolu (Hotkey)</option>
+                                <option value="command">Terminal Komutu (CMD)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-value" id="edit-value-label">Kısayol Kombinasyonu</label>
+                            <input type="text" id="edit-value" placeholder="ctrl+alt+t veya calc.exe">
+                        </div>
+                        <div class="form-group" id="installed-apps-group" style="display: none;">
+                            <label for="edit-app-select">Bilgisayardaki Uygulamalar</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="app-search-input" placeholder="Uygulama ara..." style="flex: 1; min-width: 100px;">
+                                <select id="edit-app-select" style="flex: 2; min-width: 150px;">
+                                    <option value="">-- Uygulama Seçin --</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-icon">Görsel / İkon Tipi</label>
+                            <select id="edit-icon-select">
+                                <option value="mic">Mikrofon</option>
+                                <option value="volup">Ses Arttır</option>
+                                <option value="voldown">Ses Azalt</option>
+                                <option value="play">Oynat / Durdur</option>
+                                <option value="calc">Hesap Makinesi</option>
+                                <option value="web">İnternet Tarayıcısı</option>
+                                <option value="lock">Kilit Ekranı</option>
+                                <option value="task">Görev Yöneticisi</option>
+                                <option value="custom">Özel İkon Simgesi</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="custom-icon-group" style="display: none;">
+                            <label for="edit-icon-custom">Özel İkon SVG Kodu veya URL'si</label>
+                            <input type="text" id="edit-icon-custom" placeholder="Örn. /icons/custom.svg veya SVG kodu">
+                        </div>
+                        <div class="form-group" id="custom-icon-upload-group" style="display: none;">
+                            <label>Özel İkon Dosyası Yükle (Görsel)</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="file" id="edit-icon-file" accept="image/*" style="display: none;">
+                                <button class="btn btn-secondary" id="btn-trigger-icon-upload" style="flex: 1; font-size: 12px; padding: 8px;">Dosya Seç</button>
+                                <span id="icon-upload-status" class="mono-text" style="align-self: center; font-size: 11px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 120px;">Seçilmedi</span>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn btn-secondary" id="btn-close-modal">Vazgeç</button>
+                            <button class="btn btn-primary" id="btn-apply-edit">Uygula</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB CONTENT: 2nd Monitor -->
+            <section class="tab-panel" id="panel-monitor">
+                <div class="bento-grid">
+                    <div class="card card-span-2 animate-slide-in" style="--index: 1;">
+                        <div class="card-header">
+                            <span class="meta-tag">MONİTÖR SÜRÜCÜSÜ</span>
+                            <h2>Sanal Ekran Sürücü Yönetimi</h2>
+                        </div>
+                        <div class="driver-management">
+                            <div class="driver-status-container">
+                                <div class="driver-status-icon" id="driver-status-icon">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                                </div>
+                                <div class="driver-status-details">
+                                    <h3 id="driver-title" class="serif-title-small">Sürücü Durumu Kontrol Ediliyor</h3>
+                                    <p id="driver-desc" class="text-muted">Virtual Monitor Driver (usbmmidd) sistemi üzerinden sanal bir ekran simülasyonu başlatılır.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="driver-actions">
+                                <button class="btn btn-primary" id="btn-install-driver" style="display: none;">Sürücüyü Yükle</button>
+                                <div class="toggle-control" id="monitor-toggle-container" style="display: none;">
+                                    <span class="toggle-label font-mono">SANAL MONİTÖR YANSITMA</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="chk-enable-monitor">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <p class="admin-warning" id="admin-warning" style="display: none;">⚠️ Sürücü kurulum işlemleri için uygulamayı <strong>Yönetici Olarak</strong> çalıştırmalısınız.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card animate-slide-in" style="--index: 2;">
+                        <div class="card-header">
+                            <span class="meta-tag">ADIM ADIM REHBER</span>
+                            <h2>Nasıl Yapılır?</h2>
+                        </div>
+                        <div class="guide-steps">
+                            <div class="step">
+                                <div class="step-badge">1</div>
+                                <div class="step-content">
+                                    <p>Sanal monitör anahtarını açın.</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <div class="step-badge">2</div>
+                                <div class="step-content">
+                                    <p>Windows Ekran Ayarlarından sanal monitörü fiziksel monitörünüzün sağına veya soluna yerleştirin.</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <div class="step-badge">3</div>
+                                <div class="step-content">
+                                    <p>Yansıtmak istediğiniz uygulama pencerelerini bu görünmez ikinci ekrana sürükleyin.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB CONTENT: Webcam Preview -->
+            <section class="tab-panel" id="panel-webcam">
+                <div class="bento-grid">
+                    <div class="card card-span-2 animate-slide-in" style="--index: 1;">
+                        <div class="card-header">
+                            <span class="meta-tag">KAMERA ÖNİZLEME</span>
+                            <h2>Telefon Kamerası Akışı</h2>
+                        </div>
+                        <div class="video-preview-container">
+                            <div class="video-placeholder" id="video-placeholder">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                <p class="text-muted">Telefonda Kamera Yayınını Başlatın</p>
+                            </div>
+                            <img id="webcam-stream" src="" alt="Kamera Akışı" style="display: none;">
+                        </div>
+                    </div>
+
+                    <div class="card animate-slide-in" style="--index: 2;">
+                        <div class="card-header">
+                            <span class="meta-tag">OBS VE DİĞERLERİ</span>
+                            <h2>Sanal Kamera Yönlendirme</h2>
+                        </div>
+                        <p class="card-text text-muted">Telefon kamerasını Zoom, Teams veya Discord üzerinde bir web kamerası gibi kullanmak için OBS Studio entegrasyonu:</p>
+                        <div class="guide-steps" style="margin-top: 16px;">
+                            <div class="step">
+                                <div class="step-badge font-mono">1</div>
+                                <div class="step-content">
+                                    <p>OBS üzerinde yeni bir <strong>Tarayıcı (Browser) Kaynağı</strong> oluşturun.</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <div class="step-badge font-mono">2</div>
+                                <div class="step-content">
+                                    <p>URL kısmına <code class="highlight-code">http://localhost:8085/video_feed</code> adresini girin.</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <div class="step-badge font-mono">3</div>
+                                <div class="step-content">
+                                    <p>OBS panelinde <strong>Sanal Kamerayı Başlat</strong> butonunu tıklayarak sistemi aktif hale getirin.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB CONTENT: File Transfer -->
+            <section class="tab-panel" id="panel-files">
+                <div class="bento-grid">
+                    <!-- File Manager Card -->
+                    <div class="card animate-slide-in" style="--index: 1;">
+                        <div class="card-header">
+                            <span class="meta-tag">DOSYA HAVUZU</span>
+                            <h2>Paylaşılan Dosya Yöneticisi</h2>
+                            <p class="section-desc text-muted">Telefonunuzla paylaşılan dosyalar. Klasör: <span class="font-mono">APPDATA/BigPocket/SharedFiles</span></p>
+                        </div>
+                        
+                        <div class="drag-drop-zone" id="drag-drop-zone">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                            <p>Dosyaları sürükleyip buraya bırakın veya <span class="underline-link">bilgisayardan seçin</span></p>
+                            <input type="file" id="file-input" style="display: none;" multiple>
+                        </div>
+
+                        <div class="files-list-container">
+                            <table class="files-table">
+                                <thead>
+                                    <tr>
+                                        <th>Dosya Adı</th>
+                                        <th>Boyut</th>
+                                        <th>Yükleme Tarihi</th>
+                                        <th style="text-align: right;">İşlemler</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="files-table-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Clipboard/Text Sync Card -->
+                    <div class="card animate-slide-in" style="--index: 2;">
+                        <div class="card-header">
+                            <span class="meta-tag">PANO SENKRONİZASYONU</span>
+                            <h2>Pano ve Metin Transferi</h2>
+                            <p class="section-desc text-muted">Telefonunuz ve bilgisayarınız arasında anında metin paylaşın.</p>
+                        </div>
+                        
+                        <div class="form-group" style="margin-top: 16px;">
+                            <label for="pc-clipboard-preview">Son Eşitlenen Metin</label>
+                            <textarea id="pc-clipboard-preview" rows="4" readonly style="width: 100%; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-main); padding: 10px; font-size: 13px; resize: none;" placeholder="Senkronize edilmiş metin bulunmuyor."></textarea>
+                        </div>
+                        
+                        <div style="display: flex; gap: 8px; margin-top: 12px;">
+                            <button class="btn btn-secondary" id="btn-copy-clipboard" style="flex: 1; font-size: 12px; height: 36px; padding: 0;">Metni Kopyala</button>
+                        </div>
+                        
+                        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+                        
+                        <div class="form-group">
+                            <label for="pc-clipboard-send">Telefona Metin Gönder</label>
+                            <textarea id="pc-clipboard-send" rows="3" style="width: 100%; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-main); padding: 10px; font-size: 13px; resize: none;" placeholder="Telefona göndermek istediğiniz metni yazın..."></textarea>
+                        </div>
+                        
+                        <div class="card-actions" style="margin-top: 12px;">
+                            <button class="btn btn-primary" id="btn-send-clipboard-pc" style="width: 100%; height: 36px; padding: 0;">Metni Gönder</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Password Prompt Modal (Unauthorized overlay) -->
+    <div class="modal" id="password-prompt-modal">
+        <div class="modal-content card" style="width: 350px;">
+            <div style="text-align: center; margin-top: 16px; margin-bottom: 8px;">
+                <img src="/logo.svg" alt="BigPocket" style="width: 64px; height: 64px; border-radius: 12px; border: 1px solid var(--border-color);">
+            </div>
+            <div class="card-header" style="text-align: center; margin-bottom: 12px;">
+                <span class="meta-tag">GÜVENLİ BAĞLANTI</span>
+                <h2>Şifre Gerekli</h2>
+                <p class="text-muted" style="font-size: 12px; margin-top: 4px;">Lütfen sunucu erişim şifresini girin.</p>
+            </div>
+            <div class="form-group">
+                <input type="password" id="prompt-password-input" placeholder="Şifre" style="text-align: center;">
+                <p id="prompt-error-msg" style="color: var(--status-red-txt); font-size: 11px; text-align: center; margin-top: 8px; display: none;">Hatalı şifre. Tekrar deneyin.</p>
+            </div>
+            <div class="modal-actions" style="justify-content: center; margin-top: 16px;">
+                <button class="btn btn-primary" id="btn-submit-prompt-password" style="width: 100%;">Bağlan</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
