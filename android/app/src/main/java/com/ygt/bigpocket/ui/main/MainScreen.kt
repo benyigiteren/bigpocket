@@ -1623,7 +1623,7 @@ fun StreamDeckTab(
 @Composable
 fun TrackpadTab(isConnected: Boolean) {
     val context = LocalContext.current
-    var textInput by remember { mutableStateOf(" ") }
+    var textInput by remember { mutableStateOf("  ") }
     
     Column(
         modifier = Modifier
@@ -1731,29 +1731,33 @@ fun TrackpadTab(isConnected: Boolean) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Keyboard simulation input
         OutlinedTextField(
             value = textInput,
             onValueChange = { newVal ->
-                if (newVal.length > 1) {
-                    val added = newVal.substring(1)
+                if (newVal.length > 2) {
+                    val added = newVal.substring(2)
                     SocketManager.sendControl(JSONObject().apply {
                         put("type", "keyboard_input")
                         put("text", added)
                     })
-                } else if (newVal.length < 1) {
+                } else if (newVal.length < 2) {
                     SocketManager.sendControl(JSONObject().apply {
                         put("type", "keyboard_key")
                         put("key", "backspace")
                     })
                 }
-                textInput = " "
+                textInput = "  "
             },
             label = { Text("PC'ye Metin Yazın") },
             placeholder = { Text("Yazmaya başlayın...") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            keyboardOptions = KeyboardOptions(
+                autoCorrect = false,
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done
+            )
         )
         
         Spacer(modifier = Modifier.height(8.dp))
