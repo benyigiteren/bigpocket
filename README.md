@@ -1,3 +1,4 @@
+<img src="bigpocket.png" alt="Bigpocket" width="100%" />
 # BigPocket 📱💻
 
 **BigPocket**, Windows bilgisayarınızı akıllı telefonunuz üzerinden sıfır gecikmeyle kontrol etmenizi, yönetmenizi ve telefonunuzu çok işlevli bir **Sanal 2. Monitör, Sanal Mikrofon, Stream Deck** veya **Webcam** aygıtına dönüştürmenizi sağlayan modern, yüksek performanslı ve açık kaynaklı bir uzaktan yönetim sistemidir.
