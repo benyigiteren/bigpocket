@@ -1,6 +1,17 @@
 <img src="bigpocket.png" alt="Bigpocket" width="100%" />
 # BigPocket 📱💻
 
+<div align="center">
+
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Android-4285F4?logo=android&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Windows](https://img.shields.io/badge/Windows-Server-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
+
 **BigPocket**, Windows bilgisayarınızı akıllı telefonunuz üzerinden sıfır gecikmeyle kontrol etmenizi, yönetmenizi ve telefonunuzu çok işlevli bir **Sanal 2. Monitör, Sanal Mikrofon, Stream Deck** veya **Webcam** aygıtına dönüştürmenizi sağlayan modern, yüksek performanslı ve açık kaynaklı bir uzaktan yönetim sistemidir.
 
 Go (Masaüstü Sunucusu) ve Kotlin/Jetpack Compose (Android İstemcisi) mimarisi ile maksimum performansı ve minimum gecikmeyi hedefler.
@@ -63,12 +74,12 @@ Gecikmesiz bir deneyim için kablolu bağlantı kullanılması tavsiye edilir:
 ## 📦 Kurulum ve Çalıştırma
 
 ### Windows Sunucusu (Bilgisayar)
-1.  Ana dizindeki **[Setup.exe](file:///C:/Users/ygt/Desktop/bigpocket/Setup.exe)** dosyasını çalıştırın.
+1.  Ana dizindeki **[Setup.exe](Setup.exe)** dosyasını çalıştırın.
 2.  Yönetici yetkisini onaylayın. Uygulama otomatik olarak `C:\Program Files\BigPocket` dizinine kurulacak, masaüstü kısayolu oluşturulacak ve **arka planda tamamen gizli/terminal penceresiz** olarak çalışmaya başlayacaktır.
 3.  *Kaldırmak için:* Windows Başlat menüsünden veya Denetim Masası "Program Ekle/Kaldır" arayüzünü kullanarak kolayca kaldırabilirsiniz.
 
 ### Android İstemcisi (Telefon)
-1.  Ana dizindeki **[BigPocket.apk](file:///C:/Users/ygt/Desktop/bigpocket/BigPocket.apk)** dosyasını telefonunuza yükleyin.
+1.  Ana dizindeki **[BigPocket.apk](BigPocket.apk)** dosyasını telefonunuza yükleyin.
 2.  Kamera ve mikrofon izinlerini onaylayın.
 
 ---
