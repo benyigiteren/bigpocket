@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-    version="1.1.0.0"
+    version="1.2.0.0"
     processorArchitecture="*"
     name="BigPocket"
     type="win32"/>
-  <description>BigPocket Remote Management and Second Display</description>
+  <description>BigPocket Desktop Controller</description>
   <!-- High DPI Support -->
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
@@ -13,11 +13,11 @@
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
     </windowsSettings>
   </application>
-  <!-- Explicit Administrator Elevation to prevent heuristic injection false positives -->
+  <!-- Standard user privilege level: no UAC shield badge on desktop shortcut -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
       </requestedPrivileges>
     </security>
   </trustInfo>

@@ -82,9 +82,6 @@ func main() {
 	// Remove leftovers from a previous self-update (and wait for old process if restarted)
 	cleanupOldUpdate()
 
-	// Request admin permissions automatically
-	ensureAdmin()
-
 	// Ensure directories exist
 	os.MkdirAll(appDataDir, 0755)
 	os.MkdirAll(sharedDir, 0755)

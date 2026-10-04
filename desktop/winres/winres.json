@@ -2,14 +2,28 @@
   "RT_GROUP_ICON": {
     "#1": {
       "0000": [
-        "icon.png",
-        "icon16.png"
+        "icon_256.png",
+        "icon_128.png",
+        "icon_96.png",
+        "icon_64.png",
+        "icon_48.png",
+        "icon_40.png",
+        "icon_32.png",
+        "icon_24.png",
+        "icon_16.png"
       ]
     },
     "APP": {
       "0000": [
-        "icon.png",
-        "icon16.png"
+        "icon_256.png",
+        "icon_128.png",
+        "icon_96.png",
+        "icon_64.png",
+        "icon_48.png",
+        "icon_40.png",
+        "icon_32.png",
+        "icon_24.png",
+        "icon_16.png"
       ]
     }
   },
@@ -18,11 +32,11 @@
       "0409": {
         "identity": {
           "name": "BigPocket",
-          "version": "1.0.0.0"
+          "version": "1.2.0.0"
         },
         "description": "BigPocket Desktop Controller",
         "minimum-os": "win7",
-        "execution-level": "requireAdministrator",
+        "execution-level": "asInvoker",
         "ui-access": false,
         "auto-elevate": false,
         "dpi-awareness": "system",
