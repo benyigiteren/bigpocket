@@ -71,16 +71,20 @@ func runInstaller() {
 
 	// 4. Create Shortcuts (Desktop & Start Menu)
 	targetExe := filepath.Join(installPath, "BigPocket.exe")
-	logoIco := filepath.Join(installPath, "logo.ico")
 	
 	homeDir, _ := os.UserHomeDir()
 	desktopShortcut := filepath.Join(homeDir, "Desktop", "BigPocket.lnk")
-	createShortcut(targetExe, desktopShortcut, installPath, logoIco)
+	os.Remove(desktopShortcut)
+	createShortcut(targetExe, desktopShortcut, installPath, targetExe+",0")
  
 	startMenuDir := filepath.Join(os.Getenv("ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs")
 	os.MkdirAll(startMenuDir, 0755)
 	startMenuShortcut := filepath.Join(startMenuDir, "BigPocket.lnk")
-	createShortcut(targetExe, startMenuShortcut, installPath, logoIco)
+	os.Remove(startMenuShortcut)
+	createShortcut(targetExe, startMenuShortcut, installPath, targetExe+",0")
+
+	// Refresh Windows Explorer icon cache
+	refreshShellIcons()
 
 	// 5. Register in Windows Programs & Features (Registry)
 	registerUninstall()
@@ -91,7 +95,7 @@ func runInstaller() {
 	cmd.Start()
 
 	// 7. Inform user
-	MessageBox("BigPocket Kurulumu", "BigPocket başarıyla bilgisayarınıza kuruldu!\nMasaüstü ve Başlat menüsü kısayolları oluşturuldu.", 0x40) // MB_ICONINFORMATION
+	MessageBox("BigPocket Kurulumu", "BigPocket başarıyla kuruldu ve başlatıldı!\nMasaüstü ve Başlat menüsü kısayolları oluşturuldu.", 0x40) // MB_ICONINFORMATION
 }
 
 // ----------------- Uninstaller -----------------
@@ -112,14 +116,17 @@ func runUninstaller() {
 	homeDir, _ := os.UserHomeDir()
 	os.Remove(filepath.Join(homeDir, "Desktop", "BigPocket.lnk"))
 	os.Remove(filepath.Join(os.Getenv("ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs", "BigPocket.lnk"))
+	refreshShellIcons()
 
 	// 5. Create background cleanup batch file to delete installer files and itself
 	tempBatch := filepath.Join(os.Getenv("TEMP"), "bigpocket_cleanup.bat")
 	batchContent := fmt.Sprintf(`@echo off
-timeout /t 2 /nobreak > NUL
-rmdir /s /q "%s"
+:retry
+timeout /t 1 /nobreak > NUL
+rmdir /s /q "%s" > NUL 2>&1
+if exist "%s" goto retry
 del "%%~f0"
-`, installPath)
+`, installPath, installPath)
 
 	os.WriteFile(tempBatch, []byte(batchContent), 0755)
 
@@ -207,10 +214,18 @@ func registerUninstall() {
 	defer k.Close()
 
 	k.SetStringValue("DisplayName", "BigPocket")
-	k.SetStringValue("DisplayVersion", "1.0.0")
-	k.SetStringValue("Publisher", "Ygt")
+	k.SetStringValue("DisplayVersion", "1.2.0")
+	k.SetStringValue("Publisher", "benyigiteren")
+	k.SetStringValue("InstallLocation", installPath)
 	k.SetStringValue("UninstallString", filepath.Join(installPath, "uninstall.exe"))
-	k.SetStringValue("DisplayIcon", filepath.Join(installPath, "BigPocket.exe"))
+	k.SetStringValue("DisplayIcon", filepath.Join(installPath, "BigPocket.exe")+",0")
+}
+
+func refreshShellIcons() {
+	shell32 := syscall.NewLazyDLL("shell32.dll")
+	shChangeNotify := shell32.NewProc("SHChangeNotify")
+	// SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_IDLIST = 0
+	shChangeNotify.Call(0x08000000, 0, 0, 0)
 }
 
 func MessageBox(title, text string, style uintptr) int {

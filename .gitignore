@@ -19,6 +19,9 @@ android/captures/
 # Desktop compiled binaries
 desktop/BigPocket.exe
 desktop/Setup.exe
+desktop/bigpocket-windows.exe
+/bigpocket-windows.exe
+/Setup.exe
 mcp/*.exe
 /BigPocket.exe
 *.exe~

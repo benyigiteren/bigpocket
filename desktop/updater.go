@@ -135,7 +135,7 @@ func checkForUpdate(force bool) *UpdateInfo {
 	if info.DownloadURL == "" {
 		for _, a := range rel.Assets {
 			n := strings.ToLower(a.Name)
-			if strings.HasSuffix(n, ".exe") && !strings.Contains(n, "setup") {
+			if strings.HasSuffix(n, ".exe") && !strings.Contains(n, "setup") && !strings.Contains(n, "windows") && !strings.Contains(n, "installer") {
 				info.DownloadURL = a.BrowserDownloadURL
 				break
 			}
