@@ -59,6 +59,56 @@ object UpdateManager {
         return 0
     }
 
+    sealed class CheckResult {
+        data class UpdateAvailable(val info: UpdateInfo) : CheckResult()
+        data class UpToDate(val currentVersion: String) : CheckResult()
+        data class Error(val message: String) : CheckResult()
+    }
+
+    /** Detailed check for manual button in Settings */
+    suspend fun checkDetailed(context: Context): CheckResult = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder()
+                .url("https://api.github.com/repos/$GITHUB_REPO/releases/latest")
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "BigPocket-Android")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext CheckResult.Error("GitHub API HTTP ${resp.code}")
+                val json = JSONObject(resp.body?.string() ?: return@withContext CheckResult.Error("Boş yanıt"))
+                val latest = json.optString("tag_name").removePrefix("v")
+                val current = currentVersion(context)
+                val assets = json.optJSONArray("assets") ?: return@withContext CheckResult.Error("Dosya bulunamadı")
+                var apkUrl = ""
+                var apkSize = 0L
+                for (i in 0 until assets.length()) {
+                    val a = assets.getJSONObject(i)
+                    if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
+                        apkUrl = a.optString("browser_download_url")
+                        apkSize = a.optLong("size")
+                        break
+                    }
+                }
+                if (compareVersions(latest, current) > 0 && apkUrl.isNotEmpty()) {
+                    val info = UpdateInfo(
+                        currentVersion = current,
+                        latestVersion = latest,
+                        title = json.optString("name").ifBlank { "BigPocket $latest" },
+                        notes = json.optString("body"),
+                        apkUrl = apkUrl,
+                        apkSize = apkSize,
+                        htmlUrl = json.optString("html_url")
+                    )
+                    CheckResult.UpdateAvailable(info)
+                } else {
+                    CheckResult.UpToDate(current)
+                }
+            }
+        } catch (e: Exception) {
+            CheckResult.Error(e.message ?: "Bağlantı kurulamadı")
+        }
+    }
+
     /** Returns update info when a newer release with an APK exists, otherwise null. */
     suspend fun check(context: Context, ignoreSkipped: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         try {

@@ -19,7 +19,8 @@ const tabDetails = {
     streamdeck: { title: "Stream Deck", subtitle: "Telefondaki buton ızgarasını özelleştirin." },
     monitor: { title: "Sanal 2. Monitör", subtitle: "Sanal ekran sürücüsünü yönetin ve yapılandırın." },
     webcam: { title: "Kamera Akışı", subtitle: "Telefonun kamera görüntüsünü izleyin ve yönlendirin." },
-    files: { title: "Dosya Transferi", subtitle: "Bilgisayar ile telefon arasında dosya alışverişi yapın." }
+    files: { title: "Dosya Transferi", subtitle: "Bilgisayar ile telefon arasında dosya alışverişi yapın." },
+    settings: { title: "Ayarlar", subtitle: "Uygulama tercihleri, sistem bilgileri ve güncelleme yönetimi." }
 };
 
 // Auth helpers
@@ -1404,14 +1405,49 @@ function checkMobileMode() {
     window.checkForUpdates = async function (manual = false) {
         try {
             const info = await fetch('/api/update/check' + (manual ? '?force=1' : '')).then(r => r.json());
+            const currentVerEl = document.getElementById('settings-current-ver');
+            if (currentVerEl && info.current_version) {
+                currentVerEl.textContent = 'v' + info.current_version;
+            }
             if (info.available) {
                 if (!manual && localStorage.getItem(SKIP_KEY) === info.latest_version) return;
                 showUpdateDialog(info, manual);
             } else if (manual) {
-                alert(info.error ? ('Güncelleme kontrol edilemedi: ' + info.error) : `En güncel sürümü kullanıyorsunuz (v${info.current_version}).`);
+                const updateStatusEl = document.getElementById('settings-update-status');
+                if (updateStatusEl) {
+                    if (info.error) {
+                        updateStatusEl.style.color = '#ef4444';
+                        updateStatusEl.textContent = 'Hata: ' + info.error;
+                    } else {
+                        updateStatusEl.style.color = '#10b981';
+                        updateStatusEl.textContent = `En güncel sürümü kullanıyorsunuz (v${info.current_version}) 🎉`;
+                    }
+                } else {
+                    alert(info.error ? ('Güncelleme kontrol edilemedi: ' + info.error) : `En güncel sürümü kullanıyorsunuz (v${info.current_version}).`);
+                }
             }
         } catch (_) { /* offline */ }
     };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const manualBtn = document.getElementById('btn-check-update-manual');
+        const updateStatusEl = document.getElementById('settings-update-status');
+        if (manualBtn) {
+            manualBtn.addEventListener('click', async () => {
+                if (manualBtn.disabled) return;
+                manualBtn.disabled = true;
+                if (updateStatusEl) {
+                    updateStatusEl.style.color = 'var(--text-muted)';
+                    updateStatusEl.textContent = 'GitHub üzerinden güncellemeler denetleniyor...';
+                }
+                try {
+                    await window.checkForUpdates(true);
+                } finally {
+                    manualBtn.disabled = false;
+                }
+            });
+        }
+    });
 
     window.addEventListener('load', () => setTimeout(() => window.checkForUpdates(false), 1500));
 })();

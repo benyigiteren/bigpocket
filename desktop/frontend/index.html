@@ -40,6 +40,10 @@
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                     <span>Dosya Transferi</span>
                 </button>
+                <button class="nav-item" data-tab="settings">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>Ayarlar</span>
+                </button>
             </nav>
             
             <div class="sidebar-footer">
@@ -502,6 +506,74 @@
                         
                         <div class="card-actions" style="margin-top: 12px;">
                             <button class="btn btn-primary" id="btn-send-clipboard-pc" style="width: 100%; height: 36px; padding: 0;">Metni Gönder</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings View -->
+            <section class="tab-panel" id="panel-settings">
+                <header class="view-header">
+                    <h1 class="view-title">Ayarlar</h1>
+                    <p class="view-desc">Uygulama tercihleri, sistem bilgileri ve güncelleme yönetimi.</p>
+                </header>
+
+                <div class="grid-layout" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
+                    <!-- Update & Version Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="meta-tag">SÜRÜM & DAĞITIM</span>
+                            <h2>Uygulama Güncellemesi</h2>
+                            <p class="text-muted">GitHub Releases üzerinden en son güncellemeleri kontrol edin.</p>
+                        </div>
+                        
+                        <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin: 12px 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <div style="font-weight: 600; font-size: 15px; color: var(--text-main);">BigPocket Masaüstü Sunucusu</div>
+                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.0</span></div>
+                                </div>
+                                <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;">Aktif</span>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; margin-top: 14px;">
+                            <button class="btn btn-primary" id="btn-check-update-manual" style="flex: 1; height: 42px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                <span>Güncellemeleri Denetle</span>
+                            </button>
+                        </div>
+                        <div id="settings-update-status" style="font-size: 12.5px; margin-top: 10px; min-height: 18px; color: var(--text-muted);"></div>
+                    </div>
+
+                    <!-- Network & Preferences Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="meta-tag">SİSTEM & AĞ</span>
+                            <h2>Bağlantı & Servis Portları</h2>
+                            <p class="text-muted">Mobil istemcilerin bilgisayarla haberleştiği aktif protokoller.</p>
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                                <span style="font-size: 13px; color: var(--text-muted);">Web Panel & WebSocket:</span>
+                                <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 8085</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                                <span style="font-size: 13px; color: var(--text-muted);">Otomatik Keşif (UDP):</span>
+                                <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 47800</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                                <span style="font-size: 13px; color: var(--text-muted);">Medya & Ekran Akışı (TCP):</span>
+                                <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 8083, 8084, 8086</span>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 16px;">
+                            <a href="https://github.com/benyigiteren/bigpocket" target="_blank" style="display: flex; justify-content: space-between; align-items: center; text-decoration: none; padding: 12px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main);">
+                                <span style="font-size: 13px; font-weight: 500;">GitHub Resmi Deposu</span>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                            </a>
                         </div>
                     </div>
                 </div>

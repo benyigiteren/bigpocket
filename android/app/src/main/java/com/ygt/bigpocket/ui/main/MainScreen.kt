@@ -68,6 +68,10 @@ import coil.compose.AsyncImage
 import com.ygt.bigpocket.media.ScreenReceiver
 import com.ygt.bigpocket.services.SocketManager
 import com.ygt.bigpocket.theme.BigPocketTheme
+import com.ygt.bigpocket.ui.settings.SettingsDialog
+import com.ygt.bigpocket.update.UpdatePrompt
+import com.ygt.bigpocket.update.UpdateDialog
+import com.ygt.bigpocket.update.UpdateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
@@ -425,6 +429,8 @@ fun MainScreen(
     var installedApps by remember { mutableStateOf<List<InstalledAppInfo>>(emptyList()) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingButton by remember { mutableStateOf<StreamDeckButtonInfo?>(null) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var manualUpdateInfo by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
 
     // Media streaming states
     var isMicStreaming by remember { mutableStateOf(false) }
@@ -692,6 +698,32 @@ fun MainScreen(
     }
 
     BigPocketTheme(isGamerTheme = false) {
+        // In-App Auto Update on Launch
+        UpdatePrompt()
+
+        // Manual Update Dialog (From Settings)
+        manualUpdateInfo?.let { uInfo ->
+            UpdateDialog(
+                info = uInfo,
+                onDismiss = { manualUpdateInfo = null }
+            )
+        }
+
+        // Settings Dialog
+        if (showSettingsDialog) {
+            SettingsDialog(
+                onDismiss = { showSettingsDialog = false },
+                keepScreenOn = keepScreenOn,
+                onKeepScreenOnChange = { checked ->
+                    keepScreenOn = checked
+                    prefs.edit().putBoolean("keep_screen_on", checked).apply()
+                },
+                onUpdateAvailable = { uInfo ->
+                    manualUpdateInfo = uInfo
+                }
+            )
+        }
+
         if (showQrScanner) {
             QrScannerDialog(
                 onQrCodeScanned = { rawVal ->
@@ -1195,7 +1227,8 @@ fun MainScreen(
                         onKeepScreenOnChange = { checked ->
                             keepScreenOn = checked
                             prefs.edit().putBoolean("keep_screen_on", checked).apply()
-                        }
+                        },
+                        onOpenSettings = { showSettingsDialog = true }
                     )
                     1 -> StreamDeckTab(
                         isConnected = isConnected,
@@ -1280,7 +1313,8 @@ fun MainScreen(
                             filePickerLauncher.launch("*/*")
                         },
                         ipAddress = ipAddress,
-                        password = password
+                        password = password,
+                        onOpenSettings = { showSettingsDialog = true }
                     )
                 }
             }
@@ -1301,7 +1335,8 @@ fun ConnectionTab(
     onScanQrClick: () -> Unit,
     context: Context,
     keepScreenOn: Boolean = false,
-    onKeepScreenOnChange: (Boolean) -> Unit = {}
+    onKeepScreenOnChange: (Boolean) -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -1310,6 +1345,28 @@ fun ConnectionTab(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MinimalistSurfaceElevated)
+                    .size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Ayarlar",
+                    tint = MinimalistPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
         BigPocketLogo(
             modifier = Modifier.size(72.dp)
         )
@@ -2424,7 +2481,8 @@ fun ToolsTab(
     uploadStatus: String,
     onSelectFile: () -> Unit,
     ipAddress: String,
-    password: String
+    password: String,
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -2475,8 +2533,49 @@ fun ToolsTab(
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(vertical = 8.dp)
+            modifier = Modifier.padding(vertical = 4.dp)
         )
+
+        // Settings Entry Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenSettings() },
+            colors = CardDefaults.cardColors(containerColor = MinimalistSurfaceElevated),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MinimalistAccent.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Ayarlar",
+                            tint = MinimalistAccent,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Uygulama Ayarları & Güncelleme", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = MinimalistPrimary)
+                        Text("Sürüm kontrolü, ekran uyanıklığı ve tercihler", fontSize = 11.5.sp, color = MinimalistSecondary)
+                    }
+                }
+                Icon(Icons.Default.ArrowForward, contentDescription = "Aç", tint = MinimalistSecondary, modifier = Modifier.size(16.dp))
+            }
+        }
 
         if (!isConnected) {
             Box(
