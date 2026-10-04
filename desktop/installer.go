@@ -221,17 +221,21 @@ func MessageBox(title, text string, style uintptr) int {
 }
 
 func checkIfAdmin() bool {
-	f, err := os.Open(`\\.\PhysicalDrive0`)
-	if err != nil {
-		return false
-	}
-	f.Close()
-	return true
+	shell32 := syscall.NewLazyDLL("shell32.dll")
+	isUserAnAdmin := shell32.NewProc("IsUserAnAdmin")
+	ret, _, _ := isUserAnAdmin.Call()
+	return ret != 0
 }
 
 func ensureAdmin() {
 	if checkIfAdmin() {
 		return
+	}
+
+	for _, a := range os.Args[1:] {
+		if a == "--elevated" {
+			return
+		}
 	}
 
 	verbPtr, _ := syscall.UTF16PtrFromString("runas")
@@ -243,13 +247,13 @@ func ensureAdmin() {
 	cwd, _ := os.Getwd()
 	cwdPtr, _ := syscall.UTF16PtrFromString(cwd)
 
-	args := strings.Join(os.Args[1:], " ")
+	args := strings.Join(append(os.Args[1:], "--elevated"), " ")
 	argsPtr, _ := syscall.UTF16PtrFromString(args)
 
 	shell32 := syscall.NewLazyDLL("shell32.dll")
 	shellExecute := shell32.NewProc("ShellExecuteW")
 
-	_, _, _ = shellExecute.Call(
+	ret, _, _ := shellExecute.Call(
 		0,
 		uintptr(unsafe.Pointer(verbPtr)),
 		uintptr(unsafe.Pointer(exePtr)),
@@ -258,7 +262,9 @@ func ensureAdmin() {
 		1, // SW_SHOWNORMAL
 	)
 
-	os.Exit(0)
+	if ret > 32 {
+		os.Exit(0)
+	}
 }
 
 func execCommandHidden(name string, arg ...string) *exec.Cmd {

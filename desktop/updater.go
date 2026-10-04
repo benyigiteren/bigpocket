@@ -23,7 +23,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -132,7 +134,8 @@ func checkForUpdate(force bool) *UpdateInfo {
 	}
 	if info.DownloadURL == "" {
 		for _, a := range rel.Assets {
-			if strings.HasSuffix(strings.ToLower(a.Name), ".exe") {
+			n := strings.ToLower(a.Name)
+			if strings.HasSuffix(n, ".exe") && !strings.Contains(n, "setup") {
 				info.DownloadURL = a.BrowserDownloadURL
 				break
 			}
@@ -229,14 +232,30 @@ func installUpdate(downloadURL string) {
 	}
 
 	setUpdateProgress("restarting", 100, "")
-	cmd := exec.Command(exePath, "--after-update")
-	cmd.Dir = dir
-	if err := cmd.Start(); err != nil {
-		restore()
-		fail(err)
-		return
+	verbPtr, _ := syscall.UTF16PtrFromString("open")
+	exePtr, _ := syscall.UTF16PtrFromString(exePath)
+	argPtr, _ := syscall.UTF16PtrFromString("--after-update")
+	dirPtr, _ := syscall.UTF16PtrFromString(dir)
+	shell32 := syscall.NewLazyDLL("shell32.dll")
+	shellExecute := shell32.NewProc("ShellExecuteW")
+	ret, _, _ := shellExecute.Call(
+		0,
+		uintptr(unsafe.Pointer(verbPtr)),
+		uintptr(unsafe.Pointer(exePtr)),
+		uintptr(unsafe.Pointer(argPtr)),
+		uintptr(unsafe.Pointer(dirPtr)),
+		1, // SW_SHOWNORMAL
+	)
+	if ret <= 32 {
+		cmd := exec.Command(exePath, "--after-update")
+		cmd.Dir = dir
+		if err := cmd.Start(); err != nil {
+			restore()
+			fail(err)
+			return
+		}
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 	cleanupOnExit()
 	os.Exit(0)
 }
@@ -271,8 +290,8 @@ func extractUpdateZip(zipPath, destDir, exeName string) error {
 			continue
 		}
 		target := filepath.Join(destDir, filepath.FromSlash(name))
-		if strings.HasSuffix(strings.ToLower(name), ".exe") && !strings.Contains(name, "/") {
-			// Any top-level exe becomes the main executable.
+		baseName := filepath.Base(name)
+		if strings.EqualFold(baseName, exeName) || strings.EqualFold(baseName, "bigpocket.exe") {
 			target = filepath.Join(destDir, exeName)
 			foundExe = true
 		}
