@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
 	"image/jpeg"
 	"io"
 	"net"
@@ -48,14 +50,24 @@ var (
 type StreamDeckButton struct {
 	ID    int    `json:"id"`
 	Label string `json:"label"`
-	Type  string `json:"type"`  // hotkey or command
-	Value string `json:"value"` // keybind or script
+	Type  string `json:"type"`  // hotkey, command, volume_slider, toggle, live_info
+	Value string `json:"value"` // keybind, script, volume_slider, mic_mute, sound_mute, cpu, ram
 	Icon  string `json:"icon"`  // Custom SVG path or local image
+	Page  int    `json:"page"`  // 0, 1, 2, ...
+	State bool   `json:"state"` // on/off for toggle buttons
+	Color string `json:"color"` // custom hex color e.g. "#10b981"
+}
+
+type StreamDeckPage struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
 }
 
 type Config struct {
 	Theme             string             `json:"theme"`
 	Password          string             `json:"password"`
+	ActivePage        int                `json:"active_page"`
+	StreamDeckPages   []StreamDeckPage   `json:"stream_deck_pages"`
 	StreamDeckRows    int                `json:"stream_deck_rows"`
 	StreamDeckCols    int                `json:"stream_deck_cols"`
 	StreamDeckButtons []StreamDeckButton `json:"stream_deck_buttons"`
@@ -64,17 +76,44 @@ type Config struct {
 var defaultConfig = Config{
 	Theme:          "pro",
 	Password:       "", // Default is no password
+	ActivePage:     0,
 	StreamDeckRows: 2,
 	StreamDeckCols: 4,
+	StreamDeckPages: []StreamDeckPage{
+		{ID: 0, Title: "Ana Sayfa"},
+		{ID: 1, Title: "Medya & Ses"},
+		{ID: 2, Title: "Sistem & PC"},
+	},
 	StreamDeckButtons: []StreamDeckButton{
-		{ID: 0, Label: "Mute Mic", Type: "hotkey", Value: "f20", Icon: ""},
-		{ID: 1, Label: "Vol Up", Type: "hotkey", Value: "volumeup", Icon: ""},
-		{ID: 2, Label: "Vol Down", Type: "hotkey", Value: "volumedown", Icon: ""},
-		{ID: 3, Label: "Play/Pause", Type: "hotkey", Value: "playpause", Icon: ""},
-		{ID: 4, Label: "Calc", Type: "command", Value: "calc.exe", Icon: ""},
-		{ID: 5, Label: "Browser", Type: "command", Value: "cmd /c start https://google.com", Icon: ""},
-		{ID: 6, Label: "Lock PC", Type: "command", Value: "rundll32.exe user32.dll,LockWorkStation", Icon: ""},
-		{ID: 7, Label: "Task Manager", Type: "hotkey", Value: "ctrl+shift+esc", Icon: ""},
+		// Page 0: Ana Sayfa
+		{ID: 0, Label: "Mikrofon", Type: "toggle", Value: "mic_mute", Icon: "mic", Page: 0, State: true, Color: "#10b981"},
+		{ID: 1, Label: "Ana Ses", Type: "volume_slider", Value: "master_volume", Icon: "volume", Page: 0, State: false, Color: "#6366f1"},
+		{ID: 2, Label: "Oynat / Duraklat", Type: "hotkey", Value: "playpause", Icon: "play", Page: 0, State: false, Color: "#3b82f6"},
+		{ID: 3, Label: "Sonraki", Type: "hotkey", Value: "nexttrack", Icon: "skip", Page: 0, State: false, Color: "#3b82f6"},
+		{ID: 4, Label: "Hesap Makinesi", Type: "command", Value: "calc.exe", Icon: "calc", Page: 0, State: false, Color: "#8b5cf6"},
+		{ID: 5, Label: "Tarayıcı", Type: "command", Value: "cmd /c start https://google.com", Icon: "globe", Page: 0, State: false, Color: "#ec4899"},
+		{ID: 6, Label: "İşlemci", Type: "live_info", Value: "cpu", Icon: "cpu", Page: 0, State: false, Color: "#f59e0b"},
+		{ID: 7, Label: "Bellek", Type: "live_info", Value: "ram", Icon: "ram", Page: 0, State: false, Color: "#10b981"},
+
+		// Page 1: Medya & Ses
+		{ID: 8, Label: "Ses +", Type: "hotkey", Value: "volumeup", Icon: "volume_up", Page: 1, State: false, Color: "#6366f1"},
+		{ID: 9, Label: "Ses -", Type: "hotkey", Value: "volumedown", Icon: "volume_down", Page: 1, State: false, Color: "#6366f1"},
+		{ID: 10, Label: "Sesi Kapat", Type: "toggle", Value: "sound_mute", Icon: "volume_mute", Page: 1, State: false, Color: "#ef4444"},
+		{ID: 11, Label: "Mikrofon", Type: "toggle", Value: "mic_mute", Icon: "mic", Page: 1, State: true, Color: "#10b981"},
+		{ID: 12, Label: "Önceki", Type: "hotkey", Value: "prevtrack", Icon: "prev", Page: 1, State: false, Color: "#3b82f6"},
+		{ID: 13, Label: "Oynat", Type: "hotkey", Value: "playpause", Icon: "play", Page: 1, State: false, Color: "#3b82f6"},
+		{ID: 14, Label: "Sonraki", Type: "hotkey", Value: "nexttrack", Icon: "skip", Page: 1, State: false, Color: "#3b82f6"},
+		{ID: 15, Label: "Spotify", Type: "command", Value: "cmd /c start spotify:", Icon: "spotify", Page: 1, State: false, Color: "#1db954"},
+
+		// Page 2: Sistem & PC
+		{ID: 16, Label: "Görev Yöneticisi", Type: "command", Value: "taskmgr.exe", Icon: "taskmgr", Page: 2, State: false, Color: "#f59e0b"},
+		{ID: 17, Label: "PC Kilitle", Type: "command", Value: "rundll32.exe user32.dll,LockWorkStation", Icon: "lock", Page: 2, State: false, Color: "#ef4444"},
+		{ID: 18, Label: "2. Ekran", Type: "toggle", Value: "virtual_monitor", Icon: "monitor", Page: 2, State: false, Color: "#6366f1"},
+		{ID: 19, Label: "Ekran Görüntüsü", Type: "hotkey", Value: "printscreen", Icon: "camera", Page: 2, State: false, Color: "#8b5cf6"},
+		{ID: 20, Label: "CPU Yükü", Type: "live_info", Value: "cpu", Icon: "cpu", Page: 2, State: false, Color: "#f59e0b"},
+		{ID: 21, Label: "RAM Yükü", Type: "live_info", Value: "ram", Icon: "ram", Page: 2, State: false, Color: "#10b981"},
+		{ID: 22, Label: "Terminal", Type: "command", Value: "wt.exe", Icon: "terminal", Page: 2, State: false, Color: "#06b6d4"},
+		{ID: 23, Label: "Masaüstü", Type: "hotkey", Value: "win+d", Icon: "home", Page: 2, State: false, Color: "#ec4899"},
 	},
 }
 
@@ -274,12 +313,163 @@ func createDesktopShortcut() {
 	}
 }
 
-// ----------------- Cleanup Resources -----------------
+// ----------------- Cleanup Resources & Exit Handlers -----------------
+func initExitHandlers() {
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	setConsoleCtrlHandler := kernel32.NewProc("SetConsoleCtrlHandler")
+	callback := syscall.NewCallback(func(controlType uint32) uintptr {
+		cleanupOnExit()
+		return 0
+	})
+	setConsoleCtrlHandler.Call(callback, 1)
+}
+
 func cleanupOnExit() {
-	fmt.Println("Cleaning up virtual monitor driver...")
-	if checkIfAdmin() {
-		setVirtualMonitor(false)
+	fmt.Println("Closing virtual monitor and cleaning up on exit...")
+	setVirtualMonitor(false)
+}
+
+// ----------------- Win32 Volume Controller -----------------
+func adjustMasterVolume(action string, level float64) (int, error) {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	keybdEvent := user32.NewProc("keybd_event")
+
+	switch action {
+	case "up":
+		// VK_VOLUME_UP = 0xAF
+		keybdEvent.Call(0xAF, 0, 0, 0)
+		keybdEvent.Call(0xAF, 0, 0x0002, 0)
+		return -1, nil
+	case "down":
+		// VK_VOLUME_DOWN = 0xAE
+		keybdEvent.Call(0xAE, 0, 0, 0)
+		keybdEvent.Call(0xAE, 0, 0x0002, 0)
+		return -1, nil
+	case "mute":
+		// VK_VOLUME_MUTE = 0xAD
+		keybdEvent.Call(0xAD, 0, 0, 0)
+		keybdEvent.Call(0xAD, 0, 0x0002, 0)
+		return -1, nil
+	case "set":
+		pct := int(level)
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		stepsUp := pct / 2
+		psCmd := fmt.Sprintf(`$w = New-Object -ComObject WScript.Shell; 1..50 | foreach { $w.SendKeys([char]174) }; 1..%d | foreach { $w.SendKeys([char]175) }`, stepsUp)
+		go execCommandHidden("powershell", "-Command", psCmd).Start()
+		return pct, nil
 	}
+	return -1, nil
+}
+
+// ----------------- Win32 System Performance Stats -----------------
+type MEMORYSTATUSEX struct {
+	DwLength                uint32
+	DwMemoryLoad            uint32
+	UllTotalPhys            uint64
+	UllAvailPhys            uint64
+	UllTotalPageFile        uint64
+	UllAvailPageFile        uint64
+	UllTotalVirtual         uint64
+	UllAvailVirtual         uint64
+	UllAvailExtendedVirtual uint64
+}
+
+var (
+	kernel32                                    = syscall.NewLazyDLL("kernel32.dll")
+	kernel32GlobalMemoryStatusEx                = kernel32.NewProc("GlobalMemoryStatusEx")
+	kernel32GetSystemTimes                      = kernel32.NewProc("GetSystemTimes")
+	prevIdleTime, prevKernelTime, prevUserTime uint64
+	statsMu                                     sync.Mutex
+)
+
+func getSystemStats() (cpuPercent int, ramPercent int) {
+	statsMu.Lock()
+	defer statsMu.Unlock()
+
+	// 1. RAM Usage
+	var mem MEMORYSTATUSEX
+	mem.DwLength = uint32(unsafe.Sizeof(mem))
+	ret, _, _ := kernel32GlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&mem)))
+	if ret != 0 {
+		ramPercent = int(mem.DwMemoryLoad)
+	}
+
+	// 2. CPU Usage
+	var idle, kernelTime, user syscall.Filetime
+	ret, _, _ = kernel32GetSystemTimes.Call(
+		uintptr(unsafe.Pointer(&idle)),
+		uintptr(unsafe.Pointer(&kernelTime)),
+		uintptr(unsafe.Pointer(&user)),
+	)
+	if ret != 0 {
+		iTime := (uint64(idle.HighDateTime) << 32) | uint64(idle.LowDateTime)
+		kTime := (uint64(kernelTime.HighDateTime) << 32) | uint64(kernelTime.LowDateTime)
+		uTime := (uint64(user.HighDateTime) << 32) | uint64(user.LowDateTime)
+
+		if prevKernelTime > 0 {
+			usr := uTime - prevUserTime
+			ker := kTime - prevKernelTime
+			idl := iTime - prevIdleTime
+			sys := ker + usr
+			if sys > 0 {
+				cpuPercent = int(((sys - idl) * 100) / sys)
+				if cpuPercent < 0 {
+					cpuPercent = 0
+				}
+				if cpuPercent > 100 {
+					cpuPercent = 100
+				}
+			}
+		}
+		prevIdleTime = iTime
+		prevKernelTime = kTime
+		prevUserTime = uTime
+	}
+
+	return cpuPercent, ramPercent
+}
+
+// ----------------- ADB Reverse USB Port Forwarding -----------------
+func setupAdbReverse() (bool, string) {
+	adbPaths := []string{
+		"adb",
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Android", "Sdk", "platform-tools", "adb.exe"),
+		filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local", "Android", "Sdk", "platform-tools", "adb.exe"),
+	}
+
+	adbExe := ""
+	for _, p := range adbPaths {
+		if _, err := exec.LookPath(p); err == nil {
+			adbExe = p
+			break
+		}
+		if _, err := os.Stat(p); err == nil {
+			adbExe = p
+			break
+		}
+	}
+
+	if adbExe == "" {
+		return false, "ADB bulunamadı. Lütfen Android SDK platform-tools veya ADB yükleyin."
+	}
+
+	ports := []string{"8085", "8086", "8084", "8083"}
+	successCount := 0
+	for _, port := range ports {
+		cmd := execCommandHidden(adbExe, "reverse", "tcp:"+port, "tcp:"+port)
+		if err := cmd.Run(); err == nil {
+			successCount++
+		}
+	}
+	if successCount > 0 {
+		return true, fmt.Sprintf("USB Sıfır Gecikme Modu Aktif! (%d port başarıyla USB'ye köprülendi)", successCount)
+	}
+	return false, "Cihaz bulunamadı. Lütfen telefonunuzu USB ile bağlayın ve USB Hata Ayıklama modunu açın."
 }
 
 // ----------------- Configurations -----------------
@@ -300,8 +490,14 @@ func loadConfig() Config {
 	if cfg.StreamDeckRows <= 0 || cfg.StreamDeckCols <= 0 {
 		cfg.StreamDeckRows = 2
 		cfg.StreamDeckCols = 4
-		saveConfig(cfg)
 	}
+	if len(cfg.StreamDeckPages) == 0 {
+		cfg.StreamDeckPages = defaultConfig.StreamDeckPages
+	}
+	if len(cfg.StreamDeckButtons) == 0 {
+		cfg.StreamDeckButtons = defaultConfig.StreamDeckButtons
+	}
+	saveConfig(cfg)
 	return cfg
 }
 
@@ -312,19 +508,8 @@ func saveConfig(cfg Config) {
 	if cfg.StreamDeckCols <= 0 {
 		cfg.StreamDeckCols = 4
 	}
-	expectedSize := cfg.StreamDeckRows * cfg.StreamDeckCols
-	if len(cfg.StreamDeckButtons) < expectedSize {
-		for i := len(cfg.StreamDeckButtons); i < expectedSize; i++ {
-			cfg.StreamDeckButtons = append(cfg.StreamDeckButtons, StreamDeckButton{
-				ID:    i,
-				Label: fmt.Sprintf("Buton %d", i+1),
-				Type:  "hotkey",
-				Value: "",
-				Icon:  "",
-			})
-		}
-	} else if len(cfg.StreamDeckButtons) > expectedSize {
-		cfg.StreamDeckButtons = cfg.StreamDeckButtons[:expectedSize]
+	if len(cfg.StreamDeckPages) == 0 {
+		cfg.StreamDeckPages = defaultConfig.StreamDeckPages
 	}
 
 	data, _ := json.MarshalIndent(cfg, "", "    ")
@@ -607,9 +792,71 @@ func startScreenStreamServer() {
 	}
 }
 
+// ----------------- Mouse Cursor Renderer for Second Screen -----------------
+type CURSORINFO struct {
+	CbSize      uint32
+	Flags       uint32
+	HCursor     uintptr
+	PtScreenPos struct{ X, Y int32 }
+}
+
+func drawMouseCursor(img *image.RGBA, bounds image.Rectangle) {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	getCursorInfo := user32.NewProc("GetCursorInfo")
+
+	var ci CURSORINFO
+	ci.CbSize = uint32(unsafe.Sizeof(ci))
+	ret, _, _ := getCursorInfo.Call(uintptr(unsafe.Pointer(&ci)))
+	if ret == 0 || ci.Flags&1 == 0 { // 1 = CURSOR_SHOWING
+		return
+	}
+
+	cx := int(ci.PtScreenPos.X) - bounds.Min.X
+	cy := int(ci.PtScreenPos.Y) - bounds.Min.Y
+
+	if cx < 0 || cy < 0 || cx >= bounds.Dx() || cy >= bounds.Dy() {
+		return
+	}
+
+	// Crisp high-visibility pointer arrow (15px)
+	arrowBody := [][]int{
+		{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}, {0, 7}, {0, 8}, {0, 9}, {0, 10}, {0, 11}, {0, 12}, {0, 13}, {0, 14},
+		{1, 1}, {1, 2}, {1, 3}, {1, 4}, {1, 5}, {1, 6}, {1, 7}, {1, 8}, {1, 9}, {1, 10}, {1, 11}, {1, 12},
+		{2, 2}, {2, 3}, {2, 4}, {2, 5}, {2, 6}, {2, 7}, {2, 8}, {2, 9}, {2, 10},
+		{3, 3}, {3, 4}, {3, 5}, {3, 6}, {3, 7}, {3, 8}, {3, 9}, {3, 10}, {3, 11},
+		{4, 4}, {4, 5}, {4, 6}, {4, 7}, {4, 8}, {4, 9}, {4, 12}, {4, 13},
+		{5, 5}, {5, 6}, {5, 7}, {5, 8}, {5, 13}, {5, 14},
+		{6, 6}, {6, 7}, {6, 8}, {6, 14}, {6, 15},
+		{7, 7}, {7, 8},
+	}
+	arrowOutline := [][]int{
+		{-1, -1}, {-1, 0}, {-1, 1}, {-1, 2}, {-1, 3}, {-1, 4}, {-1, 5}, {-1, 6}, {-1, 7}, {-1, 8}, {-1, 9}, {-1, 10}, {-1, 11}, {-1, 12}, {-1, 13}, {-1, 14}, {-1, 15},
+		{0, 15}, {1, 13}, {2, 11}, {3, 12}, {4, 14}, {5, 15}, {6, 16}, {7, 16}, {8, 15}, {7, 13}, {6, 9}, {7, 9}, {8, 8},
+		{7, 6}, {6, 5}, {5, 4}, {4, 3}, {3, 2}, {2, 1}, {1, 0},
+	}
+
+	for _, pt := range arrowOutline {
+		px, py := cx+pt[0], cy+pt[1]
+		if px >= 0 && px < bounds.Dx() && py >= 0 && py < bounds.Dy() {
+			img.SetRGBA(px, py, color.RGBA{0, 0, 0, 255})
+		}
+	}
+	for _, pt := range arrowBody {
+		px, py := cx+pt[0], cy+pt[1]
+		if px >= 0 && px < bounds.Dx() && py >= 0 && py < bounds.Dy() {
+			img.SetRGBA(px, py, color.RGBA{255, 255, 255, 255})
+		}
+	}
+}
+
 func handleScreenStream(conn net.Conn) {
 	defer conn.Close()
 	fmt.Println("Screen stream client connected.")
+
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetNoDelay(true)
+		tcpConn.SetWriteBuffer(128 * 1024)
+	}
 
 	for {
 		numMonitors := screenshot.NumActiveDisplays()
@@ -631,14 +878,20 @@ func handleScreenStream(conn net.Conn) {
 			continue
 		}
 
-		// Compress image to JPEG in memory
+		// Draw mouse cursor on captured image if inside this monitor!
+		drawMouseCursor(img, bounds)
+
+		// Compress image to JPEG in memory with balanced quality
 		var out bytes.Buffer
-		err = jpeg.Encode(&out, img, &jpeg.Options{Quality: 50})
+		err = jpeg.Encode(&out, img, &jpeg.Options{Quality: 55})
 		if err != nil {
 			continue
 		}
 		data := out.Bytes()
 		length := int32(len(data))
+
+		// Short deadline to prevent lag queues (drop frame if socket buffer is congested)
+		conn.SetWriteDeadline(time.Now().Add(45 * time.Millisecond))
 
 		// Send size prefix (4-byte big endian)
 		err = binary.Write(conn, binary.BigEndian, length)
@@ -646,13 +899,13 @@ func handleScreenStream(conn net.Conn) {
 			break
 		}
 
-		// Send data
+		// Send frame data
 		_, err = conn.Write(data)
 		if err != nil {
 			break
 		}
 
-		time.Sleep(40 * time.Millisecond) // ~25 FPS
+		time.Sleep(33 * time.Millisecond) // ~30 FPS smooth real-time stream
 	}
 	fmt.Println("Screen stream client disconnected.")
 }
@@ -819,21 +1072,110 @@ func handleWebSocketControl(msg map[string]interface{}) {
 	case "stream_deck_press":
 		btnID := int(msg["button_id"].(float64))
 		cfg := loadConfig()
-		var targetBtn *StreamDeckButton
-		for _, b := range cfg.StreamDeckButtons {
+		var targetBtnIndex = -1
+		for i, b := range cfg.StreamDeckButtons {
 			if b.ID == btnID {
-				targetBtn = &b
+				targetBtnIndex = i
 				break
 			}
 		}
-		if targetBtn != nil {
-			if targetBtn.Type == "hotkey" {
+		if targetBtnIndex != -1 {
+			targetBtn := &cfg.StreamDeckButtons[targetBtnIndex]
+			if targetBtn.Type == "toggle" {
+				// Toggle state
+				targetBtn.State = !targetBtn.State
+				saveConfig(cfg)
+				broadcast(map[string]interface{}{
+					"type":      "button_state_changed",
+					"button_id": targetBtn.ID,
+					"state":     targetBtn.State,
+					"page":      targetBtn.Page,
+				})
+
+				// Execute toggle specific action
+				switch targetBtn.Value {
+				case "mic_mute":
+					// Mute / Unmute microphone or trigger hotkey
+					simulateHotkey("ctrl+shift+m")
+				case "speaker_mute", "sound_mute":
+					adjustMasterVolume("mute", 0)
+				case "screen_toggle", "virtual_monitor":
+					setVirtualMonitor(targetBtn.State)
+				default:
+					if strings.Contains(targetBtn.Value, "+") {
+						simulateHotkey(targetBtn.Value)
+					} else if targetBtn.Value != "" {
+						go execCommandHidden("cmd", "/c", targetBtn.Value).Start()
+					}
+				}
+			} else if targetBtn.Type == "volume_slider" {
+				// Volume slider pressed or touched
+				if act, ok := msg["volume_action"].(string); ok && act != "" {
+					lvl := float64(50)
+					if l, ok := msg["volume_level"].(float64); ok {
+						lvl = l
+					}
+					adjustMasterVolume(act, lvl)
+				}
+			} else if targetBtn.Type == "live_info" {
+				// Live info requested / refreshed
+				cpu, ram := getSystemStats()
+				broadcast(map[string]interface{}{
+					"type": "system_stats",
+					"cpu":  cpu,
+					"ram":  ram,
+				})
+			} else if targetBtn.Type == "hotkey" {
 				simulateHotkey(targetBtn.Value)
 			} else if targetBtn.Type == "command" {
-				// Run command asynchronously so it does not block the WebSocket
 				go execCommandHidden("cmd", "/c", targetBtn.Value).Start()
 			}
 		}
+
+	case "switch_page":
+		var targetPage int
+		if pNum, ok := msg["page"].(float64); ok {
+			targetPage = int(pNum)
+		} else if pStr, ok := msg["page"].(string); ok {
+			fmt.Sscanf(pStr, "%d", &targetPage)
+		}
+		cfg := loadConfig()
+		cfg.ActivePage = targetPage
+		saveConfig(cfg)
+		broadcast(map[string]interface{}{
+			"type":        "page_switched",
+			"active_page": targetPage,
+			"buttons":     cfg.StreamDeckButtons,
+		})
+
+	case "set_volume":
+		action, _ := msg["action"].(string)
+		level := float64(50)
+		if l, ok := msg["level"].(float64); ok {
+			level = l
+		}
+		adjustMasterVolume(action, level)
+		broadcast(map[string]interface{}{
+			"type":   "volume_changed",
+			"action": action,
+			"level":  level,
+		})
+
+	case "get_system_stats":
+		cpu, ram := getSystemStats()
+		broadcast(map[string]interface{}{
+			"type": "system_stats",
+			"cpu":  cpu,
+			"ram":  ram,
+		})
+
+	case "setup_usb_reverse":
+		ok, text := setupAdbReverse()
+		broadcast(map[string]interface{}{
+			"type":    "usb_status",
+			"success": ok,
+			"message": text,
+		})
 
 	case "clipboard_sync":
 		text := msg["text"].(string)
@@ -866,17 +1208,34 @@ func handleWebSocketControl(msg map[string]interface{}) {
 		py := bounds.Min.Y + int(ry*float64(bounds.Dy()))
 
 		// Move cursor to absolute position
-		// Wait, user32 SetCursorPos:
 		setCursorPos := user32.NewProc("SetCursorPos")
 		setCursorPos.Call(uintptr(px), uintptr(py))
 
-		if action == "down" {
+		switch action {
+		case "down":
 			mouseEvent.Call(0x0002, 0, 0, 0, 0) // LEFTDOWN
-		} else if action == "up" {
+		case "up":
 			mouseEvent.Call(0x0004, 0, 0, 0, 0) // LEFTUP
-		} else if action == "click" {
+		case "click":
 			mouseEvent.Call(0x0002, 0, 0, 0, 0)
 			mouseEvent.Call(0x0004, 0, 0, 0, 0)
+		case "right_click":
+			mouseEvent.Call(0x0008, 0, 0, 0, 0) // RIGHTDOWN
+			mouseEvent.Call(0x0010, 0, 0, 0, 0) // RIGHTUP
+		case "double_click":
+			mouseEvent.Call(0x0002, 0, 0, 0, 0)
+			mouseEvent.Call(0x0004, 0, 0, 0, 0)
+			time.Sleep(30 * time.Millisecond)
+			mouseEvent.Call(0x0002, 0, 0, 0, 0)
+			mouseEvent.Call(0x0004, 0, 0, 0, 0)
+		case "scroll":
+			dy := int32(120)
+			if d, ok := msg["dy"].(float64); ok {
+				dy = int32(d)
+			}
+			mouseEvent.Call(0x0800, 0, 0, uintptr(dy), 0)
+		case "move":
+			// cursor position already updated via SetCursorPos
 		}
 	}
 }
@@ -1596,9 +1955,13 @@ func setupHttpRoutes() {
 	// Direct REST API Endpoints
 	http.HandleFunc("/api/status", handleAPIStatus)
 	http.HandleFunc("/api/streamdeck", handleAPIStreamDeck)
+	http.HandleFunc("/api/streamdeck/pages", handleAPIStreamDeckPages)
+	http.HandleFunc("/api/streamdeck/volume", handleAPIStreamDeckVolume)
 	http.HandleFunc("/api/streamdeck/trigger", handleAPIStreamDeckTrigger)
 	http.HandleFunc("/api/streamdeck/button", handleAPIStreamDeckButton)
 	http.HandleFunc("/api/streamdeck/layout", handleAPIStreamDeckLayout)
+	http.HandleFunc("/api/system/stats", handleAPISystemStats)
+	http.HandleFunc("/api/usb/forward", handleAPIUsbForward)
 	http.HandleFunc("/api/apps", handleAPIApps)
 	http.HandleFunc("/api/clipboard", handleAPIClipboard)
 	http.HandleFunc("/api/notify", handleAPINotify)
@@ -1750,6 +2113,69 @@ var mcpToolsList = []MCPTool{
 				},
 			},
 			"required": []string{"text"},
+		},
+	},
+	{
+		Name:        "streamdeck_set_volume",
+		Description: "Controls master PC volume ('up', 'down', 'mute', or 'set' with a percentage 0-100).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"action": map[string]interface{}{
+					"type":        "string",
+					"enum":        []string{"set", "up", "down", "mute"},
+					"description": "Volume action to perform",
+				},
+				"level": map[string]interface{}{
+					"type":        "number",
+					"description": "Volume percentage level (0 to 100), used when action is 'set'",
+				},
+			},
+			"required": []string{"action"},
+		},
+	},
+	{
+		Name:        "streamdeck_toggle_button",
+		Description: "Toggles the state ('on' <-> 'off') and triggers the action of a toggle-type Stream Deck button (mic mute, speaker mute, virtual monitor, or custom).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"button_id": map[string]interface{}{
+					"type":        "integer",
+					"description": "The button slot index to toggle (0-based)",
+				},
+			},
+			"required": []string{"button_id"},
+		},
+	},
+	{
+		Name:        "streamdeck_switch_page",
+		Description: "Switches the active Stream Deck tab/page across mobile and desktop interfaces.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"page": map[string]interface{}{
+					"type":        "string",
+					"description": "Page name to switch to (e.g. 'Ana Sayfa', 'Medya & Ses', 'Sistem & PC')",
+				},
+			},
+			"required": []string{"page"},
+		},
+	},
+	{
+		Name:        "get_system_stats",
+		Description: "Retrieves instantaneous real-time PC CPU usage and RAM usage percentages.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	},
+	{
+		Name:        "setup_usb_reverse",
+		Description: "Sets up ADB reverse port forwarding over physical USB cable for 1ms ultra-low latency.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
 		},
 	},
 }
@@ -2032,6 +2458,101 @@ func executeInternalMCPTool(name string, args map[string]interface{}) (string, b
 		})
 		return fmt.Sprintf("Clipboard synced: %d characters", len(text)), false
 
+	case "streamdeck_set_volume":
+		action, _ := args["action"].(string)
+		if action == "" {
+			action = "set"
+		}
+		level := float64(50)
+		if lvl, ok := args["level"].(float64); ok {
+			level = lvl
+		}
+		adjustMasterVolume(action, level)
+		broadcast(map[string]interface{}{
+			"type":   "volume_changed",
+			"action": action,
+			"level":  level,
+		})
+		return fmt.Sprintf("Master volume action executed: %s (level: %.0f%%)", action, level), false
+
+	case "streamdeck_toggle_button":
+		btnIDFloat, ok := args["button_id"].(float64)
+		if !ok {
+			return "Error: button_id must be an integer", true
+		}
+		btnID := int(btnIDFloat)
+		cfg := loadConfig()
+		var targetBtnIndex = -1
+		for i, b := range cfg.StreamDeckButtons {
+			if b.ID == btnID {
+				targetBtnIndex = i
+				break
+			}
+		}
+		if targetBtnIndex == -1 {
+			return fmt.Sprintf("Error: button ID %d not found", btnID), true
+		}
+		btn := &cfg.StreamDeckButtons[targetBtnIndex]
+		btn.State = !btn.State
+		saveConfig(cfg)
+		broadcast(map[string]interface{}{
+			"type":      "button_state_changed",
+			"button_id": btn.ID,
+			"state":     btn.State,
+			"page":      btn.Page,
+		})
+		switch btn.Value {
+		case "mic_mute":
+			simulateHotkey("ctrl+shift+m")
+		case "speaker_mute", "sound_mute":
+			adjustMasterVolume("mute", 0)
+		case "screen_toggle", "virtual_monitor":
+			setVirtualMonitor(btn.State)
+		default:
+			if strings.Contains(btn.Value, "+") {
+				simulateHotkey(btn.Value)
+			} else if btn.Value != "" {
+				go execCommandHidden("cmd", "/c", btn.Value).Start()
+			}
+		}
+		return fmt.Sprintf("Toggled button #%d [%s] to state: %v", btn.ID, btn.Label, btn.State), false
+
+	case "streamdeck_switch_page":
+		var targetPage int
+		if pNum, ok := args["page"].(float64); ok {
+			targetPage = int(pNum)
+		} else if pStr, ok := args["page"].(string); ok {
+			fmt.Sscanf(pStr, "%d", &targetPage)
+		}
+		cfg := loadConfig()
+		cfg.ActivePage = targetPage
+		saveConfig(cfg)
+		broadcast(map[string]interface{}{
+			"type":        "page_switched",
+			"active_page": targetPage,
+			"buttons":     cfg.StreamDeckButtons,
+		})
+		return fmt.Sprintf("Switched active page to: %d", targetPage), false
+
+	case "get_system_stats":
+		cpu, ram := getSystemStats()
+		res := map[string]interface{}{
+			"cpu_percent": cpu,
+			"ram_percent": ram,
+			"timestamp":   time.Now().Unix(),
+		}
+		b, _ := json.MarshalIndent(res, "", "  ")
+		return string(b), false
+
+	case "setup_usb_reverse":
+		ok, text := setupAdbReverse()
+		broadcast(map[string]interface{}{
+			"type":    "usb_status",
+			"success": ok,
+			"message": text,
+		})
+		return text, !ok
+
 	default:
 		return "Unknown tool: " + name, true
 	}
@@ -2082,6 +2603,128 @@ func handleAPIStreamDeck(w http.ResponseWriter, r *http.Request) {
 		"rows":    cfg.StreamDeckRows,
 		"cols":    cfg.StreamDeckCols,
 		"buttons": cfg.StreamDeckButtons,
+	})
+}
+
+func handleAPIStreamDeckPages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	cfg := loadConfig()
+	if r.Method == http.MethodPost {
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+			var targetPage int
+			if pNum, ok := payload["page"].(float64); ok {
+				targetPage = int(pNum)
+			} else if pStr, ok := payload["page"].(string); ok {
+				fmt.Sscanf(pStr, "%d", &targetPage)
+			}
+			cfg.ActivePage = targetPage
+			saveConfig(cfg)
+			broadcast(map[string]interface{}{
+				"type":        "page_switched",
+				"active_page": targetPage,
+				"buttons":     cfg.StreamDeckButtons,
+			})
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"active_page": cfg.ActivePage,
+		"pages":       cfg.StreamDeckPages,
+	})
+}
+
+func handleAPIStreamDeckVolume(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resStr, isErr := executeInternalMCPTool("streamdeck_set_volume", payload)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": !isErr,
+		"message": resStr,
+	})
+}
+
+func handleAPISystemStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	cpu, ram := getSystemStats()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"cpu_percent": cpu,
+		"ram_percent": ram,
+	})
+}
+
+func handleAPIUsbForward(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	ok, text := setupAdbReverse()
+	broadcast(map[string]interface{}{
+		"type":    "usb_status",
+		"success": ok,
+		"message": text,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": ok,
+		"message": text,
 	})
 }
 

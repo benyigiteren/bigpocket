@@ -32,7 +32,7 @@
       "0409": {
         "identity": {
           "name": "BigPocket",
-          "version": "1.2.0.0"
+          "version": "1.3.0.0"
         },
         "description": "BigPocket Desktop Controller",
         "minimum-os": "win7",
@@ -56,22 +56,22 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "1.2.0.0",
-          "product_version": "1.2.0.0"
+          "file_version": "1.3.0.0",
+          "product_version": "1.3.0.0"
         },
         "info": {
           "0409": {
             "Comments": "BigPocket Desktop Controller & Stream Deck Server",
             "CompanyName": "benyigiteren",
             "FileDescription": "BigPocket Desktop Controller",
-            "FileVersion": "1.2.0.0",
+            "FileVersion": "1.3.0.0",
             "InternalName": "BigPocket",
             "LegalCopyright": "Copyright (C) 2026 benyigiteren",
             "LegalTrademarks": "BigPocket",
             "OriginalFilename": "BigPocket.exe",
             "PrivateBuild": "",
             "ProductName": "BigPocket",
-            "ProductVersion": "1.2.0.0",
+            "ProductVersion": "1.3.0.0",
             "SpecialBuild": ""
           }
         }

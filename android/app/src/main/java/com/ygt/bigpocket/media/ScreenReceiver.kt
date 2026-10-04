@@ -23,9 +23,14 @@ object ScreenReceiver {
         isRunning = true
         thread(start = true) {
             try {
-                socket = Socket(ip, 8086)
-                inputStream = socket?.getInputStream()
-                Log.d(TAG, "Connected to Screen TCP stream")
+                val s = Socket()
+                s.tcpNoDelay = true
+                s.setPerformancePreferences(0, 2, 1)
+                s.receiveBufferSize = 512 * 1024
+                s.connect(java.net.InetSocketAddress(ip, 8086), 3000)
+                socket = s
+                inputStream = s.getInputStream()
+                Log.d(TAG, "Connected to Screen TCP stream with zero-latency TCP options")
                 
                 val sizeBuffer = ByteArray(4)
                 while (isRunning) {

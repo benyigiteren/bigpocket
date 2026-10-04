@@ -20,6 +20,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -93,7 +95,15 @@ data class StreamDeckButtonInfo(
     val label: String,
     val type: String,
     val value: String,
-    val icon: String
+    val icon: String,
+    val page: Int = 0,
+    val state: Boolean = false,
+    val color: String = ""
+)
+
+data class StreamDeckPageInfo(
+    val id: Int,
+    val title: String
 )
 
 data class InstalledAppInfo(
@@ -135,7 +145,11 @@ private fun fetchInstalledApps(ip: String, password: String, onSuccess: (List<In
     })
 }
 
-private fun fetchStreamDeckConfig(ip: String, password: String, onSuccess: (List<StreamDeckButtonInfo>, Int, Int) -> Unit) {
+private fun fetchStreamDeckConfig(
+    ip: String,
+    password: String,
+    onSuccess: (List<StreamDeckButtonInfo>, Int, Int, List<StreamDeckPageInfo>, Int) -> Unit
+) {
     val client = OkHttpClient()
     val request = Request.Builder()
         .url("http://$ip:8085/config")
@@ -154,6 +168,25 @@ private fun fetchStreamDeckConfig(ip: String, password: String, onSuccess: (List
                     val configObj = json.getJSONObject("config")
                     val rows = configObj.optInt("stream_deck_rows", 2)
                     val cols = configObj.optInt("stream_deck_cols", 4)
+                    val activePage = configObj.optInt("active_page", 0)
+
+                    val pagesList = mutableListOf<StreamDeckPageInfo>()
+                    val pagesArray = configObj.optJSONArray("stream_deck_pages")
+                    if (pagesArray != null) {
+                        for (i in 0 until pagesArray.length()) {
+                            val pObj = pagesArray.getJSONObject(i)
+                            pagesList.add(StreamDeckPageInfo(
+                                id = pObj.optInt("id", i),
+                                title = pObj.optString("title", "Sayfa ${i + 1}")
+                            ))
+                        }
+                    }
+                    if (pagesList.isEmpty()) {
+                        pagesList.add(StreamDeckPageInfo(0, "Ana Sayfa"))
+                        pagesList.add(StreamDeckPageInfo(1, "Medya & Ses"))
+                        pagesList.add(StreamDeckPageInfo(2, "Sistem & PC"))
+                    }
+
                     val buttonsArray = configObj.getJSONArray("stream_deck_buttons")
                     val list = mutableListOf<StreamDeckButtonInfo>()
                     for (i in 0 until buttonsArray.length()) {
@@ -163,10 +196,13 @@ private fun fetchStreamDeckConfig(ip: String, password: String, onSuccess: (List
                             label = item.getString("label"),
                             type = item.getString("type"),
                             value = item.getString("value"),
-                            icon = item.optString("icon", "")
+                            icon = item.optString("icon", ""),
+                            page = item.optInt("page", 0),
+                            state = item.optBoolean("state", false),
+                            color = item.optString("color", "")
                         ))
                     }
-                    onSuccess(list, rows, cols)
+                    onSuccess(list, rows, cols, pagesList, activePage)
                 } catch (e: Exception) {
                     Log.e("MainScreen", "Error parsing config JSON", e)
                 }
@@ -181,6 +217,8 @@ private fun saveStreamDeckConfig(
     buttons: List<StreamDeckButtonInfo>,
     rows: Int,
     cols: Int,
+    activePage: Int = 0,
+    pages: List<StreamDeckPageInfo> = emptyList(),
     onSuccess: () -> Unit
 ) {
     val client = OkHttpClient()
@@ -190,6 +228,18 @@ private fun saveStreamDeckConfig(
         configObj.put("password", password)
         configObj.put("stream_deck_rows", rows)
         configObj.put("stream_deck_cols", cols)
+        configObj.put("active_page", activePage)
+
+        if (pages.isNotEmpty()) {
+            val pagesArr = org.json.JSONArray()
+            for (p in pages) {
+                val pObj = JSONObject()
+                pObj.put("id", p.id)
+                pObj.put("title", p.title)
+                pagesArr.put(pObj)
+            }
+            configObj.put("stream_deck_pages", pagesArr)
+        }
         
         val buttonsArray = org.json.JSONArray()
         for (b in buttons) {
@@ -199,6 +249,9 @@ private fun saveStreamDeckConfig(
             bObj.put("type", b.type)
             bObj.put("value", b.value)
             bObj.put("icon", b.icon)
+            bObj.put("page", b.page)
+            bObj.put("state", b.state)
+            bObj.put("color", b.color)
             buttonsArray.put(bObj)
         }
         configObj.put("stream_deck_buttons", buttonsArray)
@@ -422,6 +475,19 @@ fun MainScreen(
     var streamDeckButtons by remember { mutableStateOf<List<StreamDeckButtonInfo>>(emptyList()) }
     var streamDeckRows by remember { mutableIntStateOf(2) }
     var streamDeckCols by remember { mutableIntStateOf(4) }
+    var streamDeckPages by remember { mutableStateOf<List<StreamDeckPageInfo>>(listOf(
+        StreamDeckPageInfo(0, "Ana Sayfa"),
+        StreamDeckPageInfo(1, "Medya & Ses"),
+        StreamDeckPageInfo(2, "Sistem & PC")
+    )) }
+    var activeDeckPage by remember { mutableIntStateOf(0) }
+    var liveCpu by remember { mutableIntStateOf(0) }
+    var liveRam by remember { mutableIntStateOf(0) }
+    var currentMasterVolume by remember { mutableFloatStateOf(50f) }
+
+    // Camera FPS & Quality preferences
+    var cameraFps by remember { mutableIntStateOf(prefs.getInt("camera_fps", 30)) }
+    var cameraQuality by remember { mutableStateOf(prefs.getString("camera_quality", "720p") ?: "720p") }
     var isDeckLandscape by remember { mutableStateOf(prefs.getBoolean("deck_landscape_v2", false)) }
     var isDeckFullscreen by remember { mutableStateOf(prefs.getBoolean("deck_fullscreen", false)) }
     var isMonitorLandscape by remember { mutableStateOf(prefs.getBoolean("monitor_landscape", false)) }
@@ -510,11 +576,13 @@ fun MainScreen(
                     streamDeckRows = 2
                     streamDeckCols = 4
                 } else {
-                    fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols ->
+                    fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols, pages, activePage ->
                         coroutineScope.launch(Dispatchers.Main) {
                             streamDeckButtons = buttons
                             streamDeckRows = rows
                             streamDeckCols = cols
+                            if (pages.isNotEmpty()) streamDeckPages = pages
+                            activeDeckPage = activePage
                         }
                     }
                 }
@@ -536,12 +604,41 @@ fun MainScreen(
         }
 
         SocketManager.configUpdateListener = {
-            fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols ->
+            fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols, pages, activePage ->
                 coroutineScope.launch(Dispatchers.Main) {
                     streamDeckButtons = buttons
                     streamDeckRows = rows
                     streamDeckCols = cols
+                    if (pages.isNotEmpty()) streamDeckPages = pages
+                    activeDeckPage = activePage
                 }
+            }
+        }
+
+        SocketManager.buttonStateListener = { btnId, state, page ->
+            coroutineScope.launch(Dispatchers.Main) {
+                streamDeckButtons = streamDeckButtons.map { b ->
+                    if (b.id == btnId) b.copy(state = state) else b
+                }
+            }
+        }
+
+        SocketManager.pageSwitchedListener = { page ->
+            coroutineScope.launch(Dispatchers.Main) {
+                activeDeckPage = page
+            }
+        }
+
+        SocketManager.volumeChangedListener = { action, level ->
+            coroutineScope.launch(Dispatchers.Main) {
+                currentMasterVolume = level
+            }
+        }
+
+        SocketManager.systemStatsListener = { cpu, ram ->
+            coroutineScope.launch(Dispatchers.Main) {
+                liveCpu = cpu
+                liveRam = ram
             }
         }
         
@@ -549,17 +646,23 @@ fun MainScreen(
             SocketManager.connectionStateListener = null
             SocketManager.clipboardListener = null
             SocketManager.configUpdateListener = null
+            SocketManager.buttonStateListener = null
+            SocketManager.pageSwitchedListener = null
+            SocketManager.volumeChangedListener = null
+            SocketManager.systemStatsListener = null
         }
     }
 
     // Refresh config when IP or connection state changes
     LaunchedEffect(isConnected, ipAddress) {
         if (isConnected) {
-            fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols ->
+            fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols, pages, activePage ->
                 coroutineScope.launch(Dispatchers.Main) {
                     streamDeckButtons = buttons
                     streamDeckRows = rows
                     streamDeckCols = cols
+                    if (pages.isNotEmpty()) streamDeckPages = pages
+                    activeDeckPage = activePage
                 }
             }
         }
@@ -576,11 +679,11 @@ fun MainScreen(
         }
     }
 
-    // Camera Stream Controller
-    LaunchedEffect(isCamStreaming, useFrontCamera) {
+    // Camera Stream Controller with FPS & Quality
+    LaunchedEffect(isCamStreaming, useFrontCamera, cameraFps, cameraQuality) {
         if (isCamStreaming) {
             SocketManager.startCameraStream()
-            startCameraAnalysis(context, lifecycleOwner, useFrontCamera) { jpegBytes ->
+            startCameraAnalysis(context, lifecycleOwner, useFrontCamera, cameraFps, cameraQuality) { jpegBytes ->
                 SocketManager.sendCameraFrame(jpegBytes)
             }
         } else {
@@ -654,11 +757,13 @@ fun MainScreen(
                 coroutineScope.launch(Dispatchers.Main) {
                     if (success) {
                         Toast.makeText(context, "Buton ikonu başarıyla güncellendi!", Toast.LENGTH_SHORT).show()
-                        fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols ->
+                        fetchStreamDeckConfig(ipAddress, password) { buttons, rows, cols, pages, activePage ->
                             coroutineScope.launch(Dispatchers.Main) {
                                 streamDeckButtons = buttons
                                 streamDeckRows = rows
                                 streamDeckCols = cols
+                                if (pages.isNotEmpty()) streamDeckPages = pages
+                                activeDeckPage = activePage
                             }
                         }
                     } else {
@@ -1237,6 +1342,26 @@ fun MainScreen(
                         buttons = streamDeckButtons,
                         rows = streamDeckRows,
                         cols = streamDeckCols,
+                        pages = streamDeckPages,
+                        activePage = activeDeckPage,
+                        onPageChange = { p ->
+                            activeDeckPage = p
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "switch_page")
+                                put("page", p)
+                            })
+                        },
+                        liveCpu = liveCpu,
+                        liveRam = liveRam,
+                        masterVolume = currentMasterVolume,
+                        onVolumeChange = { lvl ->
+                            currentMasterVolume = lvl
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "set_volume")
+                                put("action", "set")
+                                put("level", lvl.toDouble())
+                            })
+                        },
                         ipAddress = ipAddress,
                         password = password,
                         onButtonLongClick = { btn ->
@@ -1288,6 +1413,16 @@ fun MainScreen(
                         onCameraSelect = { active ->
                             useFrontCamera = active
                             prefs.edit().putBoolean("use_front_camera", active).apply()
+                        },
+                        cameraFps = cameraFps,
+                        onFpsChange = { fps ->
+                            cameraFps = fps
+                            prefs.edit().putInt("camera_fps", fps).apply()
+                        },
+                        cameraQuality = cameraQuality,
+                        onQualityChange = { q ->
+                            cameraQuality = q
+                            prefs.edit().putString("camera_quality", q).apply()
                         }
                     )
                     5 -> ToolsTab(
@@ -1543,6 +1678,28 @@ fun ConnectionTab(
                             Text("Ağdaki PC'yi Otomatik Bul")
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            onIpChange("127.0.0.1")
+                            onConnectClick()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF0F172A),
+                            contentColor = Color(0xFF38BDF8)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Default.Bolt, contentDescription = "USB 1ms", tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("⚡ USB Sıfır Gecikme (127.0.0.1 - 1ms)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1609,16 +1766,27 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
     val clean = iconName.substringBefore(":")
     return when (clean) {
         "mic" -> Icons.Default.Mic
-        "volup" -> Icons.Default.VolumeUp
-        "voldown" -> Icons.Default.VolumeDown
-        "play" -> Icons.Default.PlayArrow
-        "calc" -> Icons.Default.Build
-        "web" -> Icons.Default.Home
+        "volup", "volume_up" -> Icons.Default.VolumeUp
+        "voldown", "volume_down" -> Icons.Default.VolumeDown
+        "volume_mute", "mute", "sound_mute" -> Icons.Default.VolumeMute
+        "volume", "master_volume" -> Icons.Default.VolumeUp
+        "play", "playpause" -> Icons.Default.PlayArrow
+        "skip", "nexttrack" -> Icons.Default.SkipNext
+        "prev", "prevtrack" -> Icons.Default.SkipPrevious
+        "calc" -> Icons.Default.Calculate
+        "web", "globe" -> Icons.Default.Public
         "lock" -> Icons.Default.Lock
-        "task" -> Icons.Default.Menu
+        "task", "taskmgr" -> Icons.Default.Assessment
         "settings" -> Icons.Default.Settings
         "info" -> Icons.Default.Info
         "refresh" -> Icons.Default.Refresh
+        "cpu" -> Icons.Default.Memory
+        "ram" -> Icons.Default.Storage
+        "monitor", "desktop", "virtual_monitor" -> Icons.Default.Tv
+        "camera" -> Icons.Default.CameraAlt
+        "terminal" -> Icons.Default.Code
+        "home" -> Icons.Default.Home
+        "spotify" -> Icons.Default.MusicNote
         "add" -> Icons.Default.Add
         "delete" -> Icons.Default.Delete
         "edit" -> Icons.Default.Edit
@@ -1635,6 +1803,13 @@ fun StreamDeckTab(
     buttons: List<StreamDeckButtonInfo>,
     rows: Int,
     cols: Int,
+    pages: List<StreamDeckPageInfo>,
+    activePage: Int,
+    onPageChange: (Int) -> Unit,
+    liveCpu: Int,
+    liveRam: Int,
+    masterVolume: Float,
+    onVolumeChange: (Float) -> Unit,
     ipAddress: String,
     password: String,
     onButtonLongClick: (StreamDeckButtonInfo) -> Unit,
@@ -1654,14 +1829,21 @@ fun StreamDeckTab(
             return
         }
 
-        // Use dynamically fetched buttons from PC, fallback to placeholder labels if empty
-        val displayButtons = if (buttons.isNotEmpty()) buttons else {
-            List(rows * cols) { idx ->
-                StreamDeckButtonInfo(idx, "Buton ${idx + 1}", "hotkey", "", "")
+        // Filter buttons for the currently active page
+        val pageButtons = buttons.filter { it.page == activePage }
+        val displayButtons = if (pageButtons.isNotEmpty()) {
+            pageButtons
+        } else {
+            // Fallback: take slice corresponding to page
+            val startIdx = activePage * (rows * cols)
+            val sub = buttons.drop(startIdx).take(rows * cols)
+            if (sub.isNotEmpty()) sub else {
+                List(rows * cols) { idx ->
+                    StreamDeckButtonInfo(idx, "Slot ${idx + 1}", "hotkey", "", "")
+                }
             }
         }
 
-        // Grid layout that fits the screen height and width without scrolling in landscape
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1669,20 +1851,78 @@ fun StreamDeckTab(
                 .then(if (!isLandscape) Modifier.verticalScroll(rememberScrollState()) else Modifier),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Header: Page Selector Tabs & Live Stats
             if (!isLandscape) {
-                Text(
-                    text = "Stream Deck Butonları",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Stream Deck",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    // Live CPU/RAM badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E293B))
+                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "⚡ CPU: %$liveCpu | RAM: %$liveRam",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF38BDF8)
+                        )
+                    }
+                }
             }
 
+            // Horizontal Page Pill Tabs
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                pages.forEach { page ->
+                    val isSelected = page.id == activePage
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
+                            .border(
+                                1.dp,
+                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                                RoundedCornerShape(20.dp)
+                            )
+                            .clickable { onPageChange(page.id) }
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = page.title,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
+            // Button Grid
             for (r in 0 until rows) {
                 Row(
                     modifier = Modifier
-                        .then(if (isLandscape) Modifier.weight(1f) else Modifier.height(100.dp))
+                        .then(if (isLandscape) Modifier.weight(1f) else Modifier.height(108.dp))
                         .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -1690,24 +1930,49 @@ fun StreamDeckTab(
                         val index = r * cols + c
                         val btn = displayButtons.getOrNull(index)
                         if (btn != null) {
+                            val isToggle = btn.type == "toggle"
+                            val isVolume = btn.type == "volume_slider"
+                            val isLive = btn.type == "live_info"
+
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surface)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        when {
+                                            isToggle && btn.state -> Color(0xFF064E3B).copy(alpha = 0.5f)
+                                            isVolume -> Color(0xFF1E1B4B).copy(alpha = 0.5f)
+                                            isLive -> Color(0xFF1E293B).copy(alpha = 0.6f)
+                                            else -> MaterialTheme.colorScheme.surface
+                                        }
+                                    )
                                     .border(
                                         1.dp,
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                        RoundedCornerShape(12.dp)
+                                        when {
+                                            isToggle && btn.state -> Color(0xFF10B981)
+                                            isToggle -> Color(0xFFEF4444).copy(alpha = 0.4f)
+                                            isVolume -> Color(0xFF6366F1).copy(alpha = 0.5f)
+                                            isLive -> Color(0xFF38BDF8).copy(alpha = 0.4f)
+                                            else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        },
+                                        RoundedCornerShape(14.dp)
                                     )
-                                    .pointerInput(btn.id) {
+                                    .pointerInput(btn.id, btn.type) {
                                         detectTapGestures(
                                             onTap = {
-                                                SocketManager.sendControl(JSONObject().apply {
-                                                    put("type", "stream_deck_press")
-                                                    put("button_id", btn.id)
-                                                })
+                                                if (isVolume) {
+                                                    // Toggle or click volume
+                                                    SocketManager.sendControl(JSONObject().apply {
+                                                        put("type", "stream_deck_press")
+                                                        put("button_id", btn.id)
+                                                    })
+                                                } else {
+                                                    SocketManager.sendControl(JSONObject().apply {
+                                                        put("type", "stream_deck_press")
+                                                        put("button_id", btn.id)
+                                                    })
+                                                }
                                             },
                                             onLongPress = {
                                                 onButtonLongClick(btn)
@@ -1716,58 +1981,169 @@ fun StreamDeckTab(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
+                                // LED indicator for Toggle buttons
+                                if (isToggle) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(6.dp)
+                                            .size(8.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (btn.state) Color(0xFF10B981) else Color(0xFFEF4444))
+                                    )
+                                }
+
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center,
-                                    modifier = Modifier.padding(4.dp)
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
                                 ) {
                                     val iconSize = if (isLandscape) {
                                         when (rows) {
-                                            1 -> 48.dp
-                                            2 -> 36.dp
-                                            3 -> 28.dp
-                                            else -> 20.dp
+                                            1 -> 38.dp
+                                            2 -> 28.dp
+                                            3 -> 22.dp
+                                            else -> 18.dp
                                         }
                                     } else {
-                                        36.dp
+                                        28.dp
                                     }
 
-                                    if (btn.icon.startsWith("custom:") && btn.icon.length > 7) {
-                                        val iconPath = btn.icon.substring(7)
-                                        val imageUrl = "http://$ipAddress:8085/$iconPath?password=${Uri.encode(password)}"
-                                        AsyncImage(
-                                            model = imageUrl,
-                                            contentDescription = btn.label,
-                                            modifier = Modifier
-                                                .size(iconSize)
-                                                .clip(RoundedCornerShape(4.dp))
-                                        )
-                                    } else {
+                                    // Content based on button type
+                                    if (isVolume) {
+                                        // Volume Slider / Step Widget
                                         Icon(
-                                            imageVector = getVectorIcon(btn.icon),
-                                            contentDescription = btn.label,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            imageVector = Icons.Default.VolumeUp,
+                                            contentDescription = "Volume",
+                                            tint = Color(0xFF818CF8),
                                             modifier = Modifier.size(iconSize)
                                         )
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = btn.label,
-                                        fontSize = if (isLandscape) {
-                                            when (rows) {
-                                                1 -> 14.sp
-                                                2 -> 12.sp
-                                                3 -> 11.sp
-                                                else -> 10.sp
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = btn.label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF312E81))
+                                                    .clickable {
+                                                        SocketManager.sendControl(JSONObject().apply {
+                                                            put("type", "set_volume")
+                                                            put("action", "down")
+                                                        })
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                             }
+                                            Text(
+                                                text = "${masterVolume.toInt()}%",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFFA5B4FC)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF312E81))
+                                                    .clickable {
+                                                        SocketManager.sendControl(JSONObject().apply {
+                                                            put("type", "set_volume")
+                                                            put("action", "up")
+                                                        })
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            }
+                                        }
+                                    } else if (isLive) {
+                                        // Live Performance Stats Widget
+                                        val isCpuMetric = btn.value.contains("cpu")
+                                        val metricVal = if (isCpuMetric) liveCpu else liveRam
+                                        val metricColor = if (metricVal > 80) Color(0xFFEF4444) else if (metricVal > 50) Color(0xFFF59E0B) else Color(0xFF10B981)
+
+                                        Icon(
+                                            imageVector = if (isCpuMetric) Icons.Default.Memory else Icons.Default.Storage,
+                                            contentDescription = btn.label,
+                                            tint = metricColor,
+                                            modifier = Modifier.size(iconSize)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = btn.label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "%$metricVal",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = metricColor
+                                        )
+                                    } else {
+                                        // Standard Hotkey, Command, or Toggle Button
+                                        if (btn.icon.startsWith("custom:") && btn.icon.length > 7) {
+                                            val iconPath = btn.icon.substring(7)
+                                            val imageUrl = "http://$ipAddress:8085/$iconPath?password=${Uri.encode(password)}"
+                                            AsyncImage(
+                                                model = imageUrl,
+                                                contentDescription = btn.label,
+                                                modifier = Modifier
+                                                    .size(iconSize)
+                                                    .clip(RoundedCornerShape(4.dp))
+                                            )
                                         } else {
-                                            13.sp
-                                        },
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1
-                                    )
+                                            Icon(
+                                                imageVector = getVectorIcon(btn.icon),
+                                                contentDescription = btn.label,
+                                                tint = when {
+                                                    isToggle && btn.state -> Color(0xFF10B981)
+                                                    isToggle -> Color(0xFFEF4444)
+                                                    else -> MaterialTheme.colorScheme.primary
+                                                },
+                                                modifier = Modifier.size(iconSize)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = btn.label,
+                                            fontSize = if (isLandscape) {
+                                                when (rows) {
+                                                    1 -> 13.sp
+                                                    2 -> 11.sp
+                                                    else -> 10.sp
+                                                }
+                                            } else {
+                                                12.sp
+                                            },
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1
+                                        )
+                                        if (isToggle) {
+                                            Text(
+                                                text = if (btn.state) "AÇIK" else "KAPALI",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (btn.state) Color(0xFF10B981) else Color(0xFF94A3B8)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -2082,6 +2458,9 @@ fun MonitorTab(
 ) {
     val latestFrame = ScreenReceiver.latestFrame
     var isControlSuspended by remember { mutableStateOf(false) }
+    var rightClickMode by remember { mutableStateOf(false) }
+    var fitInsideMode by remember { mutableStateOf(true) }
+    var showKeyboardDialog by remember { mutableStateOf(false) }
     
     Box(
         modifier = Modifier
@@ -2105,15 +2484,36 @@ fun MonitorTab(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(isControlSuspended) {
+                .pointerInput(isControlSuspended, rightClickMode) {
                     if (!isControlSuspended) {
                         detectTapGestures(
                             onTap = { offset ->
-                                val rx = offset.x / size.width
-                                val ry = offset.y / size.height
+                                val rx = (offset.x / size.width).toDouble()
+                                val ry = (offset.y / size.height).toDouble()
+                                val action = if (rightClickMode) "right_click" else "click"
                                 SocketManager.sendControl(JSONObject().apply {
                                     put("type", "monitor_touch")
-                                    put("action", "click")
+                                    put("action", action)
+                                    put("x", rx)
+                                    put("y", ry)
+                                })
+                            },
+                            onDoubleTap = { offset ->
+                                val rx = (offset.x / size.width).toDouble()
+                                val ry = (offset.y / size.height).toDouble()
+                                SocketManager.sendControl(JSONObject().apply {
+                                    put("type", "monitor_touch")
+                                    put("action", "double_click")
+                                    put("x", rx)
+                                    put("y", ry)
+                                })
+                            },
+                            onLongPress = { offset ->
+                                val rx = (offset.x / size.width).toDouble()
+                                val ry = (offset.y / size.height).toDouble()
+                                SocketManager.sendControl(JSONObject().apply {
+                                    put("type", "monitor_touch")
+                                    put("action", "right_click")
                                     put("x", rx)
                                     put("y", ry)
                                 })
@@ -2125,8 +2525,8 @@ fun MonitorTab(
                     if (!isControlSuspended) {
                         detectDragGestures(
                             onDragStart = { offset ->
-                                val rx = offset.x / size.width
-                                val ry = offset.y / size.height
+                                val rx = (offset.x / size.width).toDouble()
+                                val ry = (offset.y / size.height).toDouble()
                                 SocketManager.sendControl(JSONObject().apply {
                                     put("type", "monitor_touch")
                                     put("action", "down")
@@ -2138,19 +2538,19 @@ fun MonitorTab(
                                 SocketManager.sendControl(JSONObject().apply {
                                     put("type", "monitor_touch")
                                     put("action", "up")
-                                    put("x", 0)
-                                    put("y", 0)
+                                    put("x", 0.0)
+                                    put("y", 0.0)
                                 })
                             }
                         ) { change, _ ->
                             change.consume()
-                            val rx = change.position.x / size.width
-                            val ry = change.position.y / size.height
+                            val rx = (change.position.x / size.width).toDouble()
+                            val ry = (change.position.y / size.height).toDouble()
                             SocketManager.sendControl(JSONObject().apply {
-                                    put("type", "monitor_touch")
-                                    put("action", "move")
-                                    put("x", rx)
-                                    put("y", ry)
+                                put("type", "monitor_touch")
+                                put("action", "move")
+                                put("x", rx)
+                                put("y", ry)
                             })
                         }
                     }
@@ -2161,6 +2561,7 @@ fun MonitorTab(
                 Image(
                     bitmap = latestFrame.asImageBitmap(),
                     contentDescription = "Second monitor view",
+                    contentScale = if (fitInsideMode) ContentScale.Fit else ContentScale.FillBounds,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -2174,6 +2575,121 @@ fun MonitorTab(
                         text = "Ekran yayını bekleniyor...",
                         color = Color.White.copy(alpha = 0.5f)
                     )
+                }
+            }
+        }
+
+        // Bottom Floating Action Toolbar for Easy Touch Control
+        AnimatedVisibility(
+            visible = !isControlSuspended,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (isMonitorFullscreen) 12.dp else 24.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xDD121217),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FFFFFF)),
+                shadowElevation = 10.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Mode toggle: Left vs Right click
+                    FilterChip(
+                        selected = rightClickMode,
+                        onClick = { rightClickMode = !rightClickMode },
+                        label = {
+                            Text(
+                                if (rightClickMode) "Sağ Tık" else "Sol Tık",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Mouse,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF3B82F6),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color(0x22FFFFFF),
+                            labelColor = Color(0xFFCCCCCC)
+                        )
+                    )
+
+                    // Keyboard input dialog trigger
+                    IconButton(
+                        onClick = { showKeyboardDialog = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Keyboard,
+                            contentDescription = "Klavye",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Scroll Up
+                    IconButton(
+                        onClick = {
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "monitor_touch")
+                                put("action", "scroll")
+                                put("dy", 120.0)
+                                put("x", 0.5)
+                                put("y", 0.5)
+                            })
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowUpward,
+                            contentDescription = "Yukarı Kaydır",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Scroll Down
+                    IconButton(
+                        onClick = {
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "monitor_touch")
+                                put("action", "scroll")
+                                put("dy", -120.0)
+                                put("x", 0.5)
+                                put("y", 0.5)
+                            })
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowDownward,
+                            contentDescription = "Aşağı Kaydır",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Fit inside / Fill screen toggle
+                    IconButton(
+                        onClick = { fitInsideMode = !fitInsideMode },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AspectRatio,
+                            contentDescription = "Sığdır / Doldur",
+                            tint = if (fitInsideMode) Color(0xFF10B981) else Color(0xFFF59E0B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
@@ -2240,6 +2756,100 @@ fun MonitorTab(
                     modifier = Modifier.size(20.dp)
                 )
             }
+        }
+
+        // Virtual Screen Keyboard Input Dialog
+        if (showKeyboardDialog) {
+            var monitorTypedText by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { showKeyboardDialog = false },
+                title = { Text("PC'ye Klavye Girişi", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = monitorTypedText,
+                            onValueChange = { monitorTypedText = it },
+                            placeholder = { Text("Yazı yazın...", fontSize = 13.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    SocketManager.sendControl(JSONObject().apply {
+                                        put("type", "keyboard_key")
+                                        put("key", "enter")
+                                    })
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("Enter", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = {
+                                    SocketManager.sendControl(JSONObject().apply {
+                                        put("type", "keyboard_key")
+                                        put("key", "backspace")
+                                    })
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("Sil", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = {
+                                    SocketManager.sendControl(JSONObject().apply {
+                                        put("type", "keyboard_key")
+                                        put("key", "escape")
+                                    })
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("Esc", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = {
+                                    SocketManager.sendControl(JSONObject().apply {
+                                        put("type", "keyboard_key")
+                                        put("key", "space")
+                                    })
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text("Boşluk", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (monitorTypedText.isNotEmpty()) {
+                                SocketManager.sendControl(JSONObject().apply {
+                                    put("type", "keyboard_input")
+                                    put("text", monitorTypedText)
+                                })
+                                monitorTypedText = ""
+                            }
+                            showKeyboardDialog = false
+                        }
+                    ) {
+                        Text("Gönder")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showKeyboardDialog = false }) {
+                        Text("Kapat")
+                    }
+                }
+            )
         }
     }
 }
@@ -2370,7 +2980,11 @@ fun MediaTab(
     isCamStreaming: Boolean,
     onCamToggle: (Boolean) -> Unit,
     useFrontCamera: Boolean,
-    onCameraSelect: (Boolean) -> Unit
+    onCameraSelect: (Boolean) -> Unit,
+    cameraFps: Int = 30,
+    onFpsChange: (Int) -> Unit = {},
+    cameraQuality: String = "720p HD",
+    onQualityChange: (String) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -2496,6 +3110,76 @@ fun MediaTab(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Kamerayı Değiştir", fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // FPS Selection
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Kare Hızı (FPS)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text("Düşük gecikme ve akıcılık seçimi", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(15, 30, 60).forEach { fpsVal ->
+                            val isSelected = cameraFps == fpsVal
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onFpsChange(fpsVal) },
+                                label = {
+                                    Text(
+                                        "$fpsVal FPS",
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Quality & Resolution Selection
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Çözünürlük & Kalite", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text("USB 1ms modunda 1080p önerilir", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("480p SD", "720p HD", "1080p FHD").forEach { qVal ->
+                            val isSelected = cameraQuality == qVal
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onQualityChange(qVal) },
+                                label = {
+                                    Text(
+                                        qVal,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        fontSize = 11.sp
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -2888,18 +3572,36 @@ private fun startCameraAnalysis(
     context: Context,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     useFrontCamera: Boolean,
+    fps: Int = 30,
+    quality: String = "720p HD",
     onFrame: (ByteArray) -> Unit
 ) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener({
         val cameraProvider = cameraProviderFuture.get()
+        val targetResolution = when (quality) {
+            "480p SD" -> android.util.Size(640, 480)
+            "1080p FHD" -> android.util.Size(1920, 1080)
+            else -> android.util.Size(1280, 720)
+        }
         val imageAnalysis = ImageAnalysis.Builder()
+            .setTargetResolution(targetResolution)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
 
+        val minIntervalMs = 1000L / fps.coerceIn(5, 60)
+        var lastFrameTime = 0L
+
         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-            val jpegBytes = imageProxy.toJpegBytes(isFrontCamera = useFrontCamera)
+            val now = System.currentTimeMillis()
+            if (now - lastFrameTime < minIntervalMs) {
+                imageProxy.close()
+                return@setAnalyzer
+            }
+            lastFrameTime = now
+
+            val jpegBytes = imageProxy.toJpegBytes(isFrontCamera = useFrontCamera, qualityPreset = quality)
             if (jpegBytes != null) {
                 onFrame(jpegBytes)
             }
@@ -2921,7 +3623,7 @@ private fun startCameraAnalysis(
 }
 
 // ImageProxy to JPEG Conversion NV21 (with robust stride handling and rotation/mirroring)
-private fun ImageProxy.toJpegBytes(isFrontCamera: Boolean): ByteArray? {
+private fun ImageProxy.toJpegBytes(isFrontCamera: Boolean, qualityPreset: String = "720p HD"): ByteArray? {
     try {
         val yPlane = planes[0]
         val uPlane = planes[1]
@@ -2974,9 +3676,15 @@ private fun ImageProxy.toJpegBytes(isFrontCamera: Boolean): ByteArray? {
             }
         }
 
+        val compressQuality = when (qualityPreset) {
+            "480p SD" -> 50
+            "1080p FHD" -> 85
+            else -> 70
+        }
+
         val yuvImage = YuvImage(nv21, ImageFormat.NV21, this.width, this.height, null)
         val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, this.width, this.height), 75, out) // Higher initial quality
+        yuvImage.compressToJpeg(Rect(0, 0, this.width, this.height), compressQuality, out)
         val rawBytes = out.toByteArray()
 
         val rotation = this.imageInfo.rotationDegrees
@@ -2994,7 +3702,7 @@ private fun ImageProxy.toJpegBytes(isFrontCamera: Boolean): ByteArray? {
 
             val rotatedBitmap = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
             val rotatedOut = ByteArrayOutputStream()
-            rotatedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 45, rotatedOut) // compress to final network format
+            rotatedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, compressQuality, rotatedOut)
             bitmap.recycle()
             rotatedBitmap.recycle()
             return rotatedOut.toByteArray()

@@ -214,7 +214,7 @@ func registerUninstall() {
 	defer k.Close()
 
 	k.SetStringValue("DisplayName", "BigPocket")
-	k.SetStringValue("DisplayVersion", "1.2.0")
+	k.SetStringValue("DisplayVersion", "1.3.0")
 	k.SetStringValue("Publisher", "benyigiteren")
 	k.SetStringValue("InstallLocation", installPath)
 	k.SetStringValue("UninstallString", filepath.Join(installPath, "uninstall.exe"))

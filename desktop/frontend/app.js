@@ -157,6 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupPasswordPromptHandlers();
     setupDashboardPassword();
     setupIPSelectHandler();
+    setupUsbBridge();
     
     // Fetch system info and configurations
     fetchSystemInfo();
@@ -165,6 +166,28 @@ document.addEventListener('DOMContentLoaded', () => {
     checkMicDriverStatus();
     connectWebSocket();
 });
+
+function setupUsbBridge() {
+    const adbBtn = document.getElementById('btn-setup-adb-reverse');
+    if (adbBtn) {
+        adbBtn.addEventListener('click', () => {
+            adbBtn.textContent = "Kuruluyor...";
+            adbBtn.disabled = true;
+            authFetch('/api/usb/forward', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    alert(data.message || (data.success ? "1ms USB Köprüsü Başarıyla Kuruldu!" : "ADB hatası"));
+                    adbBtn.textContent = "1ms ADB Başlat";
+                    adbBtn.disabled = false;
+                })
+                .catch(err => {
+                    alert("USB köprüsü kurulamadı: " + err);
+                    adbBtn.textContent = "1ms ADB Başlat";
+                    adbBtn.disabled = false;
+                });
+        });
+    }
+}
 
 // Setup Shutdown
 function setupShutdown() {
@@ -495,6 +518,18 @@ function setupStreamDeck() {
         if (editType.value === 'hotkey') {
             editValueLabel.textContent = "Kısayol Tuşları (Tuşlara basarak otomatik kaydedin)";
             editValue.placeholder = "Kısayolu kaydetmek için klavyeden tuşlara basın...";
+            appGroup.style.display = 'none';
+        } else if (editType.value === 'toggle') {
+            editValueLabel.textContent = "Toggle Eylemi veya Kısayol";
+            editValue.placeholder = "mic_mute, speaker_mute, virtual_monitor veya ctrl+shift+m";
+            appGroup.style.display = 'none';
+        } else if (editType.value === 'volume_slider') {
+            editValueLabel.textContent = "Ses Kontrol Değeri / Eylemi";
+            editValue.placeholder = "master, mic, up, down";
+            appGroup.style.display = 'none';
+        } else if (editType.value === 'live_info') {
+            editValueLabel.textContent = "Canlı Bilgi Türü";
+            editValue.placeholder = "cpu, ram, stats";
             appGroup.style.display = 'none';
         } else {
             editValueLabel.textContent = "Shell Komutu / Uygulama Adı (Örn. calc.exe)";
@@ -871,6 +906,11 @@ function openEditButtonModal(id) {
     editingButtonId = id;
     document.getElementById('edit-label').value = btn.label;
     document.getElementById('edit-type').value = btn.type;
+    const pageSelect = document.getElementById('edit-page');
+    if (pageSelect) {
+        pageSelect.value = (btn.page !== undefined ? btn.page : 0).toString();
+    }
+    document.getElementById('edit-type').dispatchEvent(new Event('change'));
     
     const editValue = document.getElementById('edit-value');
     editValue.value = btn.value;
@@ -902,6 +942,18 @@ function openEditButtonModal(id) {
         editValueLabel.textContent = "Kısayol Tuşları (Tuşlara basarak otomatik kaydedin)";
         editValue.placeholder = "Kısayolu kaydetmek için klavyeden tuşlara basın...";
         appGroup.style.display = 'none';
+    } else if (btn.type === 'toggle') {
+        editValueLabel.textContent = "Toggle Eylemi veya Kısayol";
+        editValue.placeholder = "mic_mute, speaker_mute, virtual_monitor veya ctrl+shift+m";
+        appGroup.style.display = 'none';
+    } else if (btn.type === 'volume_slider') {
+        editValueLabel.textContent = "Ses Kontrol Değeri / Eylemi";
+        editValue.placeholder = "master, mic, up, down";
+        appGroup.style.display = 'none';
+    } else if (btn.type === 'live_info') {
+        editValueLabel.textContent = "Canlı Bilgi Türü";
+        editValue.placeholder = "cpu, ram, stats";
+        appGroup.style.display = 'none';
     } else {
         editValueLabel.textContent = "Shell Komutu / Uygulama Adı (Örn. calc.exe)";
         editValue.placeholder = "Örn. calc.exe veya cmd /c start chrome";
@@ -916,6 +968,7 @@ function applyButtonEdit() {
     const label = document.getElementById('edit-label').value;
     const type = document.getElementById('edit-type').value;
     const value = document.getElementById('edit-value').value;
+    const page = parseInt(document.getElementById('edit-page')?.value || "0");
     
     const iconSelect = document.getElementById('edit-icon-select').value;
     const editIconCustom = document.getElementById('edit-icon-custom').value;
@@ -928,7 +981,15 @@ function applyButtonEdit() {
     const saveAndClose = (finalIcon) => {
         const idx = apiConfig.stream_deck_buttons.findIndex(b => b.id === editingButtonId);
         if (idx !== -1) {
-            apiConfig.stream_deck_buttons[idx] = { id: editingButtonId, label, type, value, icon: finalIcon };
+            apiConfig.stream_deck_buttons[idx] = {
+                ...apiConfig.stream_deck_buttons[idx],
+                id: editingButtonId,
+                label,
+                type,
+                value,
+                icon: finalIcon,
+                page
+            };
             renderStreamDeckButtons();
             saveConfigOnServer();
         }

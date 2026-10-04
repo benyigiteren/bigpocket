@@ -170,6 +170,10 @@
                                 <span class="stat-label">İşletim Sistemi</span>
                                 <span class="status-pill status-green font-mono" id="stat-os" style="background: rgba(255,255,255,0.06); color: var(--text-main);">Windows 11</span>
                             </div>
+                            <div class="stat-item" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span class="stat-label">⚡ USB 1ms Sıfır Gecikme</span>
+                                <button class="btn btn-secondary" id="btn-setup-adb-reverse" style="height: 26px; padding: 0 10px; font-size: 11px;">1ms ADB Başlat</button>
+                            </div>
                         </div>
                     </div>
  
@@ -284,6 +288,17 @@
                             <select id="edit-type">
                                 <option value="hotkey">Klavye Kısayolu (Hotkey)</option>
                                 <option value="command">Terminal Komutu (CMD)</option>
+                                <option value="toggle">Aç/Kapa Anahtarı (Toggle - Canlı LED)</option>
+                                <option value="volume_slider">Ses Seviyesi Kontrolü (Volume)</option>
+                                <option value="live_info">Canlı Sistem Bilgisi (CPU / RAM)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-page">Sayfa Seçimi</label>
+                            <select id="edit-page">
+                                <option value="0">Sayfa 1 (Ana Sayfa)</option>
+                                <option value="1">Sayfa 2 (Medya & Ses)</option>
+                                <option value="2">Sayfa 3 (Sistem & PC)</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -552,7 +567,7 @@
                     <div class="card" style="grid-column: 1 / -1; border-color: rgba(165, 166, 246, 0.25);">
                         <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
                             <div>
-                                <span class="meta-tag" style="background: rgba(165, 166, 246, 0.15); color: var(--accent); border-color: rgba(165, 166, 246, 0.3);">YAPAY ZEKA & GELİŞTİRİCİ ENTEGRASYONU</span>
+                                <span class="meta-tag" style="color: var(--accent);">YAPAY ZEKA & GELİŞTİRİCİ ENTEGRASYONU</span>
                                 <h2>Model Context Protocol (MCP) & REST API</h2>
                                 <p class="text-muted" style="max-width: 650px;">Claude Desktop, Cursor, Cline, Windsurf ve harici AI ajanlarının Stream Deck'i yönetmesini ve PC otomasyonu yapmasını sağlayın.</p>
                             </div>

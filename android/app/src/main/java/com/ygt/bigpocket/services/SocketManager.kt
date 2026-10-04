@@ -20,6 +20,10 @@ object SocketManager {
     var connectionStateListener: ((Boolean) -> Unit)? = null
     var clipboardListener: ((String) -> Unit)? = null
     var configUpdateListener: (() -> Unit)? = null
+    var buttonStateListener: ((Int, Boolean, Int) -> Unit)? = null
+    var pageSwitchedListener: ((Int) -> Unit)? = null
+    var volumeChangedListener: ((String, Float) -> Unit)? = null
+    var systemStatsListener: ((Int, Int) -> Unit)? = null
     var isConnected = false
         private set
 
@@ -76,6 +80,22 @@ object SocketManager {
                         clipboardListener?.invoke(clipText)
                     } else if (type == "config_update") {
                         configUpdateListener?.invoke()
+                    } else if (type == "button_state_changed") {
+                        val btnId = json.optInt("button_id")
+                        val state = json.optBoolean("state")
+                        val page = json.optInt("page")
+                        buttonStateListener?.invoke(btnId, state, page)
+                    } else if (type == "page_switched") {
+                        val activePage = json.optInt("active_page")
+                        pageSwitchedListener?.invoke(activePage)
+                    } else if (type == "volume_changed") {
+                        val action = json.optString("action")
+                        val level = json.optDouble("level", 50.0).toFloat()
+                        volumeChangedListener?.invoke(action, level)
+                    } else if (type == "system_stats") {
+                        val cpu = json.optInt("cpu")
+                        val ram = json.optInt("ram")
+                        systemStatsListener?.invoke(cpu, ram)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing WS message", e)
@@ -128,8 +148,12 @@ object SocketManager {
             val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             
             try {
-                audioSocket = Socket(currentIp, 8084)
-                audioOutputStream = audioSocket?.getOutputStream()
+                val s = Socket()
+                s.tcpNoDelay = true
+                s.setPerformancePreferences(0, 2, 1)
+                s.connect(java.net.InetSocketAddress(currentIp, 8084), 3000)
+                audioSocket = s
+                audioOutputStream = s.getOutputStream()
                 
                 audioRecord = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
@@ -188,9 +212,14 @@ object SocketManager {
 
         thread(start = true) {
             try {
-                cameraSocket = Socket(currentIp, 8083)
-                cameraOutputStream = cameraSocket?.getOutputStream()
-                Log.d(TAG, "Camera TCP socket connected")
+                val s = Socket()
+                s.tcpNoDelay = true
+                s.setPerformancePreferences(0, 2, 1)
+                s.sendBufferSize = 256 * 1024
+                s.connect(java.net.InetSocketAddress(currentIp, 8083), 3000)
+                cameraSocket = s
+                cameraOutputStream = s.getOutputStream()
+                Log.d(TAG, "Camera TCP socket connected with zero-latency options")
             } catch (e: Exception) {
                 Log.e(TAG, "Camera TCP socket error", e)
                 isCameraStreaming = false
