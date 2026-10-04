@@ -2270,64 +2270,85 @@ fun BigPocketLogo(modifier: Modifier = Modifier) {
         val w = size.width
         val h = size.height
         
-        // Background rounded rectangle
+        // Background rounded squircle
         drawRoundRect(
-            color = Color(0xFF131316),
+            color = Color(0xFF121215),
             size = size,
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.16f, h * 0.16f)
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.24f, h * 0.24f)
         )
         
-        // Border for the background
+        // Border
         drawRoundRect(
-            color = Color(0x14FFFFFF),
+            color = Color(0x22FFFFFF),
             size = size,
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.16f, h * 0.16f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.24f, h * 0.24f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
         )
         
-        // Draw the pocket/shield path
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.3f, h * 0.35f)
-            lineTo(w * 0.7f, h * 0.35f)
+        // Outer Pocket Rim
+        drawLine(
+            color = Color(0xFFF4F4F5),
+            start = Offset(w * 0.26f, h * 0.33f),
+            end = Offset(w * 0.74f, h * 0.33f),
+            strokeWidth = 3.5.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+
+        // Outer Pocket Body
+        val outerPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.30f, h * 0.33f)
+            lineTo(w * 0.70f, h * 0.33f)
             cubicTo(
-                w * 0.7f, h * 0.35f,
-                w * 0.7f, h * 0.65f,
-                w * 0.5f, h * 0.75f
+                w * 0.70f, h * 0.33f,
+                w * 0.70f, h * 0.58f,
+                w * 0.50f, h * 0.73f
             )
             cubicTo(
-                w * 0.3f, h * 0.65f,
-                w * 0.3f, h * 0.35f,
-                w * 0.3f, h * 0.35f
+                w * 0.30f, h * 0.58f,
+                w * 0.30f, h * 0.33f,
+                w * 0.30f, h * 0.33f
             )
             close()
         }
-        
         drawPath(
-            path = path,
-            color = Color(0xFFE2E2E9),
+            path = outerPath,
+            color = Color(0xFFF4F4F5),
             style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = 4.dp.toPx(),
+                width = 3.5.dp.toPx(),
                 join = androidx.compose.ui.graphics.StrokeJoin.Round
             )
         )
         
-        // Dashed line inside
-        drawLine(
-            color = Color(0xFFE2E2E9),
-            start = Offset(w * 0.3f, h * 0.45f),
-            end = Offset(w * 0.7f, h * 0.45f),
-            strokeWidth = 3.dp.toPx(),
-            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                intervals = floatArrayOf(8f, 12f),
-                phase = 0f
+        // Inner Pocket Accent Seam
+        val innerPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.38f, h * 0.43f)
+            lineTo(w * 0.62f, h * 0.43f)
+            cubicTo(
+                w * 0.62f, h * 0.43f,
+                w * 0.62f, h * 0.55f,
+                w * 0.50f, h * 0.63f
+            )
+            cubicTo(
+                w * 0.38f, h * 0.55f,
+                w * 0.38f, h * 0.43f,
+                w * 0.38f, h * 0.43f
+            )
+            close()
+        }
+        drawPath(
+            path = innerPath,
+            color = Color(0xFFA5A6F6),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = 2.5.dp.toPx(),
+                join = androidx.compose.ui.graphics.StrokeJoin.Round
             )
         )
         
-        // Green dot in the center of the pocket
+        // Center Sync Dot
         drawCircle(
-            color = Color(0xFF94D82D),
-            radius = 4.dp.toPx(),
-            center = Offset(w * 0.5f, h * 0.55f)
+            color = Color(0xFFA5A6F6),
+            radius = 3.dp.toPx(),
+            center = Offset(w * 0.50f, h * 0.52f)
         )
     }
 }

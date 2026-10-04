@@ -17,15 +17,16 @@ android {
 
     // Release signing: the same key must be used for every release, otherwise
     // in-app updates cannot be installed over the existing app.
-    val releaseKeystore = file("release.jks")
     signingConfigs {
-        if (releaseKeystore.exists()) {
-            create("release") {
-                storeFile = releaseKeystore
-                storePassword = System.getenv("BP_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("BP_KEY_ALIAS")
-                keyPassword = System.getenv("BP_KEY_PASSWORD")
-            }
+        create("release") {
+            storeFile = file("release.jks")
+            storePassword = "bigpocket123"
+            keyAlias = "bigpocket"
+            keyPassword = "bigpocket123"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
         }
     }
 
@@ -33,7 +34,10 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = if (releaseKeystore.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

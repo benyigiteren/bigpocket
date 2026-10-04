@@ -29,7 +29,7 @@
     --status-blue-txt: #60A5FA;
     
     --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-serif: 'Instrument Serif', Georgia, serif;
+    --font-serif: var(--font-sans);
     --font-mono: 'Geist Mono', SFMono-Regular, Consolas, monospace;
 }
 
@@ -217,17 +217,19 @@ body {
 }
 
 .header-title-container h1 {
-    font-family: var(--font-serif);
-    font-size: 32px;
-    font-weight: 900;
-    letter-spacing: -0.5px;
-    margin-bottom: 2px;
+    font-family: var(--font-sans);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin-bottom: 4px;
+    color: var(--text-main);
 }
 
 .serif-subtitle {
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 400;
+    font-family: var(--font-sans);
 }
 
 .status-indicator {
