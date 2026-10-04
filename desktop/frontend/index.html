@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BigPocket — Kontrol Paneli</title>
+    <link rel="icon" type="image/png" href="logo.png">
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +17,7 @@
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <img src="logo.svg" alt="BigPocket" class="brand-logo-img" style="width: 30px; height: 30px; border-radius: 8px;">
+                <img src="logo.png" alt="BigPocket" class="brand-logo-img" style="width: 32px; height: 32px; border-radius: 8px; object-fit: cover;">
                 <span class="brand-name">BigPocket</span>
             </div>
             
@@ -532,7 +533,7 @@
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <div style="font-weight: 600; font-size: 15px; color: var(--text-main);">BigPocket Masaüstü Sunucusu</div>
-                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.0</span></div>
+                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.1</span></div>
                                 </div>
                                 <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;">Aktif</span>
                             </div>
@@ -545,6 +546,53 @@
                             </button>
                         </div>
                         <div id="settings-update-status" style="font-size: 12.5px; margin-top: 10px; min-height: 18px; color: var(--text-muted);"></div>
+                    </div>
+
+                    <!-- MCP (Model Context Protocol) AI Integration Card -->
+                    <div class="card" style="grid-column: 1 / -1;">
+                        <div class="card-header">
+                            <span class="meta-tag" style="background: rgba(165, 166, 246, 0.15); color: var(--accent); border-color: rgba(165, 166, 246, 0.3);">YAPAY ZEKA ENTEGRASYONU</span>
+                            <h2>Model Context Protocol (MCP) Sunucusu</h2>
+                            <p class="text-muted">Claude Desktop, Cursor veya harici AI ajanlarının Stream Deck butonlarını dinamik olarak düzenlemesini ve PC üzerinde komut tetiklemesini sağlayın.</p>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin: 16px 0;">
+                            <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.05em;">MCP Sunucu Durumu</div>
+                                <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+                                    <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
+                                    <span style="font-weight: 600; font-size: 14px; color: var(--text-main);">bigpocket-streamdeck-mcp</span>
+                                    <span class="badge" style="background: rgba(165, 166, 246, 0.15); color: var(--accent); font-size: 11px; padding: 2px 8px; border-radius: 4px;">v1.0 Ready</span>
+                                </div>
+                            </div>
+
+                            <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
+                                <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.05em;">API URL & Yetkilendirme</div>
+                                <div style="font-family: var(--font-mono); font-size: 13px; color: var(--accent); margin-top: 6px; font-weight: 600;">
+                                    http://127.0.0.1:8085
+                                </div>
+                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+                                    API Key: <span id="mcp-api-key-text" style="font-family: var(--font-mono); color: var(--text-main); font-weight: 600;">(Şifresiz)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 14px;">
+                            <label style="font-size: 12.5px; font-weight: 600; color: var(--text-main); display: block; margin-bottom: 6px;">Claude Desktop / Cursor MCP Yapılandırma Bloğu (JSON)</label>
+                            <div style="position: relative;">
+                                <pre id="mcp-json-config" style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-main); overflow-x: auto; line-height: 1.5; margin: 0; white-space: pre-wrap;"></pre>
+                                <button class="btn btn-secondary" id="btn-copy-mcp-config" style="position: absolute; top: 10px; right: 10px; font-size: 11px; padding: 5px 12px; height: auto;">Kopyala</button>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px;">
+                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">⚡ get_streamdeck_config</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🛠️ set_streamdeck_button</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📐 set_grid_layout</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🚀 trigger_button</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">💻 list_installed_apps</span>
+                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📊 get_system_status</span>
+                        </div>
                     </div>
 
                     <!-- Network & Preferences Card -->
@@ -587,7 +635,7 @@
     <div class="modal" id="password-prompt-modal">
         <div class="modal-content card" style="width: 350px;">
             <div style="text-align: center; margin-top: 16px; margin-bottom: 8px;">
-                <img src="/logo.svg" alt="BigPocket" style="width: 64px; height: 64px; border-radius: 12px; border: 1px solid var(--border-color);">
+                <img src="/logo.png" alt="BigPocket" style="width: 64px; height: 64px; border-radius: 14px; border: 1px solid var(--border-color); object-fit: cover;">
             </div>
             <div class="card-header" style="text-align: center; margin-bottom: 12px;">
                 <span class="meta-tag">GÜVENLİ BAĞLANTI</span>

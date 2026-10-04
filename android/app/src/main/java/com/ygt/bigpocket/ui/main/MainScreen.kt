@@ -1601,26 +1601,6 @@ fun ConnectionTab(
                 )
             }
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Notification Permission Button
-        Button(
-            onClick = {
-                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                context.startActivity(intent)
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant, 
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Icon(Icons.Default.Notifications, contentDescription = "Notification")
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Bildirim İzni Ayarlarını Aç", fontSize = 12.sp)
-        }
     }
 }
 
@@ -2270,85 +2250,114 @@ fun BigPocketLogo(modifier: Modifier = Modifier) {
         val w = size.width
         val h = size.height
         
-        // Background rounded squircle
+        // 1. Background rounded squircle
         drawRoundRect(
-            color = Color(0xFF121215),
+            color = Color(0xFF0E0E12),
             size = size,
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.24f, h * 0.24f)
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.22f, h * 0.22f)
+        )
+        drawRoundRect(
+            color = Color(0xFF2A2A34),
+            size = size,
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.22f, h * 0.22f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
         )
         
-        // Border
+        // 2. Phone device sliding out of pocket
+        val phoneLeft = w * 0.34f
+        val phoneTop = h * 0.16f
+        val phoneWidth = w * 0.32f
+        val phoneHeight = h * 0.38f
+        val phoneRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
+        
         drawRoundRect(
-            color = Color(0x22FFFFFF),
-            size = size,
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.24f, h * 0.24f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+            color = Color(0xFF818CF8), // Electric Indigo
+            topLeft = Offset(phoneLeft, phoneTop),
+            size = androidx.compose.ui.geometry.Size(phoneWidth, phoneHeight),
+            cornerRadius = phoneRadius
+        )
+        drawRoundRect(
+            color = Color.White,
+            topLeft = Offset(phoneLeft, phoneTop),
+            size = androidx.compose.ui.geometry.Size(phoneWidth, phoneHeight),
+            cornerRadius = phoneRadius,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
         )
         
-        // Outer Pocket Rim
-        drawLine(
-            color = Color(0xFFF4F4F5),
-            start = Offset(w * 0.26f, h * 0.33f),
-            end = Offset(w * 0.74f, h * 0.33f),
-            strokeWidth = 3.5.dp.toPx(),
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        // Phone speaker notch
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.9f),
+            topLeft = Offset(w * 0.44f, h * 0.20f),
+            size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.024f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
         )
 
-        // Outer Pocket Body
-        val outerPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.30f, h * 0.33f)
-            lineTo(w * 0.70f, h * 0.33f)
+        // 3. Pocket Body
+        val pocketPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.26f, h * 0.38f)
+            lineTo(w * 0.26f, h * 0.55f)
             cubicTo(
-                w * 0.70f, h * 0.33f,
-                w * 0.70f, h * 0.58f,
-                w * 0.50f, h * 0.73f
+                w * 0.26f, h * 0.70f,
+                w * 0.38f, h * 0.78f,
+                w * 0.50f, h * 0.78f
             )
             cubicTo(
-                w * 0.30f, h * 0.58f,
-                w * 0.30f, h * 0.33f,
-                w * 0.30f, h * 0.33f
+                w * 0.62f, h * 0.78f,
+                w * 0.74f, h * 0.70f,
+                w * 0.74f, h * 0.55f
             )
+            lineTo(w * 0.74f, h * 0.38f)
             close()
         }
+        // Fill pocket
+        drawPath(path = pocketPath, color = Color(0xFF181820))
+        // Pocket stroke
         drawPath(
-            path = outerPath,
-            color = Color(0xFFF4F4F5),
+            path = pocketPath,
+            color = Color.White,
             style = androidx.compose.ui.graphics.drawscope.Stroke(
                 width = 3.5.dp.toPx(),
                 join = androidx.compose.ui.graphics.StrokeJoin.Round
             )
         )
-        
-        // Inner Pocket Accent Seam
-        val innerPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.38f, h * 0.43f)
-            lineTo(w * 0.62f, h * 0.43f)
+
+        // 4. Top Pocket Rim (White Bar)
+        drawLine(
+            color = Color.White,
+            start = Offset(w * 0.22f, h * 0.38f),
+            end = Offset(w * 0.78f, h * 0.38f),
+            strokeWidth = 4.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+
+        // 5. Pocket Accent Seam (Lavender)
+        val seamPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.34f, h * 0.47f)
             cubicTo(
-                w * 0.62f, h * 0.43f,
-                w * 0.62f, h * 0.55f,
-                w * 0.50f, h * 0.63f
+                w * 0.34f, h * 0.59f,
+                w * 0.41f, h * 0.67f,
+                w * 0.50f, h * 0.67f
             )
             cubicTo(
-                w * 0.38f, h * 0.55f,
-                w * 0.38f, h * 0.43f,
-                w * 0.38f, h * 0.43f
+                w * 0.59f, h * 0.67f,
+                w * 0.66f, h * 0.59f,
+                w * 0.66f, h * 0.47f
             )
-            close()
         }
         drawPath(
-            path = innerPath,
-            color = Color(0xFFA5A6F6),
+            path = seamPath,
+            color = Color(0xFFC084FC),
             style = androidx.compose.ui.graphics.drawscope.Stroke(
                 width = 2.5.dp.toPx(),
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                cap = androidx.compose.ui.graphics.StrokeCap.Round
             )
         )
-        
-        // Center Sync Dot
+
+        // 6. Center Wireless Connection Dot
         drawCircle(
-            color = Color(0xFFA5A6F6),
+            color = Color.White,
             radius = 3.dp.toPx(),
-            center = Offset(w * 0.50f, h * 0.52f)
+            center = Offset(w * 0.50f, h * 0.57f)
         )
     }
 }

@@ -135,6 +135,7 @@ func main() {
 		defer w.Destroy()
 		w.SetTitle("BigPocket")
 		w.SetSize(1100, 750, webview2.HintNone)
+		setWindowIcon(uintptr(w.Window()))
 		w.Navigate("http://localhost:8085")
 		w.Run()
 		
@@ -183,6 +184,49 @@ func ensureAdmin() {
 	)
 
 	os.Exit(0)
+}
+
+// Set native Win32 window and titlebar icon
+func setWindowIcon(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	user32 := syscall.NewLazyDLL("user32.dll")
+	sendMessage := user32.NewProc("SendMessageW")
+	loadImage := user32.NewProc("LoadImageW")
+
+	var hIcon uintptr
+	// 1. Try to load logo.ico directly from filesystem next to executable
+	icoPath := filepath.Join(exeDir, "logo.ico")
+	if _, err := os.Stat(icoPath); err == nil {
+		icoPathUTF16, _ := syscall.UTF16PtrFromString(icoPath)
+		// IMAGE_ICON = 1, LR_LOADFROMFILE = 0x00000010, LR_DEFAULTSIZE = 0x00000040
+		ret, _, _ := loadImage.Call(
+			0,
+			uintptr(unsafe.Pointer(icoPathUTF16)),
+			1, // IMAGE_ICON
+			0, // cx
+			0, // cy
+			0x00000010|0x00000040,
+		)
+		hIcon = ret
+	}
+
+	// 2. Fallback to embedded resource icon
+	if hIcon == 0 {
+		loadIcon := user32.NewProc("LoadIconW")
+		kernel32 := syscall.NewLazyDLL("kernel32.dll")
+		getModuleHandle := kernel32.NewProc("GetModuleHandleW")
+		hInst, _, _ := getModuleHandle.Call(0)
+		ret, _, _ := loadIcon.Call(hInst, uintptr(1))
+		hIcon = ret
+	}
+
+	if hIcon != 0 {
+		// WM_SETICON = 0x0080, ICON_SMALL = 0, ICON_BIG = 1
+		sendMessage.Call(hwnd, 0x0080, 0, hIcon)
+		sendMessage.Call(hwnd, 0x0080, 1, hIcon)
+	}
 }
 
 // ----------------- Desktop Shortcut Helper -----------------
@@ -1461,6 +1505,52 @@ func setupHttpRoutes() {
 		w.Header().Set("Content-Type", "application/json")
 		apps := getInstalledApps()
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "apps": apps})
+	})
+
+	// Trigger Stream Deck button directly via HTTP (useful for MCP and Web UI Test button)
+	http.HandleFunc("/stream_deck_trigger", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !checkAuth(w, r) {
+			return
+		}
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		btnIDFloat, ok := payload["button_id"].(float64)
+		if !ok {
+			http.Error(w, "Missing or invalid button_id", http.StatusBadRequest)
+			return
+		}
+		btnID := int(btnIDFloat)
+		cfg := loadConfig()
+		var targetBtn *StreamDeckButton
+		for _, b := range cfg.StreamDeckButtons {
+			if b.ID == btnID {
+				targetBtn = &b
+				break
+			}
+		}
+		if targetBtn == nil {
+			http.Error(w, "Button not found", http.StatusNotFound)
+			return
+		}
+
+		if targetBtn.Type == "hotkey" {
+			simulateHotkey(targetBtn.Value)
+		} else if targetBtn.Type == "command" {
+			go execCommandHidden("cmd", "/c", targetBtn.Value).Start()
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"button":  targetBtn,
+		})
 	})
 }
 

@@ -118,6 +118,7 @@ function setupDashboardPassword() {
                     setAuthPassword(newPassword);
                     alert("Erişim şifresi başarıyla güncellendi!");
                     fetchSystemInfo(); // Refresh pairing QR code with new password
+                    updateMcpCardUI();
                 }
             })
             .catch(err => {
@@ -648,9 +649,56 @@ function fetchConfig() {
                 if (settingsPwInput) {
                     settingsPwInput.value = apiConfig.password || "";
                 }
+                updateMcpCardUI();
             }
         })
         .catch(err => console.error("Error fetching config", err));
+}
+
+function updateMcpCardUI() {
+    const apiKeyEl = document.getElementById('mcp-api-key-text');
+    const jsonConfigEl = document.getElementById('mcp-json-config');
+    const copyBtn = document.getElementById('btn-copy-mcp-config');
+    if (!jsonConfigEl) return;
+
+    const pw = (apiConfig && apiConfig.password) ? apiConfig.password : "";
+    if (apiKeyEl) {
+        apiKeyEl.textContent = pw ? pw : "(Şifresiz)";
+    }
+
+    const mcpConfigObj = {
+        "mcpServers": {
+            "bigpocket-streamdeck": {
+                "command": "C:\\Users\\ygt\\Desktop\\projeler\\bigpocket-main\\mcp\\bigpocket-streamdeck-mcp.exe",
+                "args": [
+                    "--url", "http://127.0.0.1:8085"
+                ],
+                "env": {
+                    "BIGPOCKET_API_KEY": pw
+                }
+            }
+        }
+    };
+
+    const jsonStr = JSON.stringify(mcpConfigObj, null, 2);
+    jsonConfigEl.textContent = jsonStr;
+
+    if (copyBtn && !copyBtn.dataset.wired) {
+        copyBtn.dataset.wired = "true";
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(jsonConfigEl.textContent).then(() => {
+                const oldText = copyBtn.textContent;
+                copyBtn.textContent = "✓ Kopyalandı";
+                copyBtn.style.background = "var(--accent)";
+                copyBtn.style.color = "#000";
+                setTimeout(() => {
+                    copyBtn.textContent = oldText;
+                    copyBtn.style.background = "";
+                    copyBtn.style.color = "";
+                }, 1500);
+            });
+        });
+    }
 }
 
 function renderStreamDeckButtons() {
@@ -666,21 +714,71 @@ function renderStreamDeckButtons() {
         item.className = 'deck-btn';
         item.setAttribute('data-id', btn.id);
         
-        let displayIcon = iconMapUnicode[btn.icon] || "⚙️";
+        let displayIcon = iconMapUnicode[btn.icon] || "⚡";
         if (btn.icon && btn.icon.startsWith("custom:") && btn.icon.length > 7) {
             const path = btn.icon.substring(7);
             const password = getAuthPassword();
             const authQuery = password ? `?password=${encodeURIComponent(password)}` : '';
-            displayIcon = `<img src="${path}${authQuery}" style="width: 20px; height: 20px; object-fit: contain; border-radius: 4px; vertical-align: middle;" />`;
+            displayIcon = `<img src="${path}${authQuery}" />`;
         }
         
+        const typeBadgeClass = btn.type === 'hotkey' ? 'hotkey' : 'command';
+        const typeBadgeText = btn.type === 'hotkey' ? 'HOTKEY' : 'CMD';
+        const actionDisplay = btn.value ? btn.value : '(Boş)';
+        
         item.innerHTML = `
-            <div class="deck-btn-num">BUTON ${btn.id + 1}</div>
-            <div class="deck-btn-label">${displayIcon} &nbsp;${btn.label}</div>
-            <div class="deck-btn-action">${btn.type === 'hotkey' ? '⌨️ ' + btn.value : '🚀 ' + btn.value}</div>
+            <div class="deck-btn-header">
+                <span class="deck-btn-num">SLOT #${btn.id + 1}</span>
+                <span class="deck-btn-badge ${typeBadgeClass}">${typeBadgeText}</span>
+            </div>
+            <div class="deck-btn-body">
+                <div class="deck-btn-icon-wrapper">${displayIcon}</div>
+                <div class="deck-btn-label" title="${btn.label}">${btn.label || 'İsimsiz Buton'}</div>
+            </div>
+            <div class="deck-btn-footer">
+                <span class="deck-btn-action" title="${actionDisplay}">${actionDisplay}</span>
+                <button class="deck-btn-test" title="PC'de Çalıştır">Test</button>
+            </div>
         `;
+
+        // Test button triggers button without opening modal
+        const testBtn = item.querySelector('.deck-btn-test');
+        testBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            testButtonAction(btn.id, testBtn);
+        });
+
         item.addEventListener('click', () => openEditButtonModal(btn.id));
         list.appendChild(item);
+    });
+}
+
+function testButtonAction(buttonId, element) {
+    if (element) {
+        element.textContent = "⏳";
+    }
+    authFetch('/stream_deck_trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ button_id: buttonId })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (element) {
+            element.textContent = data.success ? "✓" : "✗";
+            setTimeout(() => {
+                element.textContent = "Test";
+            }, 1200);
+        }
+    })
+    .catch(err => {
+        console.error("Test trigger error", err);
+        if (element) {
+            element.textContent = "✗";
+            setTimeout(() => {
+                element.textContent = "Test";
+            }, 1200);
+        }
     });
 }
 
