@@ -190,7 +190,11 @@ object UpdateManager {
 
     /** True if the user must first allow "install unknown apps" for BigPocket. */
     fun needsInstallPermission(context: Context): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()
+        try {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()
+        } catch (e: Exception) {
+            false
+        }
 
     fun openInstallPermissionSettings(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

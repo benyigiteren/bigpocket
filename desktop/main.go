@@ -227,6 +227,10 @@ func setWindowIcon(hwnd uintptr) {
 		getModuleHandle := kernel32.NewProc("GetModuleHandleW")
 		hInst, _, _ := getModuleHandle.Call(0)
 		ret, _, _ := loadIcon.Call(hInst, uintptr(1))
+		if ret == 0 {
+			appStr, _ := syscall.UTF16PtrFromString("APP")
+			ret, _, _ = loadIcon.Call(hInst, uintptr(unsafe.Pointer(appStr)))
+		}
 		hIcon = ret
 	}
 
@@ -234,6 +238,12 @@ func setWindowIcon(hwnd uintptr) {
 		// WM_SETICON = 0x0080, ICON_SMALL = 0, ICON_BIG = 1
 		sendMessage.Call(hwnd, 0x0080, 0, hIcon)
 		sendMessage.Call(hwnd, 0x0080, 1, hIcon)
+		// Update window class icon for taskbar: GCLP_HICON = -14, GCLP_HICONSM = -34
+		setClassLongPtr := user32.NewProc("SetClassLongPtrW")
+		if setClassLongPtr.Find() == nil {
+			setClassLongPtr.Call(hwnd, uintptr(^uint(13)), hIcon)
+			setClassLongPtr.Call(hwnd, uintptr(^uint(33)), hIcon)
+		}
 	}
 }
 

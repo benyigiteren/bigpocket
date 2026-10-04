@@ -1,5 +1,11 @@
 {
   "RT_GROUP_ICON": {
+    "#1": {
+      "0000": [
+        "icon.png",
+        "icon16.png"
+      ]
+    },
     "APP": {
       "0000": [
         "icon.png",
