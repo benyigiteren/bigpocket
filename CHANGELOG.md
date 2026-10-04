@@ -3,6 +3,24 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
+## v1.2
+
+### 🎨 Kusursuz İkon Standardizasyonu (Mobil & Masaüstü)
+- **Mobil Launcher & Uygulama İçi Uyum:** Android başlatıcı simgesi (`ic_launcher_foreground.xml` ve `ic_launcher_background.xml`) sıfırdan vektörel olarak çizilerek uygulama içindeki minimalist koyu cep ve neon mor telefon logosuyla birebir eşitlendi.
+- **Görev Çubuğu & Masaüstü İkonu:** Windows görev çubuğunda (taskbar) eski simgenin kalmasına sebep olan `.syso` kaynakları, `desktop/winres` ikonları ve `/logo.svg` sunucusu baştan sona yenilendi.
+- **Daha Belirgin Sidebar Logosu:** Kenar çubuğundaki logo 42px boyutuna genişletilerek estetik kavis ve gölge efekti kazandırıldı.
+
+### 🔓 Masaüstünde Şifresiz Doğrudan Erişim
+- **Yerel Erişimde Sıfır Engel:** BigPocket bilgisayarda yerel olarak açıldığında (`localhost`/`127.0.0.1`) artık asla erişim şifresi sorulmaz; doğrudan tam yetkiyle açılır. Şifre koruması yalnızca uzaktan bağlanan telefon istemcileri için devrede kalır.
+
+### 🌐 Evrensel Model Context Protocol (MCP) & REST API
+- **Doğrudan HTTP / SSE MCP Desteği:** `http://localhost:8085/mcp` uç noktası üzerinden Claude Desktop, Cursor, Cline ve Windsurf ile harici bir işlem çalıştırmadan doğrudan bağlantı sağlandı.
+- **Sekmeli Yeni Geliştirici Arayüzü:** Ayarlar sekmesinde HTTP/SSE MCP, Stdio MCP ve doğrudan REST API için sekmeli, modern ve tek tıkla kopyalanabilen yapılandırma kartları eklendi.
+- **Zengin Araç Yelpazesi:** Stream Deck buton tetikleme, buton yapılandırma, grid düzenleme, kurulu uygulamaları listeleme, pano eşitleme ve sistem bildirimleri dahil 8 adet MCP aracı hazırlandı.
+
+### 🛡️ Windows Defender & PE Metadata Optimizasyonu
+- **Resmi Telif & Ürün Bilgisi:** `BigPocket.exe` ve `Setup.exe` ikili dosyalarına telif hakkı, ürün adı ve 1.2.0.0 sürüm PE başlıkları gömülerek antivirüs güven skoru maksimum seviyeye çıkarıldı.
+
 ## v1.1
 
 ### 🛡️ Güvenlik & Android Play Protect / Xiaomi Çözümü

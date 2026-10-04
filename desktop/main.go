@@ -661,7 +661,9 @@ func startWebSocketServer() {
 
 		cfg := loadConfig()
 		authenticated := false
-		if cfg.Password == "" {
+		remoteHost, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+		isLocal := (err == nil && (remoteHost == "127.0.0.1" || remoteHost == "::1" || remoteHost == "localhost"))
+		if cfg.Password == "" || isLocal {
 			authenticated = true
 		}
 
@@ -988,6 +990,16 @@ func showNotification(title, message string) {
 
 // ----------------- HTTP Auth Helpers -----------------
 func isAuthorized(r *http.Request) bool {
+	// PC Localhost / Loopback requests never require a password
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+			return true
+		}
+	} else if r.RemoteAddr == "127.0.0.1" || r.RemoteAddr == "::1" || r.RemoteAddr == "localhost" {
+		return true
+	}
+
 	cfg := loadConfig()
 	if cfg.Password == "" {
 		return true
@@ -1014,13 +1026,22 @@ func setupHttpRoutes() {
 	// Serve Logo SVG
 	http.HandleFunc("/logo.svg", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
-		logoSVG := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="16" fill="#131316" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
-  <path d="M30,35 L70,35 C70,35 70,65 50,75 C30,65 30,35 30,35 Z" fill="none" stroke="#E2E2E9" stroke-width="4" stroke-linejoin="round"/>
-  <line x1="30" y1="45" x2="70" y2="45" stroke="#E2E2E9" stroke-width="3" stroke-dasharray="2 3"/>
-  <circle cx="50" cy="55" r="4" fill="#94D82D"/>
+		w.Header().Set("Cache-Control", "no-cache")
+		svgPath := filepath.Join(exeDir, "frontend", "logo.svg")
+		if data, err := os.ReadFile(svgPath); err == nil {
+			w.Write(data)
+			return
+		}
+		modernSVG := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="100%" height="100%">
+  <rect x="4" y="4" width="120" height="120" rx="30" ry="30" fill="#0E0E12" stroke="#272730" stroke-width="2"/>
+  <rect x="44" y="20" width="40" height="48" rx="8" ry="8" fill="#818CF8" stroke="#FFFFFF" stroke-width="2"/>
+  <rect x="56" y="25" width="16" height="3" rx="1.5" ry="1.5" fill="#FFFFFF" opacity="0.9"/>
+  <path d="M34 48 L34 70 C34 90, 48 100, 64 100 C80 100, 94 90, 94 70 L94 48 Z" fill="#181820" stroke="#FFFFFF" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+  <line x1="28" y1="48" x2="100" y2="48" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M44 60 C44 76, 52 86, 64 86 C76 86, 84 76, 84 60" fill="none" stroke="#C084FC" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="64" cy="73" r="4" fill="#FFFFFF"/>
 </svg>`
-		w.Write([]byte(logoSVG))
+		w.Write([]byte(modernSVG))
 	})
 
 	// Serve frontend directory
@@ -1559,6 +1580,689 @@ func setupHttpRoutes() {
 			"success": true,
 			"button":  targetBtn,
 		})
+	})
+
+	// MCP Endpoint (HTTP POST JSON-RPC 2.0 & GET SSE)
+	http.HandleFunc("/mcp", handleMCPEndpoint)
+	http.HandleFunc("/mcp/sse", handleMCPEndpoint)
+
+	// Direct REST API Endpoints
+	http.HandleFunc("/api/status", handleAPIStatus)
+	http.HandleFunc("/api/streamdeck", handleAPIStreamDeck)
+	http.HandleFunc("/api/streamdeck/trigger", handleAPIStreamDeckTrigger)
+	http.HandleFunc("/api/streamdeck/button", handleAPIStreamDeckButton)
+	http.HandleFunc("/api/streamdeck/layout", handleAPIStreamDeckLayout)
+	http.HandleFunc("/api/apps", handleAPIApps)
+	http.HandleFunc("/api/clipboard", handleAPIClipboard)
+	http.HandleFunc("/api/notify", handleAPINotify)
+}
+
+// ----------------- Model Context Protocol (MCP) & REST API -----------------
+
+type MCPRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      interface{}     `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type MCPResponse struct {
+	JSONRPC string      `json:"jsonrpc"`
+	ID      interface{} `json:"id"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *MCPError   `json:"error,omitempty"`
+}
+
+type MCPError struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+type MCPTool struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	InputSchema interface{} `json:"inputSchema"`
+}
+
+var mcpToolsList = []MCPTool{
+	{
+		Name:        "get_system_status",
+		Description: "Gets BigPocket PC server status, IP addresses, ports, and system resource statistics.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	},
+	{
+		Name:        "get_streamdeck_config",
+		Description: "Retrieves current Stream Deck configuration, grid layout (rows, cols), and all buttons.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	},
+	{
+		Name:        "set_streamdeck_button",
+		Description: "Configures or edits a specific Stream Deck button slot (e.g. set label, hotkey combination, CMD application path, icon).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"button_id": map[string]interface{}{
+					"type":        "integer",
+					"description": "Button slot index (0-based)",
+				},
+				"label": map[string]interface{}{
+					"type":        "string",
+					"description": "Display label for the button",
+				},
+				"type": map[string]interface{}{
+					"type":        "string",
+					"enum":        []string{"hotkey", "command"},
+					"description": "Action type: 'hotkey' for keyboard shortcuts, 'command' for launching apps or commands",
+				},
+				"value": map[string]interface{}{
+					"type":        "string",
+					"description": "Hotkey string (e.g. 'ctrl+shift+m') or Command/App path (e.g. 'calc.exe')",
+				},
+				"icon": map[string]interface{}{
+					"type":        "string",
+					"description": "Unicode icon key (e.g. 'mic', 'desktop', 'volume_up', 'play') or custom image path",
+				},
+			},
+			"required": []string{"button_id", "label", "type", "value"},
+		},
+	},
+	{
+		Name:        "set_grid_layout",
+		Description: "Changes Stream Deck grid dimensions (number of rows and columns) and updates layout.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"rows": map[string]interface{}{
+					"type":        "integer",
+					"description": "Number of rows (1 to 5)",
+				},
+				"cols": map[string]interface{}{
+					"type":        "integer",
+					"description": "Number of columns (2 to 8)",
+				},
+			},
+			"required": []string{"rows", "cols"},
+		},
+	},
+	{
+		Name:        "trigger_button",
+		Description: "Directly triggers and executes a Stream Deck button action on the PC (simulates hotkey or runs command).",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"button_id": map[string]interface{}{
+					"type":        "integer",
+					"description": "The button slot index to trigger (0-based)",
+				},
+			},
+			"required": []string{"button_id"},
+		},
+	},
+	{
+		Name:        "list_installed_apps",
+		Description: "Fetches list of all installed Windows applications and desktop shortcuts with paths.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	},
+	{
+		Name:        "send_pc_notification",
+		Description: "Displays a desktop toast/balloon notification on the PC.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"title": map[string]interface{}{
+					"type":        "string",
+					"description": "Notification title",
+				},
+				"message": map[string]interface{}{
+					"type":        "string",
+					"description": "Notification body text",
+				},
+			},
+			"required": []string{"title", "message"},
+		},
+	},
+	{
+		Name:        "sync_clipboard",
+		Description: "Sets the PC clipboard text and syncs it with connected mobile devices.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"text": map[string]interface{}{
+					"type":        "string",
+					"description": "The text to copy to the PC clipboard",
+				},
+			},
+			"required": []string{"text"},
+		},
+	},
+}
+
+func handleMCPEndpoint(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Password")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Unauthorized"})
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		// If client requests SSE stream
+		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			flusher, ok := w.(http.Flusher)
+			if ok {
+				fmt.Fprintf(w, "event: endpoint\ndata: /mcp\n\n")
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			return
+		}
+
+		// Regular GET: return server discovery info
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name":        "bigpocket-mcp",
+			"version":     AppVersion,
+			"status":      "running",
+			"transports":  []string{"http", "sse", "stdio"},
+			"endpoint":    "http://127.0.0.1:8085/mcp",
+			"tools_count": len(mcpToolsList),
+		})
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MCPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			ID:      nil,
+			Error:   &MCPError{Code: -32700, Message: "Parse error", Data: err.Error()},
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	switch req.Method {
+	case "initialize":
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"capabilities": map[string]interface{}{
+					"tools": map[string]interface{}{
+						"listChanged": false,
+					},
+				},
+				"serverInfo": map[string]interface{}{
+					"name":    "bigpocket-streamdeck-mcp",
+					"version": AppVersion,
+				},
+			},
+		})
+
+	case "notifications/initialized":
+		w.WriteHeader(http.StatusNoContent)
+
+	case "ping":
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  map[string]interface{}{},
+		})
+
+	case "tools/list":
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]interface{}{
+				"tools": mcpToolsList,
+			},
+		})
+
+	case "tools/call":
+		var params struct {
+			Name      string                 `json:"name"`
+			Arguments map[string]interface{} `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			json.NewEncoder(w).Encode(MCPResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &MCPError{Code: -32602, Message: "Invalid params", Data: err.Error()},
+			})
+			return
+		}
+
+		resStr, isErr := executeInternalMCPTool(params.Name, params.Arguments)
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]interface{}{
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": resStr,
+					},
+				},
+				"isError": isErr,
+			},
+		})
+
+	default:
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &MCPError{Code: -32601, Message: "Method not found: " + req.Method},
+		})
+	}
+}
+
+func executeInternalMCPTool(name string, args map[string]interface{}) (string, bool) {
+	switch name {
+	case "get_system_status":
+		cfg := loadConfig()
+		ips := []string{}
+		if addrs, err := net.InterfaceAddrs(); err == nil {
+			for _, a := range addrs {
+				if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+					ips = append(ips, ipnet.IP.String())
+				}
+			}
+		}
+		res := map[string]interface{}{
+			"version":            AppVersion,
+			"http_port":          8085,
+			"screen_stream_port": 8086,
+			"audio_stream_port":  8084,
+			"ip_addresses":       ips,
+			"streamdeck_layout":  fmt.Sprintf("%dx%d", cfg.StreamDeckRows, cfg.StreamDeckCols),
+			"total_buttons":      len(cfg.StreamDeckButtons),
+		}
+		b, _ := json.MarshalIndent(res, "", "  ")
+		return string(b), false
+
+	case "get_streamdeck_config":
+		cfg := loadConfig()
+		b, _ := json.MarshalIndent(cfg, "", "  ")
+		return string(b), false
+
+	case "set_streamdeck_button":
+		btnIDFloat, ok := args["button_id"].(float64)
+		if !ok {
+			return "Error: button_id must be an integer", true
+		}
+		btnID := int(btnIDFloat)
+		label, _ := args["label"].(string)
+		bType, _ := args["type"].(string)
+		val, _ := args["value"].(string)
+		icon, _ := args["icon"].(string)
+
+		cfg := loadConfig()
+		found := false
+		for i := range cfg.StreamDeckButtons {
+			if cfg.StreamDeckButtons[i].ID == btnID {
+				cfg.StreamDeckButtons[i].Label = label
+				cfg.StreamDeckButtons[i].Type = bType
+				cfg.StreamDeckButtons[i].Value = val
+				cfg.StreamDeckButtons[i].Icon = icon
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.StreamDeckButtons = append(cfg.StreamDeckButtons, StreamDeckButton{
+				ID:    btnID,
+				Label: label,
+				Type:  bType,
+				Value: val,
+				Icon:  icon,
+			})
+		}
+		saveConfig(cfg)
+		broadcast(map[string]interface{}{"type": "config_update"})
+		return fmt.Sprintf("Successfully configured button #%d: [%s] (%s: %s)", btnID, label, bType, val), false
+
+	case "set_grid_layout":
+		rowsFloat, ok1 := args["rows"].(float64)
+		colsFloat, ok2 := args["cols"].(float64)
+		if !ok1 || !ok2 {
+			return "Error: rows and cols must be numbers", true
+		}
+		rows := int(rowsFloat)
+		cols := int(colsFloat)
+		if rows < 1 || rows > 5 || cols < 2 || cols > 8 {
+			return "Error: rows must be 1-5, cols must be 2-8", true
+		}
+		cfg := loadConfig()
+		cfg.StreamDeckRows = rows
+		cfg.StreamDeckCols = cols
+		targetTotal := rows * cols
+		for len(cfg.StreamDeckButtons) < targetTotal {
+			newID := len(cfg.StreamDeckButtons)
+			cfg.StreamDeckButtons = append(cfg.StreamDeckButtons, StreamDeckButton{
+				ID:    newID,
+				Label: fmt.Sprintf("Slot %d", newID+1),
+				Type:  "hotkey",
+				Value: "",
+				Icon:  "",
+			})
+		}
+		saveConfig(cfg)
+		broadcast(map[string]interface{}{"type": "config_update"})
+		return fmt.Sprintf("Successfully updated grid layout to %dx%d (%d buttons)", rows, cols, targetTotal), false
+
+	case "trigger_button":
+		btnIDFloat, ok := args["button_id"].(float64)
+		if !ok {
+			return "Error: button_id must be an integer", true
+		}
+		btnID := int(btnIDFloat)
+		cfg := loadConfig()
+		var targetBtn *StreamDeckButton
+		for i := range cfg.StreamDeckButtons {
+			if cfg.StreamDeckButtons[i].ID == btnID {
+				targetBtn = &cfg.StreamDeckButtons[i]
+				break
+			}
+		}
+		if targetBtn == nil {
+			return fmt.Sprintf("Error: button ID %d not found", btnID), true
+		}
+		if targetBtn.Type == "hotkey" {
+			simulateHotkey(targetBtn.Value)
+		} else if targetBtn.Type == "command" {
+			go execCommandHidden("cmd", "/c", targetBtn.Value).Start()
+		}
+		return fmt.Sprintf("Triggered button #%d (%s: %s)", btnID, targetBtn.Type, targetBtn.Value), false
+
+	case "list_installed_apps":
+		apps := getInstalledApps()
+		b, _ := json.MarshalIndent(apps, "", "  ")
+		return string(b), false
+
+	case "send_pc_notification":
+		title, _ := args["title"].(string)
+		msg, _ := args["message"].(string)
+		showNotification(title, msg)
+		return "Notification dispatched successfully", false
+
+	case "sync_clipboard":
+		text, _ := args["text"].(string)
+		lastClipboardText = text
+		clipboard.WriteAll(text)
+		broadcast(map[string]interface{}{
+			"type": "clipboard_sync",
+			"text": text,
+		})
+		return fmt.Sprintf("Clipboard synced: %d characters", len(text)), false
+
+	default:
+		return "Unknown tool: " + name, true
+	}
+}
+
+// ----------------- REST API Handlers -----------------
+func handleAPIStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	if !isAuthorized(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	cfg := loadConfig()
+	ips := []string{}
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+				ips = append(ips, ipnet.IP.String())
+			}
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":            true,
+		"version":            AppVersion,
+		"status":             "running",
+		"http_port":          8085,
+		"screen_stream_port": 8086,
+		"audio_stream_port":  8084,
+		"ips":                ips,
+		"grid":               fmt.Sprintf("%dx%d", cfg.StreamDeckRows, cfg.StreamDeckCols),
+		"buttons_count":      len(cfg.StreamDeckButtons),
+	})
+}
+
+func handleAPIStreamDeck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	if !isAuthorized(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	cfg := loadConfig()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"rows":    cfg.StreamDeckRows,
+		"cols":    cfg.StreamDeckCols,
+		"buttons": cfg.StreamDeckButtons,
+	})
+}
+
+func handleAPIStreamDeckTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	btnIDFloat, ok := payload["button_id"].(float64)
+	if !ok {
+		http.Error(w, "Missing button_id", http.StatusBadRequest)
+		return
+	}
+	resStr, isErr := executeInternalMCPTool("trigger_button", map[string]interface{}{
+		"button_id": btnIDFloat,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": !isErr,
+		"message": resStr,
+	})
+}
+
+func handleAPIStreamDeckButton(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resStr, isErr := executeInternalMCPTool("set_streamdeck_button", payload)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": !isErr,
+		"message": resStr,
+	})
+}
+
+func handleAPIStreamDeckLayout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resStr, isErr := executeInternalMCPTool("set_grid_layout", payload)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": !isErr,
+		"message": resStr,
+	})
+}
+
+func handleAPIApps(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	if !isAuthorized(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	apps := getInstalledApps()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"apps":    apps,
+	})
+}
+
+func handleAPIClipboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		text, _ := clipboard.ReadAll()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"text":    text,
+		})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		text, _ := payload["text"].(string)
+		executeInternalMCPTool("sync_clipboard", map[string]interface{}{"text": text})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Clipboard updated",
+		})
+		return
+	}
+	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+}
+
+func handleAPINotify(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isAuthorized(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "Unauthorized"})
+		return
+	}
+	var payload map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	title, _ := payload["title"].(string)
+	msg, _ := payload["message"].(string)
+	showNotification(title, msg)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Notification dispatched",
 	})
 }
 

@@ -125,6 +125,17 @@ def main():
     )
     print(f"Saved {ico_path} with sizes: {sizes}")
 
+    icon512.save(os.path.join(base_dir, "bigpocket.png"), "PNG")
+
+    # Winres icons for Windows PE group icon
+    winres_dir = os.path.join(desktop_dir, "winres")
+    if os.path.exists(winres_dir):
+        icon256 = icon512.resize((256, 256), Image.Resampling.LANCZOS)
+        icon256.save(os.path.join(winres_dir, "icon.png"), "PNG")
+        icon16 = icon512.resize((16, 16), Image.Resampling.LANCZOS)
+        icon16.save(os.path.join(winres_dir, "icon16.png"), "PNG")
+        print(f"Updated winres/icon.png and winres/icon16.png")
+
     # Android Mipmaps
     mipmap_targets = {
         "mipmap-mdpi": 48,

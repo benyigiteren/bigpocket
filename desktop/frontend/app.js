@@ -34,6 +34,9 @@ function setAuthPassword(pw) {
 
 // Custom fetch wrapper that adds auth header
 function authFetch(url, options = {}) {
+    const isLocal = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1' || 
+                    window.location.hostname === '';
     const password = getAuthPassword();
     options.headers = options.headers || {};
     if (!(options.body instanceof FormData)) {
@@ -41,10 +44,12 @@ function authFetch(url, options = {}) {
             options.headers['Content-Type'] = 'application/json';
         }
     }
-    options.headers['X-Password'] = password;
+    if (password) {
+        options.headers['X-Password'] = password;
+    }
 
     return fetch(url, options).then(res => {
-        if (res.status === 401) {
+        if (res.status === 401 && !isLocal) {
             showPasswordPrompt();
             throw new Error("Unauthorized");
         }
@@ -53,9 +58,17 @@ function authFetch(url, options = {}) {
 }
 
 function showPasswordPrompt() {
+    const isLocal = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1' || 
+                    window.location.hostname === '';
+    if (isLocal) {
+        // PC local access never prompts for a password
+        return;
+    }
     const modal = document.getElementById('password-prompt-modal');
-    modal.classList.add('active');
-    document.getElementById('prompt-error-msg').style.display = 'none';
+    if (modal) modal.classList.add('active');
+    const errEl = document.getElementById('prompt-error-msg');
+    if (errEl) errEl.style.display = 'none';
 }
 
 function setupPasswordPromptHandlers() {
@@ -656,49 +669,118 @@ function fetchConfig() {
 }
 
 function updateMcpCardUI() {
-    const apiKeyEl = document.getElementById('mcp-api-key-text');
-    const jsonConfigEl = document.getElementById('mcp-json-config');
-    const copyBtn = document.getElementById('btn-copy-mcp-config');
-    if (!jsonConfigEl) return;
+    const sseConfigEl = document.getElementById('mcp-sse-json-config');
+    const stdioConfigEl = document.getElementById('mcp-stdio-json-config');
+    if (!sseConfigEl && !stdioConfigEl) return;
 
     const pw = (apiConfig && apiConfig.password) ? apiConfig.password : "";
-    if (apiKeyEl) {
-        apiKeyEl.textContent = pw ? pw : "(Şifresiz)";
-    }
 
-    const mcpConfigObj = {
+    // 1. SSE / HTTP MCP Config (Universal modern MCP for Cursor, Claude, Cline, Windsurf)
+    const sseConfigObj = {
         "mcpServers": {
-            "bigpocket-streamdeck": {
-                "command": "C:\\Users\\ygt\\Desktop\\projeler\\bigpocket-main\\mcp\\bigpocket-streamdeck-mcp.exe",
-                "args": [
-                    "--url", "http://127.0.0.1:8085"
-                ],
-                "env": {
-                    "BIGPOCKET_API_KEY": pw
-                }
+            "bigpocket": {
+                "url": "http://127.0.0.1:8085/mcp"
             }
         }
     };
-
-    const jsonStr = JSON.stringify(mcpConfigObj, null, 2);
-    jsonConfigEl.textContent = jsonStr;
-
-    if (copyBtn && !copyBtn.dataset.wired) {
-        copyBtn.dataset.wired = "true";
-        copyBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(jsonConfigEl.textContent).then(() => {
-                const oldText = copyBtn.textContent;
-                copyBtn.textContent = "✓ Kopyalandı";
-                copyBtn.style.background = "var(--accent)";
-                copyBtn.style.color = "#000";
-                setTimeout(() => {
-                    copyBtn.textContent = oldText;
-                    copyBtn.style.background = "";
-                    copyBtn.style.color = "";
-                }, 1500);
-            });
-        });
+    if (sseConfigEl) {
+        sseConfigEl.textContent = JSON.stringify(sseConfigObj, null, 2);
     }
+
+    // 2. Stdio MCP Config (Local binary process)
+    const stdioConfigObj = {
+        "mcpServers": {
+            "bigpocket-streamdeck": {
+                "command": "C:\\Program Files\\BigPocket\\bigpocket-streamdeck-mcp.exe",
+                "args": [
+                    "--url", "http://127.0.0.1:8085"
+                ],
+                ...(pw ? { "env": { "BIGPOCKET_API_KEY": pw } } : {})
+            }
+        }
+    };
+    if (stdioConfigEl) {
+        stdioConfigEl.textContent = JSON.stringify(stdioConfigObj, null, 2);
+    }
+
+    // 3. Tab switching logic
+    const tabBtns = document.querySelectorAll('.mcp-tab-btn');
+    tabBtns.forEach(btn => {
+        if (!btn.dataset.wired) {
+            btn.dataset.wired = "true";
+            btn.addEventListener('click', () => {
+                const targetTab = btn.getAttribute('data-mcptab');
+                
+                // Update buttons
+                tabBtns.forEach(b => {
+                    b.classList.remove('active');
+                    b.style.background = 'transparent';
+                    b.style.borderColor = 'transparent';
+                    b.style.color = 'var(--text-muted)';
+                });
+                btn.classList.add('active');
+                btn.style.background = 'var(--bg-surface-elevated)';
+                btn.style.borderColor = 'var(--border-color)';
+                btn.style.color = 'var(--text-main)';
+
+                // Update tab contents
+                document.querySelectorAll('.mcp-tab-content').forEach(content => {
+                    content.style.display = 'none';
+                });
+                const activeContent = document.getElementById(`mcp-tab-content-${targetTab}`);
+                if (activeContent) {
+                    activeContent.style.display = 'block';
+                }
+            });
+        }
+    });
+
+    // 4. Copy buttons for code blocks
+    document.querySelectorAll('.btn-copy-code').forEach(btn => {
+        if (!btn.dataset.wired) {
+            btn.dataset.wired = "true";
+            btn.addEventListener('click', () => {
+                const targetId = btn.getAttribute('data-target');
+                const targetEl = document.getElementById(targetId);
+                if (targetEl) {
+                    navigator.clipboard.writeText(targetEl.textContent).then(() => {
+                        const oldText = btn.textContent;
+                        btn.textContent = "✓ Kopyalandı";
+                        btn.style.background = "var(--accent)";
+                        btn.style.color = "#000";
+                        setTimeout(() => {
+                            btn.textContent = oldText;
+                            btn.style.background = "";
+                            btn.style.color = "";
+                        }, 1500);
+                    });
+                }
+            });
+        }
+    });
+
+    // 5. Copy buttons for inline text
+    document.querySelectorAll('.btn-copy-inline').forEach(btn => {
+        if (!btn.dataset.wired) {
+            btn.dataset.wired = "true";
+            btn.addEventListener('click', () => {
+                const textToCopy = btn.getAttribute('data-copy');
+                if (textToCopy) {
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        const oldText = btn.textContent;
+                        btn.textContent = "✓";
+                        btn.style.background = "var(--accent)";
+                        btn.style.color = "#000";
+                        setTimeout(() => {
+                            btn.textContent = oldText;
+                            btn.style.background = "";
+                            btn.style.color = "";
+                        }, 1500);
+                    });
+                }
+            });
+        }
+    });
 }
 
 function renderStreamDeckButtons() {

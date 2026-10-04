@@ -17,8 +17,8 @@
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <img src="logo.png" alt="BigPocket" class="brand-logo-img" style="width: 32px; height: 32px; border-radius: 8px; object-fit: cover;">
-                <span class="brand-name">BigPocket</span>
+                <img src="logo.png" alt="BigPocket" class="brand-logo-img" style="width: 42px; height: 42px; border-radius: 10px; object-fit: cover; box-shadow: 0 4px 14px rgba(0,0,0,0.4); flex-shrink: 0;">
+                <span class="brand-name" style="font-size: 17px; font-weight: 700; letter-spacing: -0.3px;">BigPocket</span>
             </div>
             
             <nav class="sidebar-nav">
@@ -533,7 +533,7 @@
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <div style="font-weight: 600; font-size: 15px; color: var(--text-main);">BigPocket Masaüstü Sunucusu</div>
-                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.1</span></div>
+                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.2</span></div>
                                 </div>
                                 <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;">Aktif</span>
                             </div>
@@ -548,50 +548,138 @@
                         <div id="settings-update-status" style="font-size: 12.5px; margin-top: 10px; min-height: 18px; color: var(--text-muted);"></div>
                     </div>
 
-                    <!-- MCP (Model Context Protocol) AI Integration Card -->
-                    <div class="card" style="grid-column: 1 / -1;">
-                        <div class="card-header">
-                            <span class="meta-tag" style="background: rgba(165, 166, 246, 0.15); color: var(--accent); border-color: rgba(165, 166, 246, 0.3);">YAPAY ZEKA ENTEGRASYONU</span>
-                            <h2>Model Context Protocol (MCP) Sunucusu</h2>
-                            <p class="text-muted">Claude Desktop, Cursor veya harici AI ajanlarının Stream Deck butonlarını dinamik olarak düzenlemesini ve PC üzerinde komut tetiklemesini sağlayın.</p>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin: 16px 0;">
-                            <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
-                                <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.05em;">MCP Sunucu Durumu</div>
-                                <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
-                                    <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block;"></span>
-                                    <span style="font-weight: 600; font-size: 14px; color: var(--text-main);">bigpocket-streamdeck-mcp</span>
-                                    <span class="badge" style="background: rgba(165, 166, 246, 0.15); color: var(--accent); font-size: 11px; padding: 2px 8px; border-radius: 4px;">v1.0 Ready</span>
-                                </div>
+                    <!-- MCP (Model Context Protocol) & REST API Integration Card -->
+                    <div class="card" style="grid-column: 1 / -1; border-color: rgba(165, 166, 246, 0.25);">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                            <div>
+                                <span class="meta-tag" style="background: rgba(165, 166, 246, 0.15); color: var(--accent); border-color: rgba(165, 166, 246, 0.3);">YAPAY ZEKA & GELİŞTİRİCİ ENTEGRASYONU</span>
+                                <h2>Model Context Protocol (MCP) & REST API</h2>
+                                <p class="text-muted" style="max-width: 650px;">Claude Desktop, Cursor, Cline, Windsurf ve harici AI ajanlarının Stream Deck'i yönetmesini ve PC otomasyonu yapmasını sağlayın.</p>
                             </div>
-
-                            <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 10px; padding: 14px;">
-                                <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.05em;">API URL & Yetkilendirme</div>
-                                <div style="font-family: var(--font-mono); font-size: 13px; color: var(--accent); margin-top: 6px; font-weight: 600;">
-                                    http://127.0.0.1:8085
-                                </div>
-                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
-                                    API Key: <span id="mcp-api-key-text" style="font-family: var(--font-mono); color: var(--text-main); font-weight: 600;">(Şifresiz)</span>
-                                </div>
+                            <div style="display: flex; align-items: center; gap: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 6px 14px; border-radius: 99px;">
+                                <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block; box-shadow: 0 0 8px #10b981;"></span>
+                                <span style="font-size: 12px; font-weight: 600; color: #10b981;">Aktif (Port 8085)</span>
                             </div>
                         </div>
 
-                        <div style="margin-top: 14px;">
-                            <label style="font-size: 12.5px; font-weight: 600; color: var(--text-main); display: block; margin-bottom: 6px;">Claude Desktop / Cursor MCP Yapılandırma Bloğu (JSON)</label>
+                        <!-- Protocol Switcher Tabs -->
+                        <div style="display: flex; gap: 8px; margin-top: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                            <button class="mcp-tab-btn active" data-mcptab="http" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-main); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                                📡 HTTP / SSE MCP (Modern)
+                            </button>
+                            <button class="mcp-tab-btn" data-mcptab="stdio" style="background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                                ⚙️ Stdio MCP (Yerel Process)
+                            </button>
+                            <button class="mcp-tab-btn" data-mcptab="rest" style="background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                                ⚡ REST API (curl / HTTP)
+                            </button>
+                        </div>
+
+                        <!-- Tab 1: HTTP / SSE MCP -->
+                        <div class="mcp-tab-content" id="mcp-tab-content-http" style="margin-top: 16px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 14px;">
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                    <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">MCP Uç Noktası (Endpoint)</div>
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                                        <code style="font-family: var(--font-mono); font-size: 13px; color: var(--accent); font-weight: 600;">http://127.0.0.1:8085/mcp</code>
+                                        <button class="btn btn-secondary btn-copy-inline" data-copy="http://127.0.0.1:8085/mcp" style="font-size: 11px; padding: 3px 8px; height: auto;">Kopyala</button>
+                                    </div>
+                                </div>
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                    <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Protokol Türü & Yetkilendirme</div>
+                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
+                                        <span style="font-size: 13px; color: var(--text-main); font-weight: 500;">HTTP POST (JSON-RPC) + SSE GET</span>
+                                        <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-size: 11px; padding: 2px 8px; border-radius: 4px;">Yerel Şifresiz</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Cursor & Claude Desktop (SSE / HTTP) Ayar Bloğu</label>
                             <div style="position: relative;">
-                                <pre id="mcp-json-config" style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-main); overflow-x: auto; line-height: 1.5; margin: 0; white-space: pre-wrap;"></pre>
-                                <button class="btn btn-secondary" id="btn-copy-mcp-config" style="position: absolute; top: 10px; right: 10px; font-size: 11px; padding: 5px 12px; height: auto;">Kopyala</button>
+                                <pre id="mcp-sse-json-config" style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-main); overflow-x: auto; line-height: 1.5; margin: 0; white-space: pre-wrap;"></pre>
+                                <button class="btn btn-secondary btn-copy-code" data-target="mcp-sse-json-config" style="position: absolute; top: 10px; right: 10px; font-size: 11px; padding: 5px 12px; height: auto;">Kopyala</button>
                             </div>
                         </div>
 
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px;">
-                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">⚡ get_streamdeck_config</span>
-                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🛠️ set_streamdeck_button</span>
-                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📐 set_grid_layout</span>
-                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🚀 trigger_button</span>
-                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">💻 list_installed_apps</span>
-                            <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📊 get_system_status</span>
+                        <!-- Tab 2: Stdio MCP -->
+                        <div class="mcp-tab-content" id="mcp-tab-content-stdio" style="margin-top: 16px; display: none;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 14px;">
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                    <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">MCP Binary Dosyası</div>
+                                    <div style="margin-top: 6px; font-size: 12px; font-family: var(--font-mono); color: var(--text-main); word-break: break-all;">
+                                        bigpocket-streamdeck-mcp.exe
+                                    </div>
+                                </div>
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                    <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Bağlantı & İletişim</div>
+                                    <div style="margin-top: 6px; font-size: 12.5px; color: var(--text-muted);">
+                                        Standart Girdi/Çıktı (stdin / stdout) üzerinden JSON-RPC 2.0
+                                    </div>
+                                </div>
+                            </div>
+
+                            <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Claude Desktop / Cursor (Stdio) Yapılandırma Bloğu (JSON)</label>
+                            <div style="position: relative;">
+                                <pre id="mcp-stdio-json-config" style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-main); overflow-x: auto; line-height: 1.5; margin: 0; white-space: pre-wrap;"></pre>
+                                <button class="btn btn-secondary btn-copy-code" data-target="mcp-stdio-json-config" style="position: absolute; top: 10px; right: 10px; font-size: 11px; padding: 5px 12px; height: auto;">Kopyala</button>
+                            </div>
+                        </div>
+
+                        <!-- Tab 3: REST API -->
+                        <div class="mcp-tab-content" id="mcp-tab-content-rest" style="margin-top: 16px; display: none;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px;">
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="badge" style="background: #2563eb; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
+                                        <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/streamdeck/trigger</code>
+                                    </div>
+                                    <span style="font-size: 11px; color: var(--text-muted);">Buton tetikle</span>
+                                </div>
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="badge" style="background: #059669; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">GET</span>
+                                        <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/streamdeck</code>
+                                    </div>
+                                    <span style="font-size: 11px; color: var(--text-muted);">Butonları listele</span>
+                                </div>
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="badge" style="background: #2563eb; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
+                                        <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/clipboard</code>
+                                    </div>
+                                    <span style="font-size: 11px; color: var(--text-muted);">Panoya yaz</span>
+                                </div>
+                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="badge" style="background: #2563eb; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
+                                        <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/notify</code>
+                                    </div>
+                                    <span style="font-size: 11px; color: var(--text-muted);">Bildirim yolla</span>
+                                </div>
+                            </div>
+
+                            <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Örnek cURL Komutu</label>
+                            <div style="position: relative;">
+                                <pre id="mcp-curl-example" style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-main); overflow-x: auto; line-height: 1.5; margin: 0; white-space: pre-wrap;">curl -X POST http://127.0.0.1:8085/api/streamdeck/trigger \
+  -H "Content-Type: application/json" \
+  -d "{\"button_id\": 0}"</pre>
+                                <button class="btn btn-secondary btn-copy-code" data-target="mcp-curl-example" style="position: absolute; top: 10px; right: 10px; font-size: 11px; padding: 5px 12px; height: auto;">Kopyala</button>
+                            </div>
+                        </div>
+
+                        <!-- Available MCP Tools Pill Badges -->
+                        <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color);">
+                            <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.05em;">Desteklenen MCP Araçları (Tools)</div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">⚡ get_streamdeck_config</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🛠️ set_streamdeck_button</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📐 set_grid_layout</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🚀 trigger_button</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">💻 list_installed_apps</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📊 get_system_status</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🔔 send_pc_notification</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📋 sync_clipboard</span>
+                            </div>
                         </div>
                     </div>
 
