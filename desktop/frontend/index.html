@@ -157,8 +157,12 @@
                                 <span class="status-pill status-red" id="mic-driver-badge">EKSİK</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label">Arka Plan Go Servisi</span>
-                                <span class="status-pill status-green">AKTİF</span>
+                                <span class="stat-label">RAM Kullanımı</span>
+                                <span class="status-pill status-green" id="stat-ram" style="font-family: var(--font-mono); font-size: 11px;">HESAPLANIYOR</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">İşletim Sistemi</span>
+                                <span class="status-pill status-green font-mono" id="stat-os" style="background: rgba(255,255,255,0.06); color: var(--text-main);">Windows 11</span>
                             </div>
                         </div>
                     </div>
@@ -437,10 +441,16 @@
                 <div class="bento-grid">
                     <!-- File Manager Card -->
                     <div class="card animate-slide-in" style="--index: 1;">
-                        <div class="card-header">
-                            <span class="meta-tag">DOSYA HAVUZU</span>
-                            <h2>Paylaşılan Dosya Yöneticisi</h2>
-                            <p class="section-desc text-muted">Telefonunuzla paylaşılan dosyalar. Klasör: <span class="font-mono">APPDATA/BigPocket/SharedFiles</span></p>
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <span class="meta-tag">DOSYA HAVUZU</span>
+                                <h2>Paylaşılan Dosya Yöneticisi</h2>
+                                <p class="section-desc text-muted">Telefonunuzla paylaşılan dosyalar. Klasör: <span class="font-mono">APPDATA/BigPocket/SharedFiles</span></p>
+                            </div>
+                            <button class="btn btn-secondary" id="btn-open-folder" style="display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                <span>Klasörü Aç</span>
+                            </button>
                         </div>
                         
                         <div class="drag-drop-zone" id="drag-drop-zone">

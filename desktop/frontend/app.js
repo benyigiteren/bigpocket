@@ -232,6 +232,15 @@ function fetchSystemInfo() {
                 } else {
                     adminWarning.style.display = 'none';
                 }
+
+                const ramStat = document.getElementById('stat-ram');
+                if (ramStat && info.mem_stats) {
+                    ramStat.textContent = info.mem_stats.alloc_mb + ' / ' + info.mem_stats.sys_mb;
+                }
+                const osStat = document.getElementById('stat-os');
+                if (osStat && info.hostname) {
+                    osStat.textContent = info.hostname;
+                }
             }
         })
         .catch(err => {
@@ -917,6 +926,13 @@ function setupWebcam() {
 function setupDragAndDrop() {
     const zone = document.getElementById('drag-drop-zone');
     const fileInput = document.getElementById('file-input');
+    const openFolderBtn = document.getElementById('btn-open-folder');
+
+    if (openFolderBtn) {
+        openFolderBtn.addEventListener('click', () => {
+            authFetch('/open_shared_folder', { method: 'POST' });
+        });
+    }
 
     zone.addEventListener('click', () => fileInput.click());
 
@@ -989,16 +1005,41 @@ function renderFilesList(files) {
     const password = getAuthPassword();
     const authQuery = password ? `?password=${encodeURIComponent(password)}` : '';
 
+    function getFileIcon(name) {
+        const ext = name.split('.').pop().toLowerCase();
+        if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) {
+            return `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(96,165,250,0.15);color:#60A5FA;margin-right:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg></span>`;
+        }
+        if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext)) {
+            return `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(165,166,246,0.15);color:#A5A6F6;margin-right:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></span>`;
+        }
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+            return `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(74,222,128,0.15);color:#4ADE80;margin-right:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>`;
+        }
+        if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+            return `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(251,191,36,0.15);color:#FBBF24;margin-right:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>`;
+        }
+        return `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:rgba(255,255,255,0.06);color:#A1A1AA;margin-right:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
+    }
+
     files.forEach(file => {
         const tr = document.createElement('tr');
-        const sizeKB = (file.size / 1024).toFixed(1);
+        const sizeFormatted = file.size > 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' : (file.size / 1024).toFixed(1) + ' KB';
         const dateStr = new Date(file.modified * 1000).toLocaleString('tr-TR');
+        const fileIcon = getFileIcon(file.name);
         
         tr.innerHTML = `
-            <td><a href="/download/${encodeURIComponent(file.name)}${authQuery}" download>${file.name}</a></td>
-            <td class="font-mono">${sizeKB} KB</td>
-            <td>${dateStr}</td>
-            <td style="text-align: right;"><button class="btn-danger" onclick="deleteFile('${encodeURIComponent(file.name)}')">Sil</button></td>
+            <td>
+                <div style="display:flex;align-items:center;">
+                    ${fileIcon}
+                    <a href="/download/${encodeURIComponent(file.name)}${authQuery}" download style="word-break:break-all;">${file.name}</a>
+                </div>
+            </td>
+            <td class="font-mono" style="white-space:nowrap;">${sizeFormatted}</td>
+            <td style="white-space:nowrap;font-size:12px;color:var(--text-muted);">${dateStr}</td>
+            <td style="text-align: right;white-space:nowrap;">
+                <button class="btn-danger" onclick="deleteFile('${encodeURIComponent(file.name)}')">Sil</button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
@@ -1243,3 +1284,134 @@ function checkMobileMode() {
         }
     }
 }
+
+// ----------------- Auto Update Prompt -----------------
+(function () {
+    const SKIP_KEY = 'bigpocket_skip_version';
+
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // Tiny markdown renderer for release notes (headings, lists, bold, code, links).
+    function renderNotes(md) {
+        const lines = escapeHtml(md).split(/\r?\n/);
+        let html = '', inList = false;
+        const inline = t => t
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        for (const raw of lines) {
+            const line = raw.trim();
+            const li = line.match(/^[-*]\s+(.*)/);
+            if (li) {
+                if (!inList) { html += '<ul>'; inList = true; }
+                html += '<li>' + inline(li[1]) + '</li>';
+                continue;
+            }
+            if (inList) { html += '</ul>'; inList = false; }
+            const h = line.match(/^(#{1,3})\s+(.*)/);
+            if (h) html += '<h4>' + inline(h[2]) + '</h4>';
+            else if (line) html += '<p>' + inline(line) + '</p>';
+        }
+        if (inList) html += '</ul>';
+        return html || '<p>Sürüm notu yok.</p>';
+    }
+
+    function injectStyles() {
+        if (document.getElementById('bp-update-style')) return;
+        const st = document.createElement('style');
+        st.id = 'bp-update-style';
+        st.textContent = `
+        .bp-upd-overlay{position:fixed;inset:0;background:rgba(10,10,12,.6);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:9999;animation:bpFade .2s ease-out}
+        .bp-upd-card{width:min(520px,92vw);max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:18px;padding:24px;color:var(--text-main);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+        .bp-upd-badge{display:inline-block;font-size:12px;padding:4px 10px;border-radius:999px;background:rgba(165,166,246,.12);color:var(--accent-solid);margin-bottom:10px}
+        .bp-upd-card h3{font-size:20px;font-weight:600;margin-bottom:4px}
+        .bp-upd-ver{color:var(--text-muted);font-size:13px;margin-bottom:16px;font-family:var(--font-mono)}
+        .bp-upd-notes{overflow:auto;background:var(--bg-elevated,#26262C);border-radius:12px;padding:14px 16px;font-size:14px;line-height:1.55;color:var(--text-main);flex:1}
+        .bp-upd-notes h4{font-size:14px;margin:10px 0 4px}.bp-upd-notes ul{padding-left:18px;margin:4px 0}.bp-upd-notes p{margin:4px 0}
+        .bp-upd-notes code{font-family:var(--font-mono);background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px}
+        .bp-upd-notes a{color:var(--accent-solid)}
+        .bp-upd-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.06);margin-top:16px;overflow:hidden;display:none}
+        .bp-upd-bar>div{height:100%;width:0;background:var(--accent-solid);transition:width .2s}
+        .bp-upd-status{font-size:13px;color:var(--text-muted);margin-top:8px;min-height:18px}
+        .bp-upd-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+        .bp-upd-actions button{border:none;border-radius:12px;padding:10px 16px;font-size:14px;cursor:pointer;transition:background .2s}
+        .bp-upd-ghost{background:transparent;color:var(--text-muted)}.bp-upd-ghost:hover{background:rgba(255,255,255,.05)}
+        .bp-upd-primary{background:var(--accent-solid);color:var(--text-inverse);font-weight:600}.bp-upd-primary:hover{background:var(--accent-hover)}
+        .bp-upd-primary:disabled{opacity:.5;cursor:default}
+        @keyframes bpFade{from{opacity:0}to{opacity:1}}`;
+        document.head.appendChild(st);
+    }
+
+    function showUpdateDialog(info, manual) {
+        injectStyles();
+        const ov = document.createElement('div');
+        ov.className = 'bp-upd-overlay';
+        ov.innerHTML = `
+          <div class="bp-upd-card">
+            <span class="bp-upd-badge">Yeni güncelleme</span>
+            <h3>${escapeHtml(info.title || ('BigPocket ' + info.latest_version))}</h3>
+            <div class="bp-upd-ver">v${escapeHtml(info.current_version)} → v${escapeHtml(info.latest_version)}</div>
+            <div class="bp-upd-notes">${renderNotes(info.notes)}</div>
+            <div class="bp-upd-bar"><div></div></div>
+            <div class="bp-upd-status"></div>
+            <div class="bp-upd-actions">
+              <button class="bp-upd-ghost" data-act="skip">Bu sürümü atla</button>
+              <button class="bp-upd-ghost" data-act="later">Sonra</button>
+              <button class="bp-upd-primary" data-act="install">Güncelle</button>
+            </div>
+          </div>`;
+        document.body.appendChild(ov);
+        const close = () => ov.remove();
+        const bar = ov.querySelector('.bp-upd-bar'), fill = bar.firstElementChild, status = ov.querySelector('.bp-upd-status');
+
+        ov.querySelector('[data-act=later]').onclick = close;
+        ov.querySelector('[data-act=skip]').onclick = () => { localStorage.setItem(SKIP_KEY, info.latest_version); close(); };
+        ov.querySelector('[data-act=install]').onclick = async (e) => {
+            e.target.disabled = true;
+            ov.querySelectorAll('.bp-upd-ghost').forEach(b => b.disabled = true);
+            bar.style.display = 'block';
+            status.textContent = 'İndiriliyor...';
+            try {
+                const r = await fetch('/api/update/install', { method: 'POST' }).then(r => r.json());
+                if (!r.success) throw new Error(r.error || 'Başarısız');
+            } catch (err) {
+                status.textContent = 'Hata: ' + err.message;
+                e.target.disabled = false;
+                return;
+            }
+            const timer = setInterval(async () => {
+                try {
+                    const p = await fetch('/api/update/progress').then(r => r.json());
+                    fill.style.width = (p.percent || 0) + '%';
+                    if (p.state === 'downloading') status.textContent = `İndiriliyor... %${p.percent}`;
+                    else if (p.state === 'installing') status.textContent = 'Kuruluyor...';
+                    else if (p.state === 'restarting') status.textContent = 'Yeniden başlatılıyor...';
+                    else if (p.state === 'error') { clearInterval(timer); status.textContent = 'Hata: ' + p.message; e.target.disabled = false; }
+                } catch (_) {
+                    // Server went down => restarting. Reload once it is back.
+                    clearInterval(timer);
+                    status.textContent = 'Yeniden başlatılıyor...';
+                    const wait = setInterval(() => {
+                        fetch('/api/version').then(() => { clearInterval(wait); location.reload(); }).catch(() => {});
+                    }, 1500);
+                }
+            }, 500);
+        };
+    }
+
+    window.checkForUpdates = async function (manual = false) {
+        try {
+            const info = await fetch('/api/update/check' + (manual ? '?force=1' : '')).then(r => r.json());
+            if (info.available) {
+                if (!manual && localStorage.getItem(SKIP_KEY) === info.latest_version) return;
+                showUpdateDialog(info, manual);
+            } else if (manual) {
+                alert(info.error ? ('Güncelleme kontrol edilemedi: ' + info.error) : `En güncel sürümü kullanıyorsunuz (v${info.current_version}).`);
+            }
+        } catch (_) { /* offline */ }
+    };
+
+    window.addEventListener('load', () => setTimeout(() => window.checkForUpdates(false), 1500));
+})();

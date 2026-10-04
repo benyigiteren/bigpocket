@@ -16,7 +16,12 @@ class MainActivity : ComponentActivity() {
 
     enableEdgeToEdge()
     setContent {
-      BigPocketTheme { Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainNavigation() } }
+      BigPocketTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          MainNavigation()
+          com.ygt.bigpocket.update.UpdatePrompt()
+        }
+      }
     }
   }
 }

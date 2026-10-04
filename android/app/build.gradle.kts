@@ -15,10 +15,25 @@ android {
         versionName = "1.0"
     }
 
+    // Release signing: the same key must be used for every release, otherwise
+    // in-app updates cannot be installed over the existing app.
+    val releaseKeystore = file("release.jks")
+    signingConfigs {
+        if (releaseKeystore.exists()) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("BP_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("BP_KEY_ALIAS")
+                keyPassword = System.getenv("BP_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = if (releaseKeystore.exists()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import android.content.pm.ActivityInfo
+import com.ygt.bigpocket.theme.*
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -72,6 +73,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.catch
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -394,6 +396,20 @@ fun MainScreen(
     var ipAddress by remember { mutableStateOf(prefs.getString("ip_address", "192.168.1.100") ?: "192.168.1.100") }
     var password by remember { mutableStateOf(prefs.getString("password", "") ?: "") }
     var isGamerTheme by remember { mutableStateOf(false) }
+    var keepScreenOn by remember { mutableStateOf(prefs.getBoolean("keep_screen_on", true)) }
+
+    // Keep screen awake (FLAG_KEEP_SCREEN_ON)
+    DisposableEffect(keepScreenOn) {
+        val window = (context as? Activity)?.window
+        if (keepScreenOn) {
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     // Connection state
     var isConnected by remember { mutableStateOf(SocketManager.isConnected) }
@@ -644,6 +660,34 @@ fun MainScreen(
                     }
                 }
             }
+        }
+    }
+
+    // Auto discovery: while disconnected, listen for BigPocket PCs on the LAN and connect automatically.
+    LaunchedEffect(isConnected) {
+        if (isConnected) return@LaunchedEffect
+        val lastAttempt = mutableMapOf<String, Long>()
+        var warnedPassword = false
+        com.ygt.bigpocket.services.PcDiscovery.discover(context)
+            .catch { e -> Log.w("MainScreen", "Discovery unavailable", e) }
+            .collect { pc ->
+            if (SocketManager.isConnected) return@collect
+            val now = System.currentTimeMillis()
+            if (now - (lastAttempt[pc.ip] ?: 0L) < 8000) return@collect
+            lastAttempt[pc.ip] = now
+
+            if (pc.needsPassword && password.isEmpty()) {
+                if (!warnedPassword) {
+                    warnedPassword = true
+                    ipAddress = pc.ip
+                    Toast.makeText(context, "${pc.name} bulundu — bağlanmak için şifre girin", Toast.LENGTH_LONG).show()
+                }
+                return@collect
+            }
+            ipAddress = pc.ip
+            prefs.edit().putString("ip_address", pc.ip).apply()
+            Toast.makeText(context, "${pc.name} bulundu, bağlanılıyor…", Toast.LENGTH_SHORT).show()
+            SocketManager.connect(pc.ip, password)
         }
     }
 
@@ -1010,51 +1054,110 @@ fun MainScreen(
         Scaffold(
             bottomBar = {
                 if (!hideBars) {
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        NavigationBarItem(
-                            selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
-                            icon = { Icon(Icons.Default.Home, contentDescription = "Dashboard") },
-                            label = { Text("Giriş") }
-                        )
-                        NavigationBarItem(
-                            selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
-                            icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Stream Deck") },
-                            label = { Text("Deck") }
-                        )
-                        NavigationBarItem(
-                            selected = selectedTab == 2,
-                            onClick = { selectedTab = 2 },
-                            icon = { Icon(Icons.Default.Build, contentDescription = "Trackpad") },
-                            label = { Text("Mouse") }
-                        )
-                        NavigationBarItem(
-                            selected = selectedTab == 3,
-                            onClick = { 
-                                selectedTab = 3
-                                if (isConnected && !ScreenReceiver.latestFrame.let { false }) {
-                                    ScreenReceiver.start(ipAddress)
-                                }
-                            },
-                            icon = { Icon(Icons.Default.Monitor, contentDescription = "Second Screen") },
-                            label = { Text("Ekran") }
-                        )
-                        NavigationBarItem(
-                            selected = selectedTab == 4,
-                            onClick = { selectedTab = 4 },
-                            icon = { Icon(Icons.Default.Share, contentDescription = "Media") },
-                            label = { Text("Medya") }
-                        )
-                        NavigationBarItem(
-                            selected = selectedTab == 5,
-                            onClick = { selectedTab = 5 },
-                            icon = { Icon(Icons.Default.Menu, contentDescription = "Tools") },
-                            label = { Text("Araçlar") }
-                        )
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            color = MinimalistSurface,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder),
+                            shadowElevation = 8.dp
+                        ) {
+                            NavigationBar(
+                                containerColor = Color.Transparent,
+                                contentColor = MinimalistPrimary,
+                                tonalElevation = 0.dp
+                            ) {
+                                NavigationBarItem(
+                                    selected = selectedTab == 0,
+                                    onClick = { selectedTab = 0 },
+                                    icon = { Icon(Icons.Default.Home, contentDescription = "Dashboard") },
+                                    label = { Text("Giriş") },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MinimalistSurfaceElevated,
+                                        selectedIconColor = MinimalistPrimary,
+                                        selectedTextColor = MinimalistPrimary,
+                                        unselectedIconColor = MinimalistSecondary,
+                                        unselectedTextColor = MinimalistSecondary
+                                    )
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 1,
+                                    onClick = { selectedTab = 1 },
+                                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Stream Deck") },
+                                    label = { Text("Deck") },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MinimalistSurfaceElevated,
+                                        selectedIconColor = MinimalistPrimary,
+                                        selectedTextColor = MinimalistPrimary,
+                                        unselectedIconColor = MinimalistSecondary,
+                                        unselectedTextColor = MinimalistSecondary
+                                    )
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 2,
+                                    onClick = { selectedTab = 2 },
+                                    icon = { Icon(Icons.Default.Build, contentDescription = "Trackpad") },
+                                    label = { Text("Mouse") },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MinimalistSurfaceElevated,
+                                        selectedIconColor = MinimalistPrimary,
+                                        selectedTextColor = MinimalistPrimary,
+                                        unselectedIconColor = MinimalistSecondary,
+                                        unselectedTextColor = MinimalistSecondary
+                                    )
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 3,
+                                    onClick = { 
+                                        selectedTab = 3
+                                        if (isConnected && !ScreenReceiver.latestFrame.let { false }) {
+                                            ScreenReceiver.start(ipAddress)
+                                        }
+                                    },
+                                    icon = { Icon(Icons.Default.Monitor, contentDescription = "Second Screen") },
+                                    label = { Text("Ekran") },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MinimalistSurfaceElevated,
+                                        selectedIconColor = MinimalistPrimary,
+                                        selectedTextColor = MinimalistPrimary,
+                                        unselectedIconColor = MinimalistSecondary,
+                                        unselectedTextColor = MinimalistSecondary
+                                    )
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 4,
+                                    onClick = { selectedTab = 4 },
+                                    icon = { Icon(Icons.Default.Share, contentDescription = "Media") },
+                                    label = { Text("Medya") },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MinimalistSurfaceElevated,
+                                        selectedIconColor = MinimalistPrimary,
+                                        selectedTextColor = MinimalistPrimary,
+                                        unselectedIconColor = MinimalistSecondary,
+                                        unselectedTextColor = MinimalistSecondary
+                                    )
+                                )
+                                NavigationBarItem(
+                                    selected = selectedTab == 5,
+                                    onClick = { selectedTab = 5 },
+                                    icon = { Icon(Icons.Default.Menu, contentDescription = "Tools") },
+                                    label = { Text("Araçlar") },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MinimalistSurfaceElevated,
+                                        selectedIconColor = MinimalistPrimary,
+                                        selectedTextColor = MinimalistPrimary,
+                                        unselectedIconColor = MinimalistSecondary,
+                                        unselectedTextColor = MinimalistSecondary
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1087,7 +1190,12 @@ fun MainScreen(
                             }
                         },
                         onScanQrClick = { showQrScanner = true },
-                        context = context
+                        context = context,
+                        keepScreenOn = keepScreenOn,
+                        onKeepScreenOnChange = { checked ->
+                            keepScreenOn = checked
+                            prefs.edit().putBoolean("keep_screen_on", checked).apply()
+                        }
                     )
                     1 -> StreamDeckTab(
                         isConnected = isConnected,
@@ -1191,7 +1299,9 @@ fun ConnectionTab(
     isConnected: Boolean,
     onConnectClick: () -> Unit,
     onScanQrClick: () -> Unit,
-    context: Context
+    context: Context,
+    keepScreenOn: Boolean = false,
+    onKeepScreenOnChange: (Boolean) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -1215,129 +1325,193 @@ fun ConnectionTab(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Connection Badge using desaturated status colors
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(if (isConnected) com.ygt.bigpocket.theme.StatusGreenBg else com.ygt.bigpocket.theme.StatusRedBg)
-                .border(1.dp, if (isConnected) com.ygt.bigpocket.theme.StatusGreenText else com.ygt.bigpocket.theme.StatusRedText, RoundedCornerShape(4.dp))
-                .padding(vertical = 4.dp, horizontal = 12.dp)
-        ) {
-            Text(
-                text = if (isConnected) "BAĞLANTI AKTİF" else "BAĞLANTI YOK",
-                color = if (isConnected) com.ygt.bigpocket.theme.StatusGreenText else com.ygt.bigpocket.theme.StatusRedText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // IP Field and QR Scan Row
-        Row(
+        // Connection Card (Glassy & Ultra-Soft)
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MinimalistSurface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder)
         ) {
-            OutlinedTextField(
-                value = ipAddress,
-                onValueChange = onIpChange,
-                label = { Text("Bilgisayar IP Adresi") },
-                placeholder = { Text("Örn. 192.168.1.100") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = onScanQrClick,
+            Column(
                 modifier = Modifier
-                    .size(56.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "QR Kodunu Tarat",
-                    tint = MaterialTheme.colorScheme.primary
+                // Connection Status Chip
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (isConnected) com.ygt.bigpocket.theme.StatusGreenBg else com.ygt.bigpocket.theme.StatusRedBg)
+                        .border(1.dp, if (isConnected) com.ygt.bigpocket.theme.StatusGreenText.copy(alpha = 0.3f) else com.ygt.bigpocket.theme.StatusRedText.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                        .padding(vertical = 6.dp, horizontal = 16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (isConnected) com.ygt.bigpocket.theme.StatusGreenText else com.ygt.bigpocket.theme.StatusRedText)
+                        )
+                        Text(
+                            text = if (isConnected) "PC'YE BAĞLI" else "BAĞLANTI BEKLENİYOR",
+                            color = if (isConnected) com.ygt.bigpocket.theme.StatusGreenText else com.ygt.bigpocket.theme.StatusRedText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // IP Field and QR Scan Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = ipAddress,
+                        onValueChange = onIpChange,
+                        label = { Text("Bilgisayar IP Adresi") },
+                        placeholder = { Text("Örn. 192.168.1.100") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MinimalistAccent,
+                            unfocusedBorderColor = MinimalistBorder,
+                            focusedContainerColor = MinimalistBackground,
+                            unfocusedContainerColor = MinimalistBackground
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    IconButton(
+                        onClick = onScanQrClick,
+                        modifier = Modifier
+                            .size(54.dp)
+                            .background(MinimalistBackground, RoundedCornerShape(16.dp))
+                            .border(1.dp, MinimalistBorder, RoundedCornerShape(16.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "QR Kodunu Tarat",
+                            tint = MinimalistPrimary
+                        )
+                    }
+                }
+        
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Password Field
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    label = { Text("Erişim Şifresi") },
+                    placeholder = { Text("Sunucuda şifre yoksa boş bırakın") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Done,
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { onConnectClick() }),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MinimalistAccent,
+                        unfocusedBorderColor = MinimalistBorder,
+                        focusedContainerColor = MinimalistBackground,
+                        unfocusedContainerColor = MinimalistBackground
+                    )
                 )
-            }
-        }
- 
-        Spacer(modifier = Modifier.height(12.dp))
 
-        // Password Field
-        OutlinedTextField(
-            value = password,
-            onValueChange = onPasswordChange,
-            label = { Text("Erişim Şifresi") },
-            placeholder = { Text("Şifresiz (Sunucuda şifre yoksa boş bırakın)") },
-            singleLine = true,
-            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(
-                imeAction = ImeAction.Done,
-                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
-            ),
-            keyboardActions = KeyboardActions(onDone = { onConnectClick() }),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp)
-        )
+                Spacer(modifier = Modifier.height(20.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
+                // Connect Button
+                Button(
+                    onClick = onConnectClick,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isConnected) MinimalistSurfaceElevated else MinimalistPrimary,
+                        contentColor = if (isConnected) StatusRedText else MinimalistBackground
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        text = if (isConnected) "Bağlantıyı Kes" else "Bağlan",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
 
-        // Connect Button
-        Button(
-            onClick = onConnectClick,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isConnected) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                contentColor = if (isConnected) Color.White else MaterialTheme.colorScheme.background
-            ),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text(
-                text = if (isConnected) "BAĞLANTIYI KES" else "BAĞLAN",
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
-            )
-        }
-
-        if (!isConnected) {
-            Spacer(modifier = Modifier.height(8.dp))
-            val coroutineScope = rememberCoroutineScope()
-            var isSearching by remember { mutableStateOf(false) }
-            Button(
-                onClick = {
-                    isSearching = true
-                    coroutineScope.launch {
-                        val detectedIp = autoDetectPCIP()
-                        isSearching = false
-                        if (detectedIp != null) {
-                            onIpChange(detectedIp)
-                            Toast.makeText(context, "Bilgisayar bulundu: $detectedIp", Toast.LENGTH_SHORT).show()
-                            onConnectClick()
+                if (!isConnected) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val coroutineScope = rememberCoroutineScope()
+                    var isSearching by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = {
+                            isSearching = true
+                            coroutineScope.launch {
+                                val detectedIp = autoDetectPCIP()
+                                isSearching = false
+                                if (detectedIp != null) {
+                                    onIpChange(detectedIp)
+                                    Toast.makeText(context, "Bilgisayar bulundu: $detectedIp", Toast.LENGTH_SHORT).show()
+                                    onConnectClick()
+                                } else {
+                                    Toast.makeText(context, "Bilgisayar bulunamadı. Lütfen USB Tethering'in açık olduğundan emin olun.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MinimalistSurfaceElevated,
+                            contentColor = MinimalistPrimary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = !isSearching
+                    ) {
+                        if (isSearching) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = MinimalistPrimary, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Ağda PC Aranıyor...")
                         } else {
-                            Toast.makeText(context, "Bilgisayar bulunamadı. Lütfen USB Tethering'in açık olduğundan emin olun.", Toast.LENGTH_LONG).show()
+                            Icon(Icons.Default.Refresh, contentDescription = "Auto Detect", modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Ağdaki PC'yi Otomatik Bul")
                         }
                     }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                    contentColor = MaterialTheme.colorScheme.onSecondary
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                enabled = !isSearching
-            ) {
-                if (isSearching) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.onSecondary, strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Bilgisayar Aranıyor...")
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "Auto Detect", modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("USB ile Otomatik Bağlan")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Keep Screen Awake Option
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MinimalistBackground)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Ekran Asla Kararmasın", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MinimalistPrimary)
+                        Text("Kullanım esnasında telefon açık kalsın", fontSize = 11.sp, color = MinimalistSecondary)
+                    }
+                    Switch(
+                        checked = keepScreenOn,
+                        onCheckedChange = onKeepScreenOnChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MinimalistPrimary,
+                            checkedTrackColor = MinimalistSurfaceElevated
+                        )
+                    )
                 }
             }
         }
@@ -1731,66 +1905,129 @@ fun TrackpadTab(isConnected: Boolean) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedTextField(
-            value = textInput,
-            onValueChange = { newVal ->
-                if (newVal.length > 2) {
-                    val added = newVal.substring(2)
+        var rawTypedText by remember { mutableStateOf("") }
+        val speechLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val spoken = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                if (!spoken.isNullOrBlank()) {
                     SocketManager.sendControl(JSONObject().apply {
                         put("type", "keyboard_input")
-                        put("text", added)
+                        put("text", spoken)
                     })
-                } else if (newVal.length < 2) {
-                    SocketManager.sendControl(JSONObject().apply {
-                        put("type", "keyboard_key")
-                        put("key", "backspace")
-                    })
+                    Toast.makeText(context, "Söylenen yazıldı: $spoken", Toast.LENGTH_SHORT).show()
                 }
-                textInput = "  "
-            },
-            label = { Text("PC'ye Metin Yazın") },
-            placeholder = { Text("Yazmaya başlayın...") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-            keyboardOptions = KeyboardOptions(
-                autoCorrect = false,
-                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                imeAction = androidx.compose.ui.text.input.ImeAction.Done
-            )
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
+            }
+        }
+
+        // Functional Toolbar Row (Esc, Tab, Space, Backspace, Voice)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Voice Typing Button
+            IconButton(
+                onClick = {
+                    try {
+                        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "PC'ye yazmak için konuşun...")
+                        }
+                        speechLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Ses tanıma başlatılamadı", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(MinimalistSurfaceElevated, RoundedCornerShape(12.dp))
+                    .border(1.dp, MinimalistBorder, RoundedCornerShape(12.dp))
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Sesli Yaz", tint = StatusGreenText, modifier = Modifier.size(20.dp))
+            }
+
+            // Quick Hotkeys
+            listOf(
+                "ESC" to "escape",
+                "TAB" to "tab",
+                "BOŞLUK" to "space",
+                "SİL" to "backspace"
+            ).forEach { (label, key) ->
+                Button(
+                    onClick = {
+                        SocketManager.sendControl(JSONObject().apply {
+                            put("type", "keyboard_key")
+                            put("key", key)
+                        })
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MinimalistSurfaceElevated, contentColor = MinimalistPrimary),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.weight(1f).height(44.dp)
+                ) {
+                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Direct Text Send Field
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(
-                onClick = {
-                    SocketManager.sendControl(JSONObject().apply {
-                        put("type", "keyboard_key")
-                        put("key", "enter")
-                    })
-                },
+            OutlinedTextField(
+                value = rawTypedText,
+                onValueChange = { rawTypedText = it },
+                label = { Text("PC'ye Metin Gönder / Yaz") },
+                placeholder = { Text("Kelime veya cümle...") },
+                singleLine = true,
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Enter")
-            }
+                shape = RoundedCornerShape(14.dp),
+                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = {
+                    if (rawTypedText.isNotEmpty()) {
+                        SocketManager.sendControl(JSONObject().apply {
+                            put("type", "keyboard_input")
+                            put("text", rawTypedText)
+                        })
+                        rawTypedText = ""
+                    }
+                }),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MinimalistAccent,
+                    unfocusedBorderColor = MinimalistBorder,
+                    focusedContainerColor = MinimalistBackground,
+                    unfocusedContainerColor = MinimalistBackground
+                )
+            )
+
             Spacer(modifier = Modifier.width(8.dp))
+
             Button(
                 onClick = {
-                    SocketManager.sendControl(JSONObject().apply {
-                        put("type", "keyboard_key")
-                        put("key", "backspace")
-                    })
+                    if (rawTypedText.isNotEmpty()) {
+                        SocketManager.sendControl(JSONObject().apply {
+                            put("type", "keyboard_input")
+                            put("text", rawTypedText)
+                        })
+                        rawTypedText = ""
+                    } else {
+                        SocketManager.sendControl(JSONObject().apply {
+                            put("type", "keyboard_key")
+                            put("key", "enter")
+                        })
+                    }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MinimalistPrimary, contentColor = MinimalistBackground),
+                modifier = Modifier.height(54.dp)
             ) {
-                Text("Geri")
+                Text(if (rawTypedText.isNotEmpty()) "Gönder" else "Enter", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     }
@@ -2416,33 +2653,58 @@ fun ToolsTab(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (file in sharedFilesList) {
+                            val ext = file.name.substringAfterLast(".", "").lowercase()
+                            val (badgeColor, typeIcon) = when (ext) {
+                                "mp4", "mkv", "avi", "mov" -> StatusBlueText to Icons.Default.Share
+                                "mp3", "wav", "flac" -> MinimalistAccent to Icons.Default.Info
+                                "jpg", "jpeg", "png", "gif", "webp" -> StatusGreenText to Icons.Default.Refresh
+                                else -> MinimalistSecondary to Icons.Default.Menu
+                            }
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                    .padding(vertical = 8.dp, horizontal = 12.dp),
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(MinimalistSurfaceElevated)
+                                    .border(1.dp, MinimalistBorder, RoundedCornerShape(14.dp))
+                                    .padding(vertical = 10.dp, horizontal = 14.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(badgeColor.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = typeIcon,
+                                        contentDescription = ext,
+                                        tint = badgeColor,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = file.name,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MinimalistPrimary,
                                         maxLines = 1
                                     )
                                     Text(
                                         text = formatFileSize(file.size),
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                        fontSize = 11.5.sp,
+                                        color = MinimalistSecondary
                                     )
                                 }
                                 
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    // Download Button (PlayArrow serves as a trigger)
+                                    // Download Button (Real Download trigger)
                                     IconButton(
                                         onClick = {
                                             downloadFileUsingManager(context, ipAddress, password, file.name)
@@ -2450,9 +2712,9 @@ fun ToolsTab(
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.PlayArrow,
+                                            imageVector = Icons.Default.Share,
                                             contentDescription = "İndir",
-                                            tint = MaterialTheme.colorScheme.primary
+                                            tint = MinimalistPrimary
                                         )
                                     }
 
@@ -2475,17 +2737,17 @@ fun ToolsTab(
                                         Icon(
                                             imageVector = Icons.Default.Delete,
                                             contentDescription = "Sil",
-                                            tint = MaterialTheme.colorScheme.error
+                                            tint = StatusRedText
                                         )
                                     }
                                 }
                             }
-                        }
                     }
                 }
             }
         }
     }
+}
 }
 
 // ----------------- Helpers -----------------

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -78,6 +79,9 @@ var defaultConfig = Config{
 }
 
 func main() {
+	// Remove leftovers from a previous self-update (and wait for old process if restarted)
+	cleanupOldUpdate()
+
 	// Request admin permissions automatically
 	ensureAdmin()
 
@@ -108,9 +112,11 @@ func main() {
 	go startScreenStreamServer()
 	go startWebSocketServer()
 	go startClipboardPolling()
+	go startDiscovery()
 
 	// Handle HTTP Routing
 	setupHttpRoutes()
+	setupUpdateRoutes()
 
 	// Start HTTP Server in background goroutine
 	go func() {
@@ -729,6 +735,20 @@ func handleWebSocketControl(msg map[string]interface{}) {
 			vk = 0x08 // VK_BACK
 		case "space":
 			vk = 0x20 // VK_SPACE
+		case "tab":
+			vk = 0x09 // VK_TAB
+		case "escape":
+			vk = 0x1B // VK_ESCAPE
+		case "delete":
+			vk = 0x2E // VK_DELETE
+		case "up":
+			vk = 0x26 // VK_UP
+		case "down":
+			vk = 0x28 // VK_DOWN
+		case "left":
+			vk = 0x25 // VK_LEFT
+		case "right":
+			vk = 0x27 // VK_RIGHT
 		}
 		if vk != 0 {
 			keybdEvent.Call(vk, 0, 0, 0)
@@ -1023,6 +1043,15 @@ func setupHttpRoutes() {
 				"http_api":   8085,
 			},
 			"is_admin": isAdmin,
+			"hostname": func() string { h, _ := os.Hostname(); return h }(),
+			"mem_stats": func() map[string]interface{} {
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				return map[string]interface{}{
+					"alloc_mb": fmt.Sprintf("%.1f MB", float64(m.Alloc)/(1024*1024)),
+					"sys_mb":   fmt.Sprintf("%.1f MB", float64(m.Sys)/(1024*1024)),
+				}
+			}(),
 		})
 	})
 
@@ -1106,6 +1135,16 @@ func setupHttpRoutes() {
 			})
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "files": fileList})
+	})
+
+	// Open Shared Files Folder in Windows Explorer
+	http.HandleFunc("/open_shared_folder", func(w http.ResponseWriter, r *http.Request) {
+		if !checkAuth(w, r) {
+			return
+		}
+		execCommandHidden("explorer.exe", sharedDir).Start()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	})
 
 	// Download File

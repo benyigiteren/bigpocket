@@ -10,11 +10,11 @@ private val MinimalistColorScheme = darkColorScheme(
     secondary = MinimalistSecondary,
     background = MinimalistBackground,
     surface = MinimalistSurface,
-    onPrimary = MinimalistBackground, // Text on primary button (inverse)
-    onSecondary = Color.White,
+    onPrimary = MinimalistBackground,
+    onSecondary = MinimalistPrimary,
     onBackground = MinimalistPrimary,
     onSurface = MinimalistPrimary,
-    surfaceVariant = Color(0xFF1B1B1F)
+    surfaceVariant = MinimalistSurfaceElevated
 )
 
 @Composable

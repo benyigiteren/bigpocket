@@ -19,6 +19,9 @@ android/captures/
 # Desktop compiled binaries
 desktop/BigPocket.exe
 desktop/Setup.exe
+/BigPocket.exe
+*.exe~
+bigpocket-windows.zip
 
 # Local data and configuration files
 config.json
