@@ -221,14 +221,36 @@
             <!-- TAB CONTENT: Stream Deck -->
             <section class="tab-panel" id="panel-streamdeck">
                 <div class="card animate-slide-in" style="--index: 1;">
-                    <div class="card-header">
-                        <span class="meta-tag">STREAM DECK ÖZELLEŞTİRME</span>
-                        <h2>Buton Matrisi</h2>
-                        <p class="section-desc text-muted">Telefonunuz yatay konumdayken gösterilecek butonları buradan yapılandırın.</p>
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                        <div>
+                            <span class="meta-tag">STUDIO DECK V2 • DRAG & DROP & WIDGET ENGINE</span>
+                            <h2>Gelişmiş Stream Deck & Widget Tasarımcısı</h2>
+                            <p class="section-desc text-muted">Öğeleri sürükleyip bırakarak sıralayın, boyutlarını (1x1, 2x1, 1x2, 2x2) canlı büyütün, donanım monitörleri, saat ve ses kaydırıcıları ekleyin.</p>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button class="btn btn-secondary" id="btn-add-widget-quick" style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 8px 14px;">
+                                <span>➕</span> Widget / Buton Ekle
+                            </button>
+                            <button class="btn btn-primary" id="btn-save-config" style="padding: 8px 18px; font-size: 12.5px;">
+                                💾 Değişiklikleri Kaydet
+                            </button>
+                        </div>
                     </div>
 
-                    <div class="deck-settings-bar" style="display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; background: var(--bg-main); padding: 16px; border-radius: 6px; border: 1px solid var(--border-color); align-items: flex-end;">
-                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 120px;">
+                    <!-- Page Selector Bar -->
+                    <div class="deck-pages-bar" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 8px 14px; border-radius: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px;" id="deck-page-tabs">
+                            <span style="font-size: 12px; font-weight: 600; color: var(--text-muted); margin-right: 4px;">SAYFA:</span>
+                            <!-- Dynamic page pill buttons -->
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button class="btn btn-secondary" id="btn-add-deck-page" style="height: 28px; padding: 0 10px; font-size: 11px;">+ Yeni Sayfa</button>
+                        </div>
+                    </div>
+
+                    <!-- Grid Settings & Widget Palette Drawer -->
+                    <div class="deck-settings-bar" style="display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; background: var(--bg-main); padding: 14px; border-radius: 8px; border: 1px solid var(--border-color); align-items: flex-end;">
+                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 100px;">
                             <label for="deck-rows">Satır Sayısı</label>
                             <select id="deck-rows" style="width: 100%;">
                                 <option value="1">1 Satır</option>
@@ -238,7 +260,7 @@
                                 <option value="5">5 Satır</option>
                             </select>
                         </div>
-                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 120px;">
+                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 100px;">
                             <label for="deck-cols">Sütun Sayısı</label>
                             <select id="deck-cols" style="width: 100%;">
                                 <option value="2">2 Sütun</option>
@@ -250,25 +272,62 @@
                                 <option value="8">8 Sütun</option>
                             </select>
                         </div>
-                        <div class="form-group" style="margin-bottom: 0; flex: 1.5; min-width: 180px;">
-                            <label for="deck-preset">Hazır Şablon Yükle</label>
+                        <div class="form-group" style="margin-bottom: 0; flex: 1.5; min-width: 160px;">
+                            <label for="deck-preset">Hazır Şablonlar</label>
                             <select id="deck-preset" style="width: 100%;">
                                 <option value="">-- Şablon Seçin --</option>
-                                <option value="media">Medya Kontrolleri</option>
-                                <option value="obs">OBS Studio</option>
-                                <option value="windows">Windows Hızlı Araçlar</option>
-                                <option value="developer">Yazılımcı Araçları</option>
+                                <option value="pro_studio">Pro Studio (Ses Barı + Donanım + Saat + Kontroller)</option>
+                                <option value="media">Medya & Müzik Masası</option>
+                                <option value="hardware">Donanım & Sistem İzleme</option>
+                                <option value="obs">OBS & Yayın Kontrolü</option>
+                                <option value="windows">Windows Üretkenlik</option>
                                 <option value="gaming">Oyun & Discord</option>
                             </select>
                         </div>
-                        <button class="btn btn-secondary" id="btn-apply-grid-settings" style="height: 38px;">Düzeni Uygula</button>
+                        <button class="btn btn-secondary" id="btn-apply-grid-settings" style="height: 38px;">Düzeni Yenile</button>
                     </div>
 
-                    <div class="buttons-grid" id="deck-buttons-list">
-                        <!-- Populated by JS -->
-                    </div>
-                    <div class="card-actions">
-                        <button class="btn btn-primary" id="btn-save-config">Değişiklikleri Kaydet</button>
+                    <!-- Live Visual Interactive Deck Canvas -->
+                    <div class="deck-canvas-container" style="background: #09090C; border: 1px solid #1F1F27; border-radius: 12px; padding: 18px; box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);">
+                        <div class="deck-canvas-hint" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); margin-bottom: 12px; font-family: var(--font-mono);">
+                            <span>💡 İPUCU: Kartları sürükleyip bırakarak yerini değiştirin • Boyut haplarına tıklayarak genişletin</span>
+                            <span id="deck-canvas-dimensions">Matris: 2x4</span>
+                        </div>
+                        <div class="buttons-grid" id="deck-buttons-list">
+                            <!-- Populated with interactive draggable and resizable tiles -->
+                        </div>
+
+                        <!-- Elgato Stream Deck+ Rotary Knobs Section -->
+                        <div class="deck-rotary-strip">
+                            <div class="deck-rotary-unit" id="rotary-volume-control">
+                                <span class="deck-rotary-label">Ana Ses</span>
+                                <div class="deck-rotary-knob" title="Çevirerek Sesi Ayarlayın">
+                                    <div class="deck-rotary-notch"></div>
+                                </div>
+                                <span class="deck-rotary-val" id="rotary-volume-val">70%</span>
+                            </div>
+                            <div class="deck-rotary-unit" id="rotary-bright-control">
+                                <span class="deck-rotary-label">Parlaklık</span>
+                                <div class="deck-rotary-knob" title="Çevirerek Parlaklığı Ayarlayın">
+                                    <div class="deck-rotary-notch" style="background: #FBBF24; box-shadow: 0 0 6px #FBBF24;"></div>
+                                </div>
+                                <span class="deck-rotary-val" id="rotary-bright-val" style="color: #FBBF24;">85%</span>
+                            </div>
+                            <div class="deck-rotary-unit" id="rotary-mic-control">
+                                <span class="deck-rotary-label">Mikrofon</span>
+                                <div class="deck-rotary-knob" title="Mikrofon Kazancı">
+                                    <div class="deck-rotary-notch" style="background: #10B981; box-shadow: 0 0 6px #10B981;"></div>
+                                </div>
+                                <span class="deck-rotary-val" id="rotary-mic-val" style="color: #10B981;">100%</span>
+                            </div>
+                            <div class="deck-rotary-unit" id="rotary-cpu-control">
+                                <span class="deck-rotary-label">Sistem Yükü</span>
+                                <div class="deck-rotary-knob" style="cursor: default;">
+                                    <div class="deck-rotary-notch" style="background: #38BDF8; box-shadow: 0 0 6px #38BDF8;"></div>
+                                </div>
+                                <span class="deck-rotary-val" id="rotary-cpu-val" style="color: #38BDF8;">Canlı</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -284,14 +343,33 @@
                             <input type="text" id="edit-label" placeholder="Örn. Mikrofonu Kapat">
                         </div>
                         <div class="form-group">
-                            <label for="edit-type">Eylem Türü</label>
+                            <label for="edit-type">Eylem & Widget Türü</label>
                             <select id="edit-type">
-                                <option value="hotkey">Klavye Kısayolu (Hotkey)</option>
-                                <option value="command">Terminal Komutu (CMD)</option>
-                                <option value="toggle">Aç/Kapa Anahtarı (Toggle - Canlı LED)</option>
-                                <option value="volume_slider">Ses Seviyesi Kontrolü (Volume)</option>
-                                <option value="live_info">Canlı Sistem Bilgisi (CPU / RAM)</option>
+                                <option value="hotkey">⌨️ Klavye Kısayolu (Hotkey)</option>
+                                <option value="command">⚡ Terminal / Uygulama (CMD / EXE)</option>
+                                <option value="toggle">💡 Aç/Kapa Anahtarı (Canlı LED Toggle)</option>
+                                <option value="volume_slider">🎚️ Ses Seviyesi Kapsülü (Apple Audio Capsule)</option>
+                                <option value="brightness_slider">☀️ Ekran Parlaklığı Kapsülü (Apple Display Slider)</option>
+                                <option value="live_info">📈 Canlı Donanım Monitörü (CPU / RAM / Isı)</option>
+                                <option value="clock_widget">🕒 Canlı Flipping / OLED Saat & Takvim</option>
                             </select>
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 12px;">
+                            <div style="flex: 1;">
+                                <label for="edit-colspan">Genişlik (Sütun)</label>
+                                <select id="edit-colspan">
+                                    <option value="1">1 Hücre (1x)</option>
+                                    <option value="2">2 Hücre Geniş (2x)</option>
+                                    <option value="3">3 Hücre Ultra Geniş (3x)</option>
+                                </select>
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="edit-rowspan">Yükseklik (Satır)</label>
+                                <select id="edit-rowspan">
+                                    <option value="1">1 Hücre (1x)</option>
+                                    <option value="2">2 Hücre Yüksek (2x)</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="edit-page">Sayfa Seçimi</label>
@@ -302,7 +380,7 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="edit-value" id="edit-value-label">Kısayol Kombinasyonu</label>
+                            <label for="edit-value" id="edit-value-label">Kısayol Kombinasyonu / Değer</label>
                             <input type="text" id="edit-value" placeholder="ctrl+alt+t veya calc.exe">
                         </div>
                         <div class="form-group" id="installed-apps-group" style="display: none;">
@@ -314,19 +392,29 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="edit-icon">Görsel / İkon Tipi</label>
-                            <select id="edit-icon-select">
-                                <option value="mic">Mikrofon</option>
-                                <option value="volup">Ses Arttır</option>
-                                <option value="voldown">Ses Azalt</option>
-                                <option value="play">Oynat / Durdur</option>
-                                <option value="calc">Hesap Makinesi</option>
-                                <option value="web">İnternet Tarayıcısı</option>
-                                <option value="lock">Kilit Ekranı</option>
-                                <option value="task">Görev Yöneticisi</option>
-                                <option value="custom">Özel İkon Simgesi</option>
-                            </select>
+                        <div class="form-group" style="display: flex; gap: 12px;">
+                            <div style="flex: 2;">
+                                <label for="edit-icon-select">Görsel / İkon Tipi</label>
+                                <select id="edit-icon-select">
+                                    <option value="mic">🎤 Mikrofon</option>
+                                    <option value="volup">🔊 Ses Aç</option>
+                                    <option value="voldown">🔉 Ses Kıs</option>
+                                    <option value="volume">🎚️ Ses Seviyesi</option>
+                                    <option value="play">⏯️ Oynat / Durdur</option>
+                                    <option value="calc">🧮 Hesap Makinesi</option>
+                                    <option value="web">🌐 Tarayıcı</option>
+                                    <option value="lock">🔒 Ekranı Kilitle</option>
+                                    <option value="task">📊 Görev Yöneticisi</option>
+                                    <option value="cpu">💻 CPU / İşlemci</option>
+                                    <option value="ram">🧠 RAM / Bellek</option>
+                                    <option value="clock">🕒 Saat & Zaman</option>
+                                    <option value="custom">⭐ Özel İkon</option>
+                                </select>
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="edit-color">Vurgu Rengi</label>
+                                <input type="color" id="edit-color" value="#818CF8" style="height: 38px; width: 100%; padding: 2px; border-radius: 6px; background: transparent; cursor: pointer; border: 1px solid var(--border-color);">
+                            </div>
                         </div>
                         <div class="form-group" id="custom-icon-group" style="display: none;">
                             <label for="edit-icon-custom">Özel İkon SVG Kodu veya URL'si</label>
@@ -340,9 +428,12 @@
                                 <span id="icon-upload-status" class="mono-text" style="align-self: center; font-size: 11px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 120px;">Seçilmedi</span>
                             </div>
                         </div>
-                        <div class="modal-actions">
-                            <button class="btn btn-secondary" id="btn-close-modal">Vazgeç</button>
-                            <button class="btn btn-primary" id="btn-apply-edit">Uygula</button>
+                        <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px;">
+                            <button class="btn btn-secondary" id="btn-delete-button" style="color: #EF4444; border-color: rgba(239,68,68,0.3);">🗑️ Sil</button>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-secondary" id="btn-close-modal">Vazgeç</button>
+                                <button class="btn btn-primary" id="btn-apply-edit">Uygula</button>
+                            </div>
                         </div>
                     </div>
                 </div>

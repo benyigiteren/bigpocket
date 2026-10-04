@@ -3,6 +3,32 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
+## v1.4
+
+### 🍏 Apple Control Center Tarzı Kapsül Kaydırıcılar (Ses & Parlaklık)
+- **Akıcı Dokunmatik Kapsül (Pill Slider):** Eski basit butonlar yerine iOS Denetim Merkezi'ndeki gibi akıcı, dikey/yatay parmak sürükleme ve tıklamayla %0-%100 seviyesini anında ayarlayan Apple kapsül kaydırıcıları entegre edildi.
+- **Akıllı Kontrast & Dinamik İkonlar:** Doluluk arttıkça metin ve simgeler arka plana göre otomatik olarak açık/koyu renk kontrastına geçer. Ses düzeyi simgesi sessiz, düşük ve yüksek seviyelere göre dinamik güncellenir; parlaklık için güneş simgesi ve sıcak amber ışıltısı eklendi.
+- **Haptik Titreşim:** Sürükleme esnasında dokunsal haptik titreşim desteği sunuldu.
+
+### 🎛️ Elgato Stream Deck+ Döner Kadran Konsolu (Rotary Dials)
+- **Fiziksel 4'lü Kadran Çubuğu:** Stream Deck'in altına Elgato Stream Deck+ donanımından esinlenilen döner kontrol paneli eklendi.
+- **Ana Ses Kadranı:** Dairesel LED gösterge halkası, tek dokunuşla sessize alma (`Mute`) ve çevirerek hassas ses ayarı.
+- **Ekran Parlaklığı Kadranı:** Monitör parlaklığını çevirerek hassas ayarlama (%0 - %100).
+- **Mikrofon Kadranı:** Canlı mikrofon durumu ve tek dokunuşla kapatma/açma.
+- **Sistem Yükü Kadranı:** Anlık işlemci sıcaklığı (°C) ve kullanım oranı göstergesi.
+
+### 🖲️ Elgato Stream Deck Donanım Tuş Kapağı (Keycap)
+- **3D Fiziksel Eğim & LCD Çerçevesi:** Gerçek donanım tuş eğimi (`#20222D` - `#101117`), üst ışık yansıması ve gömülü iç ekran (`#090A0E`).
+- **Dokunsal Basış Hissi:** Tuşa basıldığında fiziksel tuş hissi veren hafif küçülme animasyonu (`0.94x scale`).
+- **Donanım Durum LED'i:** Aç/Kapa (toggle) tuşlarının köşesinde zümrüt yeşili neon donanım LED ışığı.
+
+### ⏱️ OLED / Flip Dijital Saat & Canlı Telemetri
+- **Dijital Saat Widget'ı:** Canlı saniyeli split-flap saat, nabız atan `:` ayracı ve Türkçe gün/tarih rozeti.
+- **Donanım Telemetri Kartı:** CPU % + Sıcaklık (°C) ve RAM GB kullanım çubuğu.
+
+### 🔆 Yerel Monitör Parlaklığı Entegrasyonu
+- **WMI Parlaklık Kontrolü:** Windows monitör parlaklığı WMI API ile doğrudan PC üzerinden ayarlanır ve telefonla senkronize çalışır.
+
 ## v1.3
 
 ### ⚡ USB Sıfır Gecikme Modu (1ms ADB Köprüsü)

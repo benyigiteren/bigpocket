@@ -30,20 +30,31 @@ func main() {
 	// Request admin permissions automatically
 	ensureAdmin()
 
-	// Determine if running as uninstaller
+	// Determine if running as uninstaller or silent install
 	exePath, _ := os.Executable()
 	exeName := strings.ToLower(filepath.Base(exePath))
-	isUninstall := exeName == "uninstall.exe" || (len(os.Args) > 1 && (os.Args[1] == "--uninstall" || os.Args[1] == "/uninstall"))
+	isUninstall := exeName == "uninstall.exe"
+	isSilent := false
+
+	for _, arg := range os.Args[1:] {
+		low := strings.ToLower(arg)
+		if low == "--uninstall" || low == "/uninstall" {
+			isUninstall = true
+		}
+		if low == "--silent" || low == "/silent" || low == "-s" || low == "/s" {
+			isSilent = true
+		}
+	}
 
 	if isUninstall {
 		runUninstaller()
 	} else {
-		runInstaller()
+		runInstaller(isSilent)
 	}
 }
 
 // ----------------- Installer -----------------
-func runInstaller() {
+func runInstaller(silent bool) {
 	// Kill any running BigPocket.exe processes to release file locks
 	execCommandHidden("taskkill", "/f", "/t", "/im", "BigPocket.exe").Run()
 	time.Sleep(2 * time.Second)
@@ -94,8 +105,10 @@ func runInstaller() {
 	cmd.Dir = installPath
 	cmd.Start()
 
-	// 7. Inform user
-	MessageBox("BigPocket Kurulumu", "BigPocket başarıyla kuruldu ve başlatıldı!\nMasaüstü ve Başlat menüsü kısayolları oluşturuldu.", 0x40) // MB_ICONINFORMATION
+	// 7. Inform user (if not silent)
+	if !silent {
+		MessageBox("BigPocket Kurulumu", "BigPocket başarıyla kuruldu ve başlatıldı!\nMasaüstü ve Başlat menüsü kısayolları oluşturuldu.", 0x40) // MB_ICONINFORMATION
+	}
 }
 
 // ----------------- Uninstaller -----------------

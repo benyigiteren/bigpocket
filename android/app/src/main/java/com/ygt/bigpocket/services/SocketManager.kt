@@ -23,7 +23,9 @@ object SocketManager {
     var buttonStateListener: ((Int, Boolean, Int) -> Unit)? = null
     var pageSwitchedListener: ((Int) -> Unit)? = null
     var volumeChangedListener: ((String, Float) -> Unit)? = null
+    var brightnessChangedListener: ((Int) -> Unit)? = null
     var systemStatsListener: ((Int, Int) -> Unit)? = null
+    var detailedStatsListener: ((Int, Int, Int, Double, Double) -> Unit)? = null
     var isConnected = false
         private set
 
@@ -92,10 +94,17 @@ object SocketManager {
                         val action = json.optString("action")
                         val level = json.optDouble("level", 50.0).toFloat()
                         volumeChangedListener?.invoke(action, level)
+                    } else if (type == "brightness_changed") {
+                        val level = json.optInt("level", 80)
+                        brightnessChangedListener?.invoke(level)
                     } else if (type == "system_stats") {
                         val cpu = json.optInt("cpu")
                         val ram = json.optInt("ram")
+                        val temp = json.optInt("cpu_temp", 45)
+                        val ramUsed = json.optDouble("ram_used_gb", 0.0)
+                        val ramTotal = json.optDouble("ram_total_gb", 0.0)
                         systemStatsListener?.invoke(cpu, ram)
+                        detailedStatsListener?.invoke(cpu, ram, temp, ramUsed, ramTotal)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing WS message", e)

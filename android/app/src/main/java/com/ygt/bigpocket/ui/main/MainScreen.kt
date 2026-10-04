@@ -47,6 +47,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.draw.scale
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -98,7 +105,9 @@ data class StreamDeckButtonInfo(
     val icon: String,
     val page: Int = 0,
     val state: Boolean = false,
-    val color: String = ""
+    val color: String = "",
+    val rowSpan: Int = 1,
+    val colSpan: Int = 1
 )
 
 data class StreamDeckPageInfo(
@@ -199,7 +208,9 @@ private fun fetchStreamDeckConfig(
                             icon = item.optString("icon", ""),
                             page = item.optInt("page", 0),
                             state = item.optBoolean("state", false),
-                            color = item.optString("color", "")
+                            color = item.optString("color", ""),
+                            rowSpan = item.optInt("row_span", 1),
+                            colSpan = item.optInt("col_span", 1)
                         ))
                     }
                     onSuccess(list, rows, cols, pagesList, activePage)
@@ -252,6 +263,8 @@ private fun saveStreamDeckConfig(
             bObj.put("page", b.page)
             bObj.put("state", b.state)
             bObj.put("color", b.color)
+            bObj.put("row_span", b.rowSpan)
+            bObj.put("col_span", b.colSpan)
             buttonsArray.put(bObj)
         }
         configObj.put("stream_deck_buttons", buttonsArray)
@@ -484,6 +497,10 @@ fun MainScreen(
     var liveCpu by remember { mutableIntStateOf(0) }
     var liveRam by remember { mutableIntStateOf(0) }
     var currentMasterVolume by remember { mutableFloatStateOf(50f) }
+    var currentBrightness by remember { mutableIntStateOf(80) }
+    var liveCpuTemp by remember { mutableIntStateOf(45) }
+    var liveRamUsedGb by remember { mutableDoubleStateOf(0.0) }
+    var liveRamTotalGb by remember { mutableDoubleStateOf(0.0) }
 
     // Camera FPS & Quality preferences
     var cameraFps by remember { mutableIntStateOf(prefs.getInt("camera_fps", 30)) }
@@ -635,10 +652,26 @@ fun MainScreen(
             }
         }
 
+        SocketManager.brightnessChangedListener = { level ->
+            coroutineScope.launch(Dispatchers.Main) {
+                currentBrightness = level
+            }
+        }
+
         SocketManager.systemStatsListener = { cpu, ram ->
             coroutineScope.launch(Dispatchers.Main) {
                 liveCpu = cpu
                 liveRam = ram
+            }
+        }
+
+        SocketManager.detailedStatsListener = { cpu, ram, temp, ramUsed, ramTotal ->
+            coroutineScope.launch(Dispatchers.Main) {
+                liveCpu = cpu
+                liveRam = ram
+                liveCpuTemp = temp
+                liveRamUsedGb = ramUsed
+                liveRamTotalGb = ramTotal
             }
         }
         
@@ -649,7 +682,9 @@ fun MainScreen(
             SocketManager.buttonStateListener = null
             SocketManager.pageSwitchedListener = null
             SocketManager.volumeChangedListener = null
+            SocketManager.brightnessChangedListener = null
             SocketManager.systemStatsListener = null
+            SocketManager.detailedStatsListener = null
         }
     }
 
@@ -892,32 +927,46 @@ fun MainScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        Text("Eylem Türü", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Eylem / Widget Türü", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Button(
-                                onClick = { editType = "hotkey" },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (editType == "hotkey") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = if (editType == "hotkey") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Kısayol")
-                            }
-                            Button(
-                                onClick = { editType = "command" },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (editType == "command") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = if (editType == "command") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Uygulama/Komut")
+                            val types = listOf(
+                                "hotkey" to "Kısayol",
+                                "command" to "Uygulama",
+                                "toggle" to "Aç/Kapa (LED)",
+                                "volume_slider" to "Ses Barı",
+                                "brightness_slider" to "Parlaklık",
+                                "clock_widget" to "Dijital Saat",
+                                "live_info" to "Donanım (CPU/RAM)"
+                            )
+                            for ((typeKey, typeLabel) in types) {
+                                val isSelected = editType == typeKey
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                        .border(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            editType = typeKey
+                                            if (typeKey == "volume_slider" && editLabel.isEmpty()) editLabel = "Ana Ses"
+                                            if (typeKey == "brightness_slider" && editLabel.isEmpty()) editLabel = "Parlaklık"
+                                            if (typeKey == "clock_widget" && editLabel.isEmpty()) editLabel = "Saat"
+                                            if (typeKey == "live_info" && editLabel.isEmpty()) editLabel = "CPU / RAM"
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = typeLabel,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
 
@@ -1159,12 +1208,17 @@ fun MainScreen(
                         onClick = {
                             val updatedButtons = streamDeckButtons.map {
                                 if (it.id == currentBtn.id) {
-                                    StreamDeckButtonInfo(currentBtn.id, editLabel, editType, editValue, editIcon)
+                                    currentBtn.copy(
+                                        label = editLabel,
+                                        type = editType,
+                                        value = editValue,
+                                        icon = editIcon
+                                    )
                                 } else {
                                     it
                                 }
                             }
-                            saveStreamDeckConfig(ipAddress, password, updatedButtons, streamDeckRows, streamDeckCols) {
+                            saveStreamDeckConfig(ipAddress, password, updatedButtons, streamDeckRows, streamDeckCols, activeDeckPage, streamDeckPages) {
                                 coroutineScope.launch(Dispatchers.Main) {
                                     Toast.makeText(context, "Buton başarıyla güncellendi!", Toast.LENGTH_SHORT).show()
                                     streamDeckButtons = updatedButtons
@@ -1362,6 +1416,17 @@ fun MainScreen(
                                 put("level", lvl.toDouble())
                             })
                         },
+                        brightness = currentBrightness,
+                        onBrightnessChange = { lvl ->
+                            currentBrightness = lvl
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "set_brightness")
+                                put("level", lvl)
+                            })
+                        },
+                        liveCpuTemp = liveCpuTemp,
+                        liveRamUsedGb = liveRamUsedGb,
+                        liveRamTotalGb = liveRamTotalGb,
                         ipAddress = ipAddress,
                         password = password,
                         onButtonLongClick = { btn ->
@@ -1770,6 +1835,7 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
         "voldown", "volume_down" -> Icons.Default.VolumeDown
         "volume_mute", "mute", "sound_mute" -> Icons.Default.VolumeMute
         "volume", "master_volume" -> Icons.Default.VolumeUp
+        "bright", "brightness", "sun", "light" -> Icons.Default.LightMode
         "play", "playpause" -> Icons.Default.PlayArrow
         "skip", "nexttrack" -> Icons.Default.SkipNext
         "prev", "prevtrack" -> Icons.Default.SkipPrevious
@@ -1795,6 +1861,744 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
     }
 }
 
+/**
+ * Apple Control Center style capsule pill slider.
+ * Supports smooth vertical drag gestures, authentic frosted glass fill, dynamic icon and contrast text.
+ */
+@Composable
+fun AppleCapsuleSlider(
+    type: String, // "volume" or "brightness"
+    value: Float, // 0..100
+    label: String,
+    accentColor: Color,
+    onValueChange: (Float) -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    val isVolume = type == "volume"
+    val isBrightness = type == "brightness"
+    val clampedValue = value.coerceIn(0f, 100f)
+    val fillFraction = clampedValue / 100f
+
+    var isDragging by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF14151E))
+            .border(
+                1.5.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF383A4E),
+                        Color(0xFF1F202B)
+                    )
+                ),
+                RoundedCornerShape(22.dp)
+            )
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = {
+                        onLongClick?.invoke()
+                    },
+                    onTap = { offset ->
+                        val h = size.height.toFloat()
+                        if (h > 0f) {
+                            val newFraction = (1f - (offset.y / h)).coerceIn(0f, 1f)
+                            val newLvl = (newFraction * 100f)
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onValueChange(newLvl)
+                        }
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { isDragging = true },
+                    onDragEnd = { isDragging = false },
+                    onDragCancel = { isDragging = false },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val h = size.height.toFloat()
+                        if (h > 0f) {
+                            val newFraction = (1f - (change.position.y / h)).coerceIn(0f, 1f)
+                            val newLvl = (newFraction * 100f)
+                            if (kotlin.math.abs(newLvl - clampedValue) >= 2f) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            onValueChange(newLvl)
+                        }
+                    }
+                )
+            }
+    ) {
+        val maxHeightPx = constraints.maxHeight.toFloat()
+        val fillHeight = maxHeightPx * fillFraction
+
+        // Track Background subtle frosted inner gradient
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF1A1C27),
+                            Color(0xFF101118)
+                        )
+                    )
+                )
+        )
+
+        // Apple Fluid Capsule Fill (From Bottom to Top)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(with(androidx.compose.ui.platform.LocalDensity.current) { fillHeight.toDp() })
+                .background(
+                    if (isBrightness) {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0xFFFFFBEB),
+                                Color(0xFFFDE68A),
+                                Color(0xFFF59E0B)
+                            )
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0xFFFFFFFF),
+                                Color(0xFFF1F5F9),
+                                Color(0xFFCBD5E1)
+                            )
+                        )
+                    }
+                )
+        )
+
+        // Layered UI: Top Percentage, Center/Bottom Icon & Label
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 10.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Live Percentage Readout
+            val textInvert = fillFraction > 0.78f
+            Text(
+                text = "${clampedValue.toInt()}%",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontFamily = FontFamily.Monospace,
+                color = if (textInvert) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+            )
+
+            // Dynamic Apple Icon
+            val iconInvert = fillFraction > 0.35f
+            val iconVector = when {
+                isBrightness -> Icons.Default.LightMode
+                clampedValue == 0f -> Icons.Default.VolumeMute
+                clampedValue < 50f -> Icons.Default.VolumeDown
+                else -> Icons.Default.VolumeUp
+            }
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = iconVector,
+                    contentDescription = label,
+                    tint = if (iconInvert) Color(0xFF0F172A) else Color(0xFFF8FAFC),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = label.uppercase(),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (iconInvert) Color(0xFF1E293B) else Color(0xFF94A3B8),
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Split-flap / OLED Digital Clock Tile
+ */
+@Composable
+fun StreamDeckClockTile(
+    label: String,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val timeFormat = remember { java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()) }
+    val dateFormat = remember { java.text.SimpleDateFormat("EEE • d MMM", java.util.Locale("tr")) }
+    var currentTimeStr by remember { mutableStateOf(timeFormat.format(java.util.Date())) }
+    var currentDateStr by remember { mutableStateOf(dateFormat.format(java.util.Date()).uppercase()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            val now = java.util.Date()
+            currentTimeStr = timeFormat.format(now)
+            currentDateStr = dateFormat.format(now).uppercase()
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = currentTimeStr,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = accentColor,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = currentDateStr,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF94A3B8),
+            maxLines = 1
+        )
+    }
+}
+
+/**
+ * Live hardware telemetry gauge (CPU load, temperature, RAM GB)
+ */
+@Composable
+fun StreamDeckTelemetryTile(
+    label: String,
+    metricType: String,
+    liveCpu: Int,
+    liveRam: Int,
+    liveCpuTemp: Int,
+    liveRamUsedGb: Double,
+    liveRamTotalGb: Double,
+    modifier: Modifier = Modifier
+) {
+    val isCpu = metricType.contains("cpu")
+    val percent = if (isCpu) liveCpu else liveRam
+    val metricColor = when {
+        percent > 80 -> Color(0xFFEF4444)
+        percent > 50 -> Color(0xFFF59E0B)
+        else -> Color(0xFF10B981)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = if (isCpu) Icons.Default.Memory else Icons.Default.Storage,
+                contentDescription = label,
+                tint = metricColor,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = if (isCpu) "%$liveCpu" else "%$liveRam",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = metricColor,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = if (isCpu) "$liveCpuTemp°C Telemetri" else String.format("%.1f/%.1f GB", liveRamUsedGb, liveRamTotalGb),
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF94A3B8),
+            maxLines = 1
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        // Mini Load Progress Bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0xFF1E202B))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction = (percent / 100f).coerceIn(0f, 1f))
+                    .background(metricColor)
+            )
+        }
+    }
+}
+
+/**
+ * Elgato Stream Deck Physical Keycap Tile Composable.
+ * Beveled hardware casing, recessed LCD screen, status LED, tactile press animation.
+ */
+@Composable
+fun ElgatoKeycapTile(
+    button: StreamDeckButtonInfo,
+    masterVolume: Float,
+    onVolumeChange: (Float) -> Unit,
+    brightness: Int,
+    onBrightnessChange: (Int) -> Unit,
+    liveCpu: Int,
+    liveRam: Int,
+    liveCpuTemp: Int,
+    liveRamUsedGb: Double,
+    liveRamTotalGb: Double,
+    ipAddress: String,
+    password: String,
+    onPress: () -> Unit,
+    onLongPress: () -> Unit,
+    isLandscape: Boolean,
+    rows: Int,
+    modifier: Modifier = Modifier
+) {
+    var isPressed by remember { mutableStateOf(false) }
+    val scaleAnim by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        label = "keycapScale"
+    )
+
+    val isVolume = button.type == "volume_slider"
+    val isBrightness = button.type == "brightness_slider"
+    val isClock = button.type == "clock_widget"
+    val isLive = button.type == "live_info"
+    val isToggle = button.type == "toggle"
+
+    val accentColor = remember(button.color) {
+        try {
+            if (button.color.startsWith("#") && button.color.length >= 7) {
+                Color(android.graphics.Color.parseColor(button.color))
+            } else {
+                Color(0xFF818CF8)
+            }
+        } catch (_: Exception) {
+            Color(0xFF818CF8)
+        }
+    }
+
+    // Outer Physical Keycap Housing (Bevel + Depth)
+    Box(
+        modifier = modifier
+            .scale(scaleAnim)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF20222D),
+                        Color(0xFF101117)
+                    )
+                )
+            )
+            .border(
+                1.2.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF3E4156),
+                        Color(0xFF1A1B24)
+                    )
+                ),
+                RoundedCornerShape(16.dp)
+            )
+            .then(
+                if (!isVolume && !isBrightness) {
+                    Modifier.pointerInput(button.id) {
+                        detectTapGestures(
+                            onPress = {
+                                isPressed = true
+                                tryAwaitRelease()
+                                isPressed = false
+                            },
+                            onTap = { onPress() },
+                            onLongPress = { onLongPress() }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .padding(4.dp)
+    ) {
+        // Inner Recessed Display / Action Area
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF090A0E))
+                .border(1.dp, Color(0xFF1B1D27), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                isVolume -> {
+                    AppleCapsuleSlider(
+                        type = "volume",
+                        value = masterVolume,
+                        label = if (button.label.isNotEmpty()) button.label else "Ses",
+                        accentColor = accentColor,
+                        onValueChange = onVolumeChange,
+                        onLongClick = onLongPress
+                    )
+                }
+                isBrightness -> {
+                    AppleCapsuleSlider(
+                        type = "brightness",
+                        value = brightness.toFloat(),
+                        label = if (button.label.isNotEmpty()) button.label else "Parlaklık",
+                        accentColor = Color(0xFFFBBF24),
+                        onValueChange = { onBrightnessChange(it.toInt()) },
+                        onLongClick = onLongPress
+                    )
+                }
+                isClock -> {
+                    StreamDeckClockTile(
+                        label = button.label,
+                        accentColor = accentColor
+                    )
+                }
+                isLive -> {
+                    StreamDeckTelemetryTile(
+                        label = button.label,
+                        metricType = button.value,
+                        liveCpu = liveCpu,
+                        liveRam = liveRam,
+                        liveCpuTemp = liveCpuTemp,
+                        liveRamUsedGb = liveRamUsedGb,
+                        liveRamTotalGb = liveRamTotalGb
+                    )
+                }
+                else -> {
+                    // Standard Hotkey, Command, or Hardware Toggle
+                    val iconSize = if (isLandscape) {
+                        when (rows) {
+                            1 -> 36.dp
+                            2 -> 26.dp
+                            else -> 20.dp
+                        }
+                    } else 28.dp
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        if (button.icon.startsWith("custom:") && button.icon.length > 7) {
+                            val iconPath = button.icon.substring(7)
+                            val imageUrl = "http://$ipAddress:8085/$iconPath?password=${Uri.encode(password)}"
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = button.label,
+                                modifier = Modifier
+                                    .size(iconSize)
+                                    .clip(RoundedCornerShape(6.dp))
+                            )
+                        } else {
+                            Icon(
+                                imageVector = getVectorIcon(button.icon),
+                                contentDescription = button.label,
+                                tint = when {
+                                    isToggle && button.state -> Color(0xFF10B981)
+                                    isToggle -> Color(0xFFEF4444)
+                                    else -> accentColor
+                                },
+                                modifier = Modifier.size(iconSize)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = button.label,
+                            fontSize = if (isLandscape) 11.sp else 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFF1F5F9),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                        if (isToggle) {
+                            Spacer(modifier = Modifier.height(1.dp))
+                            Text(
+                                text = if (button.state) "AÇIK" else "KAPALI",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (button.state) Color(0xFF10B981) else Color(0xFF94A3B8)
+                            )
+                        }
+                    }
+
+                    // Physical LED Status Dot for Toggle Buttons
+                    if (isToggle) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                                .size(7.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (button.state) Color(0xFF10B981) else Color(0xFF7F1D1D))
+                                .border(
+                                    1.dp,
+                                    if (button.state) Color(0xFF34D399) else Color(0xFF991B1B),
+                                    RoundedCornerShape(4.dp)
+                                )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Elgato Stream Deck+ style rotary knob / encoder module
+ */
+@Composable
+fun StreamDeckRotaryDial(
+    label: String,
+    value: Float, // 0..100
+    displayValue: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    activeColor: Color,
+    onValueChange: (Float) -> Unit,
+    onTap: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    var isDragging by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Rotary Knob Circle
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(27.dp))
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            Color(0xFF262837),
+                            Color(0xFF12131C)
+                        )
+                    )
+                )
+                .border(
+                    1.5.dp,
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF3E415A),
+                            Color(0xFF181924)
+                        )
+                    ),
+                    RoundedCornerShape(27.dp)
+                )
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onTap?.invoke()
+                        }
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val delta = (dragAmount.x - dragAmount.y) * 0.4f
+                            val newLvl = (value + delta).coerceIn(0f, 100f)
+                            if (kotlin.math.abs(newLvl - value) >= 2f) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            onValueChange(newLvl)
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // Dial perimeter indicator arc
+            Canvas(modifier = Modifier.fillMaxSize().padding(4.dp)) {
+                val sweep = (value / 100f).coerceIn(0f, 1f) * 270f
+                // Track arc
+                drawArc(
+                    color = Color(0xFF242636),
+                    startAngle = 135f,
+                    sweepAngle = 270f,
+                    useCenter = false,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+                // Active arc
+                drawArc(
+                    color = activeColor,
+                    startAngle = 135f,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+
+            // Center icon
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = activeColor,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Value text
+        Text(
+            text = displayValue,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color(0xFFF1F5F9),
+            fontFamily = FontFamily.Monospace
+        )
+
+        // Label
+        Text(
+            text = label.uppercase(),
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF94A3B8),
+            letterSpacing = 0.5.sp,
+            maxLines = 1
+        )
+    }
+}
+
+/**
+ * Elgato Stream Deck+ tactile rotary dials console bar.
+ * Provides fine-tuning knobs for Master Volume, Screen Brightness, Mic Mute, and CPU Load.
+ */
+@Composable
+fun StreamDeckRotaryBar(
+    masterVolume: Float,
+    onVolumeChange: (Float) -> Unit,
+    brightness: Int,
+    onBrightnessChange: (Int) -> Unit,
+    liveCpu: Int,
+    liveCpuTemp: Int,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0F1017))
+            .border(
+                1.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF2D3043),
+                        Color(0xFF14151E)
+                    )
+                ),
+                RoundedCornerShape(16.dp)
+            )
+            .padding(vertical = 8.dp, horizontal = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Dial 1: Master Volume
+            StreamDeckRotaryDial(
+                label = "Ana Ses",
+                value = masterVolume,
+                displayValue = "${masterVolume.toInt()}%",
+                icon = if (masterVolume == 0f) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
+                activeColor = Color(0xFF818CF8),
+                onValueChange = onVolumeChange,
+                onTap = {
+                    val target = if (masterVolume > 0f) 0f else 50f
+                    onVolumeChange(target)
+                },
+                modifier = Modifier.weight(1f)
+            )
+
+            // Dial 2: Monitor Brightness
+            StreamDeckRotaryDial(
+                label = "Parlaklık",
+                value = brightness.toFloat(),
+                displayValue = "$brightness%",
+                icon = Icons.Default.LightMode,
+                activeColor = Color(0xFFFBBF24),
+                onValueChange = { onBrightnessChange(it.toInt()) },
+                onTap = {
+                    val target = if (brightness > 50) 20 else 80
+                    onBrightnessChange(target)
+                },
+                modifier = Modifier.weight(1f)
+            )
+
+            // Dial 3: Mic Control
+            var micMuted by remember { mutableStateOf(false) }
+            StreamDeckRotaryDial(
+                label = "Mikrofon",
+                value = if (micMuted) 0f else 85f,
+                displayValue = if (micMuted) "SESSİZ" else "AÇIK",
+                icon = if (micMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                activeColor = if (micMuted) Color(0xFFEF4444) else Color(0xFF38BDF8),
+                onValueChange = { },
+                onTap = {
+                    micMuted = !micMuted
+                    SocketManager.sendControl(JSONObject().apply {
+                        put("type", "stream_deck_press")
+                        put("button_id", 9999) // Mic toggle
+                    })
+                },
+                modifier = Modifier.weight(1f)
+            )
+
+            // Dial 4: CPU Hardware Telemetry
+            StreamDeckRotaryDial(
+                label = "Donanım",
+                value = liveCpu.toFloat(),
+                displayValue = "$liveCpuTemp°C",
+                icon = Icons.Default.Memory,
+                activeColor = if (liveCpu > 80) Color(0xFFEF4444) else Color(0xFF10B981),
+                onValueChange = { },
+                onTap = {
+                    SocketManager.sendControl(JSONObject().apply {
+                        put("type", "get_system_stats")
+                    })
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
 @Composable
 fun StreamDeckTab(
     isConnected: Boolean,
@@ -1810,6 +2614,11 @@ fun StreamDeckTab(
     liveRam: Int,
     masterVolume: Float,
     onVolumeChange: (Float) -> Unit,
+    brightness: Int,
+    onBrightnessChange: (Int) -> Unit,
+    liveCpuTemp: Int,
+    liveRamUsedGb: Double,
+    liveRamTotalGb: Double,
     ipAddress: String,
     password: String,
     onButtonLongClick: (StreamDeckButtonInfo) -> Unit,
@@ -1820,21 +2629,24 @@ fun StreamDeckTab(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Color(0xFF090A0E))
     ) {
         if (!isConnected) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Eylemleri tetiklemek için bilgisayara bağlanın.", textAlign = TextAlign.Center)
+                Text(
+                    text = "Stream Deck kontrollerini kullanmak için PC bağlantısını kurun.",
+                    color = Color(0xFF94A3B8),
+                    textAlign = TextAlign.Center
+                )
             }
             return
         }
 
-        // Filter buttons for the currently active page
+        // Filter buttons for active page
         val pageButtons = buttons.filter { it.page == activePage }
         val displayButtons = if (pageButtons.isNotEmpty()) {
             pageButtons
         } else {
-            // Fallback: take slice corresponding to page
             val startIdx = activePage * (rows * cols)
             val sub = buttons.drop(startIdx).take(rows * cols)
             if (sub.isNotEmpty()) sub else {
@@ -1847,50 +2659,62 @@ fun StreamDeckTab(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(if (isLandscape) 8.dp else 16.dp)
+                .padding(if (isLandscape) 8.dp else 14.dp)
                 .then(if (!isLandscape) Modifier.verticalScroll(rememberScrollState()) else Modifier),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header: Page Selector Tabs & Live Stats
+            // Header Bar
             if (!isLandscape) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 6.dp),
+                        .padding(bottom = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Stream Deck",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF10B981))
+                        )
+                        Text(
+                            text = "Stream Deck Studio",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFF8FAFC)
+                        )
+                    }
 
-                    // Live CPU/RAM badge
+                    // Live Telemetry Chip
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF1E293B))
-                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .background(Color(0xFF141620))
+                            .border(1.dp, Color(0xFF272A3C), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Text(
-                            text = "⚡ CPU: %$liveCpu | RAM: %$liveRam",
+                            text = "⚡ %$liveCpu • $liveCpuTemp°C | RAM: %$liveRam",
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
                             color = Color(0xFF38BDF8)
                         )
                     }
                 }
             }
 
-            // Horizontal Page Pill Tabs
+            // Horizontal Page Selection Tabs
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(bottom = 6.dp),
+                    .padding(bottom = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1899,10 +2723,10 @@ fun StreamDeckTab(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
+                            .background(if (isSelected) Color(0xFF6366F1) else Color(0xFF161822))
                             .border(
                                 1.dp,
-                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                                if (isSelected) Color(0xFF818CF8) else Color(0xFF2A2D3E),
                                 RoundedCornerShape(20.dp)
                             )
                             .clickable { onPageChange(page.id) }
@@ -1911,14 +2735,14 @@ fun StreamDeckTab(
                         Text(
                             text = page.title,
                             fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                            color = if (isSelected) Color.White else Color(0xFF94A3B8)
                         )
                     }
                 }
             }
 
-            // Button Grid
+            // Keycap Grid
             for (r in 0 until rows) {
                 Row(
                     modifier = Modifier
@@ -1930,277 +2754,97 @@ fun StreamDeckTab(
                         val index = r * cols + c
                         val btn = displayButtons.getOrNull(index)
                         if (btn != null) {
-                            val isToggle = btn.type == "toggle"
-                            val isVolume = btn.type == "volume_slider"
-                            val isLive = btn.type == "live_info"
-
-                            Box(
+                            ElgatoKeycapTile(
+                                button = btn,
+                                masterVolume = masterVolume,
+                                onVolumeChange = onVolumeChange,
+                                brightness = brightness,
+                                onBrightnessChange = onBrightnessChange,
+                                liveCpu = liveCpu,
+                                liveRam = liveRam,
+                                liveCpuTemp = liveCpuTemp,
+                                liveRamUsedGb = liveRamUsedGb,
+                                liveRamTotalGb = liveRamTotalGb,
+                                ipAddress = ipAddress,
+                                password = password,
+                                onPress = {
+                                    SocketManager.sendControl(JSONObject().apply {
+                                        put("type", "stream_deck_press")
+                                        put("button_id", btn.id)
+                                    })
+                                },
+                                onLongPress = {
+                                    onButtonLongClick(btn)
+                                },
+                                isLandscape = isLandscape,
+                                rows = rows,
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        when {
-                                            isToggle && btn.state -> Color(0xFF064E3B).copy(alpha = 0.5f)
-                                            isVolume -> Color(0xFF1E1B4B).copy(alpha = 0.5f)
-                                            isLive -> Color(0xFF1E293B).copy(alpha = 0.6f)
-                                            else -> MaterialTheme.colorScheme.surface
-                                        }
-                                    )
-                                    .border(
-                                        1.dp,
-                                        when {
-                                            isToggle && btn.state -> Color(0xFF10B981)
-                                            isToggle -> Color(0xFFEF4444).copy(alpha = 0.4f)
-                                            isVolume -> Color(0xFF6366F1).copy(alpha = 0.5f)
-                                            isLive -> Color(0xFF38BDF8).copy(alpha = 0.4f)
-                                            else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                        },
-                                        RoundedCornerShape(14.dp)
-                                    )
-                                    .pointerInput(btn.id, btn.type) {
-                                        detectTapGestures(
-                                            onTap = {
-                                                if (isVolume) {
-                                                    // Toggle or click volume
-                                                    SocketManager.sendControl(JSONObject().apply {
-                                                        put("type", "stream_deck_press")
-                                                        put("button_id", btn.id)
-                                                    })
-                                                } else {
-                                                    SocketManager.sendControl(JSONObject().apply {
-                                                        put("type", "stream_deck_press")
-                                                        put("button_id", btn.id)
-                                                    })
-                                                }
-                                            },
-                                            onLongPress = {
-                                                onButtonLongClick(btn)
-                                            }
-                                        )
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                // LED indicator for Toggle buttons
-                                if (isToggle) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(6.dp)
-                                            .size(8.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(if (btn.state) Color(0xFF10B981) else Color(0xFFEF4444))
-                                    )
-                                }
-
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
-                                ) {
-                                    val iconSize = if (isLandscape) {
-                                        when (rows) {
-                                            1 -> 38.dp
-                                            2 -> 28.dp
-                                            3 -> 22.dp
-                                            else -> 18.dp
-                                        }
-                                    } else {
-                                        28.dp
-                                    }
-
-                                    // Content based on button type
-                                    if (isVolume) {
-                                        // Volume Slider / Step Widget
-                                        Icon(
-                                            imageVector = Icons.Default.VolumeUp,
-                                            contentDescription = "Volume",
-                                            tint = Color(0xFF818CF8),
-                                            modifier = Modifier.size(iconSize)
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = btn.label,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(22.dp)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(Color(0xFF312E81))
-                                                    .clickable {
-                                                        SocketManager.sendControl(JSONObject().apply {
-                                                            put("type", "set_volume")
-                                                            put("action", "down")
-                                                        })
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text("-", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                            }
-                                            Text(
-                                                text = "${masterVolume.toInt()}%",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFFA5B4FC)
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(22.dp)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(Color(0xFF312E81))
-                                                    .clickable {
-                                                        SocketManager.sendControl(JSONObject().apply {
-                                                            put("type", "set_volume")
-                                                            put("action", "up")
-                                                        })
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text("+", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                            }
-                                        }
-                                    } else if (isLive) {
-                                        // Live Performance Stats Widget
-                                        val isCpuMetric = btn.value.contains("cpu")
-                                        val metricVal = if (isCpuMetric) liveCpu else liveRam
-                                        val metricColor = if (metricVal > 80) Color(0xFFEF4444) else if (metricVal > 50) Color(0xFFF59E0B) else Color(0xFF10B981)
-
-                                        Icon(
-                                            imageVector = if (isCpuMetric) Icons.Default.Memory else Icons.Default.Storage,
-                                            contentDescription = btn.label,
-                                            tint = metricColor,
-                                            modifier = Modifier.size(iconSize)
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = btn.label,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1
-                                        )
-                                        Text(
-                                            text = "%$metricVal",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = metricColor
-                                        )
-                                    } else {
-                                        // Standard Hotkey, Command, or Toggle Button
-                                        if (btn.icon.startsWith("custom:") && btn.icon.length > 7) {
-                                            val iconPath = btn.icon.substring(7)
-                                            val imageUrl = "http://$ipAddress:8085/$iconPath?password=${Uri.encode(password)}"
-                                            AsyncImage(
-                                                model = imageUrl,
-                                                contentDescription = btn.label,
-                                                modifier = Modifier
-                                                    .size(iconSize)
-                                                    .clip(RoundedCornerShape(4.dp))
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = getVectorIcon(btn.icon),
-                                                contentDescription = btn.label,
-                                                tint = when {
-                                                    isToggle && btn.state -> Color(0xFF10B981)
-                                                    isToggle -> Color(0xFFEF4444)
-                                                    else -> MaterialTheme.colorScheme.primary
-                                                },
-                                                modifier = Modifier.size(iconSize)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = btn.label,
-                                            fontSize = if (isLandscape) {
-                                                when (rows) {
-                                                    1 -> 13.sp
-                                                    2 -> 11.sp
-                                                    else -> 10.sp
-                                                }
-                                            } else {
-                                                12.sp
-                                            },
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 1
-                                        )
-                                        if (isToggle) {
-                                            Text(
-                                                text = if (btn.state) "AÇIK" else "KAPALI",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (btn.state) Color(0xFF10B981) else Color(0xFF94A3B8)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            )
                         } else {
                             Box(modifier = Modifier.weight(1f).fillMaxHeight())
                         }
                     }
                 }
             }
+
+            // Elgato Stream Deck+ Rotary Dials Strip (Hardware Bar)
+            StreamDeckRotaryBar(
+                masterVolume = masterVolume,
+                onVolumeChange = onVolumeChange,
+                brightness = brightness,
+                onBrightnessChange = onBrightnessChange,
+                liveCpu = liveCpu,
+                liveCpuTemp = liveCpuTemp,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
-        // Floating menu overlay for Deck Tab controls
+        // Floating Action Controls (Fullscreen, Rotate, Home)
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(if (isLandscape) 8.dp else 16.dp)
-                .background(Color(0xCC131316), RoundedCornerShape(24.dp))
-                .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(24.dp))
+                .padding(if (isLandscape) 8.dp else 14.dp)
+                .background(Color(0xDD111218), RoundedCornerShape(20.dp))
+                .border(1.dp, Color(0xFF292C3D), RoundedCornerShape(20.dp))
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Fullscreen toggle button
             IconButton(
                 onClick = onToggleFullscreen,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             ) {
                 Icon(
                     imageVector = if (isDeckFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                     contentDescription = "Tam Ekran",
-                    tint = if (isDeckFullscreen) Color(0xFF94D82D) else Color.White,
-                    modifier = Modifier.size(20.dp)
+                    tint = if (isDeckFullscreen) Color(0xFF10B981) else Color.White,
+                    modifier = Modifier.size(18.dp)
                 )
             }
 
-            // Landscape/Orientation toggle button
             IconButton(
                 onClick = onToggleLandscape,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.ScreenRotation,
                     contentDescription = "Yön Değiştir",
-                    tint = if (isLandscape) Color(0xFF74C0FC) else Color.White,
-                    modifier = Modifier.size(20.dp)
+                    tint = if (isLandscape) Color(0xFF38BDF8) else Color.White,
+                    modifier = Modifier.size(18.dp)
                 )
             }
-            
-            // Exit Tab button
+
             IconButton(
                 onClick = onExitClick,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Home,
                     contentDescription = "Çıkış",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

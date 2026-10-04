@@ -568,39 +568,299 @@ body {
     margin-top: 16px;
 }
 
-/* Stream Deck Grid */
+/* ========================================================
+   STREAM DECK STUDIO PRO: HARDWARE AESTHETIC & APPLE CAPSULES
+   ======================================================== */
+
+.deck-canvas-container {
+    background: #0B0B0F;
+    border: 1px solid #1A1A22;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: inset 0 2px 24px rgba(0, 0, 0, 0.75), 0 10px 30px rgba(0, 0, 0, 0.5);
+    position: relative;
+}
+
 .buttons-grid {
     display: grid;
     grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 24px;
+    grid-auto-rows: 125px;
+    gap: 16px;
+    margin-bottom: 12px;
 }
 
+/* Elgato Stream Deck Physical Bezel Keycap Style */
 .deck-btn {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%), var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    background: radial-gradient(140% 120% at 50% 0%, #1A1A24 0%, #0D0E13 100%);
+    border: 1px solid #232330;
+    border-top: 1px solid #323344;
+    border-radius: 14px;
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    min-height: 116px;
-    cursor: pointer;
+    min-height: 125px;
+    cursor: grab;
     position: relative;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.08), inset 0 -2px 4px rgba(0, 0, 0, 0.5);
+    transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.16s ease, box-shadow 0.16s ease;
     overflow: hidden;
-}
-
-.deck-btn:hover {
-    border-color: var(--accent);
-    background: var(--bg-surface-elevated);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(165, 166, 246, 0.2);
+    user-select: none;
 }
 
 .deck-btn:active {
-    transform: translateY(0);
+    cursor: grabbing;
+    transform: scale(0.97) translateY(2px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+.deck-btn:hover {
+    border-color: rgba(129, 140, 248, 0.6);
+    border-top-color: #818CF8;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65), 0 0 16px rgba(129, 140, 248, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.15);
+}
+
+.deck-btn.dragging {
+    opacity: 0.3;
+    transform: scale(0.94);
+    border: 2px dashed #818CF8;
+}
+
+.deck-btn.drag-over {
+    border: 2px solid #818CF8;
+    background: rgba(129, 140, 248, 0.14);
+    transform: scale(1.02);
+}
+
+/* Span Classes */
+.deck-btn.col-span-2 { grid-column: span 2; }
+.deck-btn.col-span-3 { grid-column: span 3; }
+.deck-btn.col-span-4 { grid-column: span 4; }
+.deck-btn.row-span-2 { grid-row: span 2; min-height: 266px; }
+
+/* Apple iOS / macOS Smooth Rounded Pill Slider */
+.apple-pill-slider-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.apple-pill-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.apple-pill-title {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #F1F5F9;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.apple-pill-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 800;
+    color: #FFFFFF;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.apple-pill-track {
+    width: 100%;
+    height: 38px;
+    background: rgba(255, 255, 255, 0.07);
+    border-radius: 19px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+}
+
+.apple-pill-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #FFFFFF, #E2E8F0);
+    border-radius: 19px;
+    transition: width 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 12px;
+}
+
+.apple-pill-fill.accent-volume {
+    background: linear-gradient(90deg, #4F46E5, #818CF8);
+    box-shadow: 0 0 16px rgba(99, 102, 241, 0.4);
+}
+
+.apple-pill-fill.accent-brightness {
+    background: linear-gradient(90deg, #D97706, #FBBF24);
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+}
+
+/* Elgato Stream Deck+ Rotary Knob Bar Preview */
+.deck-rotary-strip {
+    margin-top: 18px;
+    background: #08080C;
+    border: 1px solid #1E1E28;
+    border-radius: 14px;
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 16px;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.deck-rotary-unit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.deck-rotary-knob {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2A2B38, #111218 80%);
+    border: 2px solid #333444;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.2);
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.deck-rotary-knob:hover {
+    border-color: #818CF8;
+    transform: scale(1.04);
+}
+
+.deck-rotary-notch {
+    position: absolute;
+    width: 3px;
+    height: 10px;
+    background: #818CF8;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    box-shadow: 0 0 6px #818CF8;
+}
+
+.deck-rotary-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.deck-rotary-val {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 800;
+    color: #F8FAFC;
+}
+
+/* Flip / OLED Digital Clock & Weather / Calendar */
+.deck-clock-widget {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    padding: 6px 0;
+}
+
+.deck-clock-time {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #FFFFFF;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.35);
+    line-height: 1.1;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 4px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.deck-clock-date {
+    font-size: 10.5px;
+    color: #94A3B8;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-top: 6px;
+}
+
+/* Hardware Gauge Widget (CPU / RAM / Temp) */
+.deck-hardware-widget {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    width: 100%;
+}
+
+.deck-hardware-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+}
+
+.deck-hardware-gauge {
+    width: 100%;
+    height: 7px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.deck-hardware-gauge-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.deck-hardware-gauge-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* LED Toggle Indicator Glow */
+.deck-toggle-glow {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    transition: all 0.2s ease;
+}
+
+.deck-toggle-glow.active {
+    background: #10B981;
+    box-shadow: 0 0 10px #10B981, 0 0 3px #10B981;
+}
+
+.deck-toggle-glow.inactive {
+    background: #EF4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
 }
 
 .deck-btn-header {
@@ -608,7 +868,7 @@ body {
     justify-content: space-between;
     align-items: center;
     width: 100%;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .deck-btn-num {
@@ -641,16 +901,41 @@ body {
     border: 1px solid rgba(34, 197, 94, 0.25);
 }
 
+.deck-btn-badge.toggle {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.deck-btn-badge.volume_slider {
+    background: rgba(99, 102, 241, 0.15);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.deck-btn-badge.live_info, .deck-btn-badge.cpu_widget, .deck-btn-badge.ram_widget {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.deck-btn-badge.clock_widget {
+    background: rgba(236, 72, 153, 0.15);
+    color: #f472b6;
+    border: 1px solid rgba(236, 72, 153, 0.3);
+}
+
 .deck-btn-body {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin: 4px 0 10px 0;
+    margin: 4px 0 8px 0;
+    flex: 1;
 }
 
 .deck-btn-icon-wrapper {
-    width: 34px;
-    height: 34px;
+    width: 36px;
+    height: 36px;
     border-radius: 8px;
     background: var(--bg-main);
     border: 1px solid var(--border-color);
@@ -662,8 +947,8 @@ body {
 }
 
 .deck-btn-icon-wrapper img {
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     object-fit: contain;
     border-radius: 4px;
 }
@@ -682,8 +967,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 6px;
     width: 100%;
 }
 

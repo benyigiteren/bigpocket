@@ -26,6 +26,8 @@ mcp/*.exe
 /BigPocket.exe
 *.exe~
 bigpocket-windows.zip
+*.apk
+*.zip
 
 # Local data and configuration files
 config.json

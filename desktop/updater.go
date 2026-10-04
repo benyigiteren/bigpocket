@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	AppVersion = "1.3"
+	AppVersion = "1.4"
 	// GitHubRepo is "owner/repo" of the public repository that publishes releases.
 	GitHubRepo = "benyigiteren/bigpocket"
 )
@@ -124,18 +124,30 @@ func checkForUpdate(force bool) *UpdateInfo {
 	info.Notes = rel.Body
 	info.URL = rel.HTMLURL
 	info.PublishedAt = rel.PublishedAt
-	// Prefer a zip bundle (exe + frontend), fall back to a bare exe.
+
+	// 1. Prioritize full installer executable (bigpocket-windows.exe) for cleanest seamless update
 	for _, a := range rel.Assets {
 		n := strings.ToLower(a.Name)
-		if strings.HasSuffix(n, ".zip") && strings.Contains(n, "win") {
+		if strings.HasSuffix(n, ".exe") && (strings.Contains(n, "windows") || strings.Contains(n, "setup") || strings.Contains(n, "installer")) {
 			info.DownloadURL = a.BrowserDownloadURL
 			break
 		}
 	}
+	// 2. Fall back to zip bundle
 	if info.DownloadURL == "" {
 		for _, a := range rel.Assets {
 			n := strings.ToLower(a.Name)
-			if strings.HasSuffix(n, ".exe") && !strings.Contains(n, "setup") && !strings.Contains(n, "windows") && !strings.Contains(n, "installer") {
+			if strings.HasSuffix(n, ".zip") && strings.Contains(n, "win") {
+				info.DownloadURL = a.BrowserDownloadURL
+				break
+			}
+		}
+	}
+	// 3. Fall back to bare exe
+	if info.DownloadURL == "" {
+		for _, a := range rel.Assets {
+			n := strings.ToLower(a.Name)
+			if strings.HasSuffix(n, ".exe") {
 				info.DownloadURL = a.BrowserDownloadURL
 				break
 			}
@@ -166,7 +178,7 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// installUpdate downloads the release asset, swaps files next to the executable and restarts.
+// installUpdate downloads the release asset, swaps files or runs installer silently with UAC elevation if needed.
 func installUpdate(downloadURL string) {
 	fail := func(err error) {
 		fmt.Println("Update failed:", err)
@@ -185,7 +197,22 @@ func installUpdate(downloadURL string) {
 		return
 	}
 
-	tmpFile, err := os.CreateTemp("", "bigpocket-update-*")
+	exePath, err := os.Executable()
+	if err != nil {
+		fail(err)
+		return
+	}
+	dir := filepath.Dir(exePath)
+
+	isInstaller := strings.HasSuffix(strings.ToLower(downloadURL), ".exe") && 
+		(strings.Contains(strings.ToLower(downloadURL), "windows") || strings.Contains(strings.ToLower(downloadURL), "setup") || strings.Contains(strings.ToLower(downloadURL), "installer"))
+
+	// Create temp file for download
+	tmpExt := ".zip"
+	if strings.HasSuffix(strings.ToLower(downloadURL), ".exe") {
+		tmpExt = ".exe"
+	}
+	tmpFile, err := os.CreateTemp("", "bigpocket-update-*"+tmpExt)
 	if err != nil {
 		fail(err)
 		return
@@ -195,22 +222,104 @@ func installUpdate(downloadURL string) {
 	_, err = io.Copy(io.MultiWriter(tmpFile, pw), resp.Body)
 	tmpFile.Close()
 	if err != nil {
+		os.Remove(tmpPath)
 		fail(err)
 		return
 	}
-	defer os.Remove(tmpPath)
 
 	setUpdateProgress("installing", 100, "")
-	exePath, err := os.Executable()
-	if err != nil {
-		fail(err)
+
+	// Case 1: If downloading full installer (bigpocket-windows.exe), run it silently via ShellExecute with "runas"
+	// This requests elevation only once for the update, installs cleanly into Program Files, and restarts asInvoker (no shield badge!).
+	if isInstaller {
+		setUpdateProgress("restarting", 100, "")
+		shell32 := syscall.NewLazyDLL("shell32.dll")
+		shellExecute := shell32.NewProc("ShellExecuteW")
+
+		verbPtr, _ := syscall.UTF16PtrFromString("runas")
+		installerPtr, _ := syscall.UTF16PtrFromString(tmpPath)
+		argsPtr, _ := syscall.UTF16PtrFromString("/silent")
+		dirPtr, _ := syscall.UTF16PtrFromString(os.TempDir())
+
+		ret, _, _ := shellExecute.Call(
+			0,
+			uintptr(unsafe.Pointer(verbPtr)),
+			uintptr(unsafe.Pointer(installerPtr)),
+			uintptr(unsafe.Pointer(argsPtr)),
+			uintptr(unsafe.Pointer(dirPtr)),
+			1, // SW_SHOWNORMAL
+		)
+		if ret <= 32 {
+			fail(fmt.Errorf("güncelleyici yönetici izni alamadı"))
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+		cleanupOnExit()
+		os.Exit(0)
 		return
 	}
-	dir := filepath.Dir(exePath)
+
+	// Case 2: Zip or Bare Exe - Test if current directory is writable (e.g. C:\Program Files)
+	testFile := filepath.Join(dir, ".test_write")
+	writeErr := os.WriteFile(testFile, []byte("test"), 0644)
+	if writeErr != nil {
+		// Directory is write-protected (e.g., C:\Program Files\BigPocket as standard user).
+		// We elevate via a clean one-shot batch script in Temp to apply the update and relaunch!
+		os.Remove(testFile)
+		batPath := filepath.Join(os.TempDir(), "bp_update_elevated.bat")
+		var batContent string
+		if strings.HasSuffix(strings.ToLower(downloadURL), ".zip") {
+			batContent = fmt.Sprintf(`@echo off
+timeout /t 1 /nobreak >nul
+taskkill /f /im BigPocket.exe >nul 2>&1
+powershell -Command "Expand-Archive -Path '%s' -DestinationPath '%s' -Force"
+del /f /q "%s" >nul 2>&1
+start "" "%s" --after-update
+del "%%~f0"
+`, tmpPath, dir, tmpPath, exePath)
+		} else {
+			batContent = fmt.Sprintf(`@echo off
+timeout /t 1 /nobreak >nul
+taskkill /f /im BigPocket.exe >nul 2>&1
+copy /y "%s" "%s" >nul
+del /f /q "%s" >nul 2>&1
+start "" "%s" --after-update
+del "%%~f0"
+`, tmpPath, exePath, tmpPath, exePath)
+		}
+		os.WriteFile(batPath, []byte(batContent), 0644)
+
+		setUpdateProgress("restarting", 100, "")
+		shell32 := syscall.NewLazyDLL("shell32.dll")
+		shellExecute := shell32.NewProc("ShellExecuteW")
+		verbPtr, _ := syscall.UTF16PtrFromString("runas")
+		cmdPtr, _ := syscall.UTF16PtrFromString("cmd.exe")
+		argsPtr, _ := syscall.UTF16PtrFromString("/c \"" + batPath + "\"")
+		tmpDirPtr, _ := syscall.UTF16PtrFromString(os.TempDir())
+
+		ret, _, _ := shellExecute.Call(
+			0,
+			uintptr(unsafe.Pointer(verbPtr)),
+			uintptr(unsafe.Pointer(cmdPtr)),
+			uintptr(unsafe.Pointer(argsPtr)),
+			uintptr(unsafe.Pointer(tmpDirPtr)),
+			0, // SW_HIDE
+		)
+		if ret <= 32 {
+			fail(fmt.Errorf("güncelleme için yönetici onayı verilmedi"))
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+		cleanupOnExit()
+		os.Exit(0)
+		return
+	}
+	os.Remove(testFile)
+
+	// Directory is writable (e.g. running from user profile or dev folder)
 	oldPath := exePath + ".old"
 	os.Remove(oldPath)
 
-	// A running exe on Windows can be renamed but not overwritten.
 	if err := os.Rename(exePath, oldPath); err != nil {
 		fail(err)
 		return

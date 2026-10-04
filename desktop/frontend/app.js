@@ -367,6 +367,28 @@ function connectWebSocket() {
         } else if (msg.type === 'config_update') {
             console.log("Configuration updated, reloading...");
             fetchConfig();
+        } else if (msg.type === 'system_stats') {
+            cachedLiveStats = {
+                cpu: msg.cpu || 0,
+                ram: msg.ram || 0,
+                cpu_temp: msg.cpu_temp || (38 + Math.round((msg.cpu || 0) * 0.45)),
+                ram_used_gb: msg.ram_used_gb || 0,
+                ram_total_gb: msg.ram_total_gb || 16
+            };
+            const ramBadge = document.getElementById('stat-ram');
+            if (ramBadge) {
+                ramBadge.textContent = `%${msg.ram} (${cachedLiveStats.ram_used_gb} GB)`;
+            }
+            // Update any visible live_info buttons without full re-render
+            updateLiveStatsDOM();
+        } else if (msg.type === 'button_state_changed') {
+            if (apiConfig && apiConfig.stream_deck_buttons) {
+                const b = apiConfig.stream_deck_buttons.find(btn => btn.id === msg.button_id);
+                if (b) {
+                    b.state = msg.state;
+                    renderStreamDeckButtons();
+                }
+            }
         }
     };
 
@@ -394,13 +416,28 @@ const iconMapUnicode = {
 };
 
 const PRESETS = {
+    pro_studio: [
+        { label: "Canlı Saat", type: "clock_widget", value: "digital_clock", icon: "clock", col_span: 2, row_span: 1, color: "#EC4899" },
+        { label: "Ana Ses", type: "volume_slider", value: "master_volume", icon: "volume", col_span: 2, row_span: 1, color: "#6366F1" },
+        { label: "İşlemci & Sıcaklık", type: "live_info", value: "cpu", icon: "cpu", col_span: 1, row_span: 1, color: "#F59E0B" },
+        { label: "Bellek Durumu", type: "live_info", value: "ram", icon: "ram", col_span: 1, row_span: 1, color: "#10B981" },
+        { label: "Mikrofon", type: "toggle", value: "mic_mute", icon: "mic", col_span: 1, row_span: 1, state: true, color: "#10B981" },
+        { label: "Hoparlör", type: "toggle", value: "sound_mute", icon: "voldown", col_span: 1, row_span: 1, state: false, color: "#EF4444" },
+    ],
+    hardware: [
+        { label: "Sistem Saati", type: "clock_widget", value: "digital_clock", icon: "clock", col_span: 2, row_span: 1, color: "#818CF8" },
+        { label: "İşlemci Yükü & Isı", type: "live_info", value: "cpu", icon: "cpu", col_span: 1, row_span: 1, color: "#F59E0B" },
+        { label: "RAM Kullanımı", type: "live_info", value: "ram", icon: "ram", col_span: 1, row_span: 1, color: "#10B981" },
+        { label: "Görev Yöneticisi", type: "command", value: "taskmgr.exe", icon: "task", col_span: 2, row_span: 1, color: "#3B82F6" },
+        { label: "PC Kilitle", type: "command", value: "rundll32.exe user32.dll,LockWorkStation", icon: "lock", col_span: 2, row_span: 1, color: "#EF4444" },
+    ],
     media: [
-        { label: "Önceki Şarkı", type: "hotkey", value: "prevtrack", icon: "play" },
-        { label: "Oynat / Durdur", type: "hotkey", value: "playpause", icon: "play" },
-        { label: "Sonraki Şarkı", type: "hotkey", value: "nexttrack", icon: "play" },
-        { label: "Sesi Kapat", type: "hotkey", value: "mute", icon: "voldown" },
-        { label: "Ses Azalt", type: "hotkey", value: "volumedown", icon: "voldown" },
-        { label: "Ses Arttır", type: "hotkey", value: "volumeup", icon: "volup" },
+        { label: "Ana Ses Barı", type: "volume_slider", value: "master_volume", icon: "volume", col_span: 2, row_span: 1, color: "#6366F1" },
+        { label: "Sesi Kapat", type: "toggle", value: "sound_mute", icon: "voldown", col_span: 1, row_span: 1, color: "#EF4444" },
+        { label: "Mikrofon", type: "toggle", value: "mic_mute", icon: "mic", col_span: 1, row_span: 1, color: "#10B981" },
+        { label: "Önceki Parça", type: "hotkey", value: "prevtrack", icon: "play", col_span: 1, row_span: 1, color: "#3B82F6" },
+        { label: "Oynat / Durdur", type: "hotkey", value: "playpause", icon: "play", col_span: 2, row_span: 1, color: "#818CF8" },
+        { label: "Sonraki Parça", type: "hotkey", value: "nexttrack", icon: "play", col_span: 1, row_span: 1, color: "#3B82F6" },
     ],
     obs: [
         { label: "Yayını Başlat", type: "hotkey", value: "ctrl+shift+f1", icon: "custom" },
@@ -524,12 +561,20 @@ function setupStreamDeck() {
             editValue.placeholder = "mic_mute, speaker_mute, virtual_monitor veya ctrl+shift+m";
             appGroup.style.display = 'none';
         } else if (editType.value === 'volume_slider') {
-            editValueLabel.textContent = "Ses Kontrol Değeri / Eylemi";
-            editValue.placeholder = "master, mic, up, down";
+            editValueLabel.textContent = "Ses Seviyesi Değeri (0 - 100)";
+            editValue.placeholder = "master_volume, 0-100";
+            appGroup.style.display = 'none';
+        } else if (editType.value === 'brightness_slider') {
+            editValueLabel.textContent = "Ekran Parlaklığı Değeri (0 - 100)";
+            editValue.placeholder = "display_brightness, 0-100";
             appGroup.style.display = 'none';
         } else if (editType.value === 'live_info') {
-            editValueLabel.textContent = "Canlı Bilgi Türü";
-            editValue.placeholder = "cpu, ram, stats";
+            editValueLabel.textContent = "Canlı Donanım Türü";
+            editValue.placeholder = "cpu, ram";
+            appGroup.style.display = 'none';
+        } else if (editType.value === 'clock_widget') {
+            editValueLabel.textContent = "Saat & Zaman Widget'ı";
+            editValue.placeholder = "digital_clock";
             appGroup.style.display = 'none';
         } else {
             editValueLabel.textContent = "Shell Komutu / Uygulama Adı (Örn. calc.exe)";
@@ -679,158 +724,198 @@ function setupStreamDeck() {
     closeModalBtn.addEventListener('click', () => modal.classList.remove('active'));
     applyEditBtn.addEventListener('click', applyButtonEdit);
     saveBtn.addEventListener('click', saveConfigOnServer);
-}
 
-function fetchConfig() {
-    authFetch('/config')
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                apiConfig = data.config;
-                
-                // Populate rows & cols selectors
-                document.getElementById('deck-rows').value = apiConfig.stream_deck_rows || 2;
-                document.getElementById('deck-cols').value = apiConfig.stream_deck_cols || 4;
-                
+    // Delete button inside modal
+    const deleteBtn = document.getElementById('btn-delete-button');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+            if (editingButtonId !== null && apiConfig && apiConfig.stream_deck_buttons) {
+                apiConfig.stream_deck_buttons = apiConfig.stream_deck_buttons.filter(b => b.id !== editingButtonId);
                 renderStreamDeckButtons();
-                const settingsPwInput = document.getElementById('settings-password');
-                if (settingsPwInput) {
-                    settingsPwInput.value = apiConfig.password || "";
-                }
-                updateMcpCardUI();
+                saveConfigOnServer();
+                modal.classList.remove('active');
             }
-        })
-        .catch(err => console.error("Error fetching config", err));
-}
-
-function updateMcpCardUI() {
-    const sseConfigEl = document.getElementById('mcp-sse-json-config');
-    const stdioConfigEl = document.getElementById('mcp-stdio-json-config');
-    if (!sseConfigEl && !stdioConfigEl) return;
-
-    const pw = (apiConfig && apiConfig.password) ? apiConfig.password : "";
-
-    // 1. SSE / HTTP MCP Config (Universal modern MCP for Cursor, Claude, Cline, Windsurf)
-    const sseConfigObj = {
-        "mcpServers": {
-            "bigpocket": {
-                "url": "http://127.0.0.1:8085/mcp"
-            }
-        }
-    };
-    if (sseConfigEl) {
-        sseConfigEl.textContent = JSON.stringify(sseConfigObj, null, 2);
+        });
     }
 
-    // 2. Stdio MCP Config (Local binary process)
-    const stdioConfigObj = {
-        "mcpServers": {
-            "bigpocket-streamdeck": {
-                "command": "C:\\Program Files\\BigPocket\\bigpocket-streamdeck-mcp.exe",
-                "args": [
-                    "--url", "http://127.0.0.1:8085"
-                ],
-                ...(pw ? { "env": { "BIGPOCKET_API_KEY": pw } } : {})
-            }
-        }
-    };
-    if (stdioConfigEl) {
-        stdioConfigEl.textContent = JSON.stringify(stdioConfigObj, null, 2);
+    // Quick add button
+    const quickAddBtn = document.getElementById('btn-add-widget-quick');
+    if (quickAddBtn) {
+        quickAddBtn.addEventListener('click', () => {
+            if (!apiConfig) return;
+            const newId = apiConfig.stream_deck_buttons.length > 0 
+                ? Math.max(...apiConfig.stream_deck_buttons.map(b => b.id)) + 1 
+                : 0;
+            const activePg = apiConfig.active_page || 0;
+            apiConfig.stream_deck_buttons.push({
+                id: newId,
+                label: "Yeni Widget",
+                type: "hotkey",
+                value: "",
+                icon: "custom",
+                page: activePg,
+                col_span: 1,
+                row_span: 1,
+                color: "#818CF8",
+                state: false
+            });
+            renderStreamDeckButtons();
+            openEditButtonModal(newId);
+        });
     }
 
-    // 3. Tab switching logic
-    const tabBtns = document.querySelectorAll('.mcp-tab-btn');
-    tabBtns.forEach(btn => {
-        if (!btn.dataset.wired) {
-            btn.dataset.wired = "true";
-            btn.addEventListener('click', () => {
-                const targetTab = btn.getAttribute('data-mcptab');
-                
-                // Update buttons
-                tabBtns.forEach(b => {
-                    b.classList.remove('active');
-                    b.style.background = 'transparent';
-                    b.style.borderColor = 'transparent';
-                    b.style.color = 'var(--text-muted)';
-                });
-                btn.classList.add('active');
-                btn.style.background = 'var(--bg-surface-elevated)';
-                btn.style.borderColor = 'var(--border-color)';
-                btn.style.color = 'var(--text-main)';
+    // Add new page button
+    const addPageBtn = document.getElementById('btn-add-deck-page');
+    if (addPageBtn) {
+        addPageBtn.addEventListener('click', () => {
+            if (!apiConfig) return;
+            if (!apiConfig.stream_deck_pages) apiConfig.stream_deck_pages = [];
+            const newPageId = apiConfig.stream_deck_pages.length;
+            const title = prompt("Yeni sayfa başlığı:", `Sayfa ${newPageId + 1}`);
+            if (title) {
+                apiConfig.stream_deck_pages.push({ id: newPageId, title: title });
+                apiConfig.active_page = newPageId;
+                renderPageTabs();
+                renderStreamDeckButtons();
+                saveConfigOnServer();
+            }
+        });
+    }
+}
 
-                // Update tab contents
-                document.querySelectorAll('.mcp-tab-content').forEach(content => {
-                    content.style.display = 'none';
-                });
-                const activeContent = document.getElementById(`mcp-tab-content-${targetTab}`);
-                if (activeContent) {
-                    activeContent.style.display = 'block';
-                }
-            });
-        }
+// Render dynamic page tabs
+function renderPageTabs() {
+    const tabsContainer = document.getElementById('deck-page-tabs');
+    if (!tabsContainer || !apiConfig) return;
+
+    tabsContainer.innerHTML = '<span style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-right: 4px; letter-spacing: 0.05em;">SAYFA:</span>';
+    const pages = apiConfig.stream_deck_pages || [
+        { id: 0, title: "Ana Sayfa" },
+        { id: 1, title: "Medya & Ses" },
+        { id: 2, title: "Sistem & PC" }
+    ];
+
+    pages.forEach(pg => {
+        const isActive = (apiConfig.active_page || 0) === pg.id;
+        const btn = document.createElement('button');
+        btn.className = `deck-page-tab-btn ${isActive ? 'active' : ''}`;
+        btn.style.cssText = `
+            padding: 5px 12px;
+            font-size: 11.5px;
+            font-weight: ${isActive ? '700' : '500'};
+            background: ${isActive ? '#818CF8' : 'rgba(255,255,255,0.05)'};
+            color: ${isActive ? '#000000' : 'var(--text-main)'};
+            border: 1px solid ${isActive ? '#818CF8' : 'var(--border-color)'};
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        `;
+        btn.textContent = pg.title;
+        btn.addEventListener('click', () => {
+            apiConfig.active_page = pg.id;
+            renderPageTabs();
+            renderStreamDeckButtons();
+        });
+        tabsContainer.appendChild(btn);
     });
 
-    // 4. Copy buttons for code blocks
-    document.querySelectorAll('.btn-copy-code').forEach(btn => {
-        if (!btn.dataset.wired) {
-            btn.dataset.wired = "true";
-            btn.addEventListener('click', () => {
-                const targetId = btn.getAttribute('data-target');
-                const targetEl = document.getElementById(targetId);
-                if (targetEl) {
-                    navigator.clipboard.writeText(targetEl.textContent).then(() => {
-                        const oldText = btn.textContent;
-                        btn.textContent = "✓ Kopyalandı";
-                        btn.style.background = "var(--accent)";
-                        btn.style.color = "#000";
-                        setTimeout(() => {
-                            btn.textContent = oldText;
-                            btn.style.background = "";
-                            btn.style.color = "";
-                        }, 1500);
-                    });
-                }
-            });
-        }
-    });
+    // Populate edit modal page select
+    const pageSelect = document.getElementById('edit-page');
+    if (pageSelect) {
+        pageSelect.innerHTML = '';
+        pages.forEach(pg => {
+            const opt = document.createElement('option');
+            opt.value = pg.id.toString();
+            opt.textContent = `${pg.title} (Sayfa ${pg.id + 1})`;
+            pageSelect.appendChild(opt);
+        });
+    }
+}
 
-    // 5. Copy buttons for inline text
-    document.querySelectorAll('.btn-copy-inline').forEach(btn => {
-        if (!btn.dataset.wired) {
-            btn.dataset.wired = "true";
-            btn.addEventListener('click', () => {
-                const textToCopy = btn.getAttribute('data-copy');
-                if (textToCopy) {
-                    navigator.clipboard.writeText(textToCopy).then(() => {
-                        const oldText = btn.textContent;
-                        btn.textContent = "✓";
-                        btn.style.background = "var(--accent)";
-                        btn.style.color = "#000";
-                        setTimeout(() => {
-                            btn.textContent = oldText;
-                            btn.style.background = "";
-                            btn.style.color = "";
-                        }, 1500);
-                    });
-                }
-            });
+// Live hardware stats cache
+let cachedLiveStats = { cpu: 12, ram: 42, cpu_temp: 45, ram_used_gb: 6.8, ram_total_gb: 16.0 };
+
+function updateLiveStatsDOM() {
+    // Dynamically update hardware widgets without recreating elements
+    document.querySelectorAll('.deck-hardware-widget').forEach(widget => {
+        const btnEl = widget.closest('.deck-btn');
+        if (!btnEl) return;
+        const btnId = parseInt(btnEl.getAttribute('data-id'));
+        const btn = (apiConfig.stream_deck_buttons || []).find(b => b.id === btnId);
+        if (!btn) return;
+
+        const isCpu = (btn.value || '').includes('cpu');
+        const pct = isCpu ? cachedLiveStats.cpu : cachedLiveStats.ram;
+        const extra = isCpu ? `${cachedLiveStats.cpu_temp}°C` : `${cachedLiveStats.ram_used_gb}/${cachedLiveStats.ram_total_gb} GB`;
+        const fillCol = pct > 80 ? '#EF4444' : pct > 50 ? '#F59E0B' : '#10B981';
+
+        const pctEl = widget.querySelector('.deck-hardware-row span:last-child');
+        if (pctEl) {
+            pctEl.textContent = `%${pct}`;
+            pctEl.style.color = fillCol;
         }
+        const fillEl = widget.querySelector('.deck-hardware-gauge-fill');
+        if (fillEl) {
+            fillEl.style.width = `${pct}%`;
+            fillEl.style.background = fillCol;
+        }
+        const extraEl = widget.querySelector('div:last-child');
+        if (extraEl) extraEl.textContent = extra;
     });
 }
 
+// 1-second interval to tick Clock widgets smoothly
+setInterval(() => {
+    document.querySelectorAll('.deck-clock-widget').forEach(clock => {
+        const timeEl = clock.querySelector('.deck-clock-time');
+        const dateEl = clock.querySelector('.deck-clock-date');
+        const now = new Date();
+        if (timeEl) {
+            timeEl.textContent = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        if (dateEl) {
+            dateEl.textContent = now.toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' });
+        }
+    });
+}, 1000);
+
+// Render Stream Deck Interactive Grid with Drag & Drop and Resizing
 function renderStreamDeckButtons() {
     const list = document.getElementById('deck-buttons-list');
+    if (!list || !apiConfig) return;
     list.innerHTML = '';
-    
-    // Dynamically set CSS variables for rows and columns
-    list.style.setProperty('--cols', apiConfig.stream_deck_cols || 4);
-    list.style.setProperty('--rows', apiConfig.stream_deck_rows || 2);
-    
-    apiConfig.stream_deck_buttons.forEach(btn => {
+
+    const cols = apiConfig.stream_deck_cols || 4;
+    const rows = apiConfig.stream_deck_rows || 2;
+    list.style.setProperty('--cols', cols);
+    list.style.setProperty('--rows', rows);
+
+    const dimEl = document.getElementById('deck-canvas-dimensions');
+    if (dimEl) dimEl.textContent = `Matris: ${rows}x${cols}`;
+
+    const activePage = apiConfig.active_page || 0;
+    // Filter buttons belonging to active page
+    const pageButtons = (apiConfig.stream_deck_buttons || []).filter(b => (b.page || 0) === activePage);
+
+    pageButtons.forEach((btn, index) => {
         const item = document.createElement('div');
         item.className = 'deck-btn';
+        item.draggable = true;
         item.setAttribute('data-id', btn.id);
-        
+        item.setAttribute('data-index', index);
+
+        // Apply column and row spans
+        const colSpan = btn.col_span || 1;
+        const rowSpan = btn.row_span || 1;
+        if (colSpan > 1) item.classList.add(`col-span-${colSpan}`);
+        if (rowSpan > 1) item.classList.add(`row-span-${rowSpan}`);
+
+        // Custom accent color border glow
+        if (btn.color) {
+            item.style.borderColor = btn.color + '44';
+        }
+
+        // Icon handling
         let displayIcon = iconMapUnicode[btn.icon] || "⚡";
         if (btn.icon && btn.icon.startsWith("custom:") && btn.icon.length > 7) {
             const path = btn.icon.substring(7);
@@ -838,36 +923,258 @@ function renderStreamDeckButtons() {
             const authQuery = password ? `?password=${encodeURIComponent(password)}` : '';
             displayIcon = `<img src="${path}${authQuery}" />`;
         }
-        
-        const typeBadgeClass = btn.type === 'hotkey' ? 'hotkey' : 'command';
-        const typeBadgeText = btn.type === 'hotkey' ? 'HOTKEY' : 'CMD';
+
+        // Badge styling
+        const badgeClass = btn.type || 'hotkey';
+        let badgeLabel = 'KEY';
+        if (btn.type === 'command') badgeLabel = 'CMD';
+        else if (btn.type === 'toggle') badgeLabel = 'LED';
+        else if (btn.type === 'volume_slider') badgeLabel = 'SES KAPSÜLÜ';
+        else if (btn.type === 'brightness_slider') badgeLabel = 'PARLAKLIK';
+        else if (btn.type === 'clock_widget') badgeLabel = 'OLED SAAT';
+        else if (btn.type === 'live_info') badgeLabel = 'DONANIM';
+
+        // Custom body preview based on widget type
+        let bodyContent = '';
+        if (btn.type === 'clock_widget') {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateStr = now.toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' });
+            bodyContent = `
+                <div class="deck-clock-widget">
+                    <div class="deck-clock-time" style="color: ${btn.color || '#FFFFFF'}">${timeStr}</div>
+                    <div class="deck-clock-date">${dateStr}</div>
+                </div>
+            `;
+        } else if (btn.type === 'volume_slider') {
+            bodyContent = `
+                <div class="apple-pill-slider-container">
+                    <div class="apple-pill-header">
+                        <span class="apple-pill-title">🔊 ${btn.label}</span>
+                        <span class="apple-pill-value" style="color: #A5B4FC;">75%</span>
+                    </div>
+                    <div class="apple-pill-track" onclick="event.stopPropagation(); setMasterVolumeByPercent(75);">
+                        <div class="apple-pill-fill accent-volume" style="width: 75%;">
+                            <span style="font-size: 14px;">🔊</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else if (btn.type === 'brightness_slider') {
+            bodyContent = `
+                <div class="apple-pill-slider-container">
+                    <div class="apple-pill-header">
+                        <span class="apple-pill-title">☀️ ${btn.label}</span>
+                        <span class="apple-pill-value" style="color: #FDE68A;">85%</span>
+                    </div>
+                    <div class="apple-pill-track" onclick="event.stopPropagation(); setDisplayBrightness(85);">
+                        <div class="apple-pill-fill accent-brightness" style="width: 85%;">
+                            <span style="font-size: 14px;">☀️</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else if (btn.type === 'live_info') {
+            const isCpu = (btn.value || '').includes('cpu');
+            const pct = isCpu ? cachedLiveStats.cpu : cachedLiveStats.ram;
+            const extra = isCpu ? `${cachedLiveStats.cpu_temp}°C` : `${cachedLiveStats.ram_used_gb}/${cachedLiveStats.ram_total_gb} GB`;
+            const fillCol = pct > 80 ? '#EF4444' : pct > 50 ? '#F59E0B' : '#10B981';
+            bodyContent = `
+                <div class="deck-hardware-widget">
+                    <div class="deck-hardware-row">
+                        <span style="font-size: 12px; font-weight: 700; color: #F8FAFC;">${btn.label}</span>
+                        <span style="font-family: var(--font-mono); font-weight: 800; color: ${fillCol};">%${pct}</span>
+                    </div>
+                    <div class="deck-hardware-gauge">
+                        <div class="deck-hardware-gauge-fill" style="width: ${pct}%; background: ${fillCol};"></div>
+                    </div>
+                    <div style="font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right;">${extra}</div>
+                </div>
+            `;
+        } else {
+            // Stream Deck Physical Bezel Button / Toggle
+            const toggleIndicator = btn.type === 'toggle' 
+                ? `<span class="deck-toggle-glow ${btn.state ? 'active' : 'inactive'}"></span>` 
+                : '';
+            bodyContent = `
+                <div class="deck-btn-body">
+                    <div class="deck-btn-icon-wrapper" style="border-color: ${btn.color ? btn.color + '44' : 'var(--border-color)'}; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">${displayIcon}</div>
+                    <div style="overflow: hidden; flex: 1;">
+                        <div class="deck-btn-label" title="${btn.label}">${btn.label || 'İsimsiz Buton'}</div>
+                        ${btn.type === 'toggle' ? `<div style="font-size: 10px; font-weight: 700; color: ${btn.state ? '#10B981' : '#94A3B8'}; display: flex; align-items: center; gap: 6px; margin-top: 3px;">${toggleIndicator} ${btn.state ? 'AÇIK' : 'KAPALI'}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
         const actionDisplay = btn.value ? btn.value : '(Boş)';
-        
+
         item.innerHTML = `
             <div class="deck-btn-header">
-                <span class="deck-btn-num">SLOT #${btn.id + 1}</span>
-                <span class="deck-btn-badge ${typeBadgeClass}">${typeBadgeText}</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="deck-btn-num">#${btn.id + 1}</span>
+                    <span class="deck-btn-badge ${badgeClass}">${badgeLabel}</span>
+                </div>
+                <div class="deck-btn-resize-pill" title="Boyut Değiştir (Hücre Genişliği)">
+                    <button class="deck-size-btn ${colSpan === 1 && rowSpan === 1 ? 'active' : ''}" data-size="1x1">1x1</button>
+                    <button class="deck-size-btn ${colSpan === 2 && rowSpan === 1 ? 'active' : ''}" data-size="2x1">2x1</button>
+                    <button class="deck-size-btn ${colSpan === 1 && rowSpan === 2 ? 'active' : ''}" data-size="1x2">1x2</button>
+                    <button class="deck-size-btn ${colSpan === 2 && rowSpan === 2 ? 'active' : ''}" data-size="2x2">2x2</button>
+                </div>
             </div>
-            <div class="deck-btn-body">
-                <div class="deck-btn-icon-wrapper">${displayIcon}</div>
-                <div class="deck-btn-label" title="${btn.label}">${btn.label || 'İsimsiz Buton'}</div>
-            </div>
+            ${bodyContent}
             <div class="deck-btn-footer">
                 <span class="deck-btn-action" title="${actionDisplay}">${actionDisplay}</span>
-                <button class="deck-btn-test" title="PC'de Çalıştır">Test</button>
+                <button class="deck-btn-test" title="PC'de Canlı Tetikle">Test</button>
             </div>
         `;
 
-        // Test button triggers button without opening modal
+        // Resize buttons handler
+        item.querySelectorAll('.deck-size-btn').forEach(szBtn => {
+            szBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const sz = szBtn.getAttribute('data-size');
+                if (sz === '1x1') { btn.col_span = 1; btn.row_span = 1; }
+                else if (sz === '2x1') { btn.col_span = 2; btn.row_span = 1; }
+                else if (sz === '1x2') { btn.col_span = 1; btn.row_span = 2; }
+                else if (sz === '2x2') { btn.col_span = 2; btn.row_span = 2; }
+                renderStreamDeckButtons();
+                saveConfigOnServer();
+            });
+        });
+
+        // Test button handler
         const testBtn = item.querySelector('.deck-btn-test');
         testBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             testButtonAction(btn.id, testBtn);
         });
 
+        // Edit button click
         item.addEventListener('click', () => openEditButtonModal(btn.id));
+
+        // Drag & Drop event handlers
+        item.addEventListener('dragstart', (e) => {
+            item.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', btn.id.toString());
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            document.querySelectorAll('.deck-btn').forEach(el => el.classList.remove('drag-over'));
+        });
+
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            item.classList.add('drag-over');
+        });
+
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+
+        item.addEventListener('drop', (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+            const targetId = btn.id;
+            if (draggedId !== targetId) {
+                swapStreamDeckButtons(draggedId, targetId);
+            }
+        });
+
         list.appendChild(item);
     });
+
+    setupRotaryDials();
+}
+
+// Interactive Elgato Stream Deck+ style rotary knob interaction
+function setupRotaryDials() {
+    const volDial = document.getElementById('rotary-volume-control');
+    const brightDial = document.getElementById('rotary-bright-control');
+    const micDial = document.getElementById('rotary-mic-control');
+
+    if (volDial && !volDial.dataset.wired) {
+        volDial.dataset.wired = "true";
+        let curVol = 70;
+        volDial.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            curVol += e.deltaY < 0 ? 5 : -5;
+            curVol = Math.max(0, Math.min(100, curVol));
+            document.getElementById('rotary-volume-val').textContent = curVol + '%';
+            const knob = volDial.querySelector('.deck-rotary-knob');
+            if (knob) knob.style.transform = `rotate(${(curVol - 50) * 2.4}deg)`;
+            setMasterVolumeByPercent(curVol);
+        });
+        volDial.addEventListener('click', () => {
+            curVol = curVol === 0 ? 60 : 0;
+            document.getElementById('rotary-volume-val').textContent = curVol + '%';
+            setMasterVolumeByPercent(curVol);
+        });
+    }
+
+    if (brightDial && !brightDial.dataset.wired) {
+        brightDial.dataset.wired = "true";
+        let curBright = 85;
+        brightDial.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            curBright += e.deltaY < 0 ? 5 : -5;
+            curBright = Math.max(0, Math.min(100, curBright));
+            document.getElementById('rotary-bright-val').textContent = curBright + '%';
+            const knob = brightDial.querySelector('.deck-rotary-knob');
+            if (knob) knob.style.transform = `rotate(${(curBright - 50) * 2.4}deg)`;
+            setDisplayBrightness(curBright);
+        });
+    }
+
+    if (micDial && !micDial.dataset.wired) {
+        micDial.dataset.wired = "true";
+        let micMuted = false;
+        micDial.addEventListener('click', () => {
+            micMuted = !micMuted;
+            document.getElementById('rotary-mic-val').textContent = micMuted ? "SESSİZ" : "100%";
+            document.getElementById('rotary-mic-val').style.color = micMuted ? "#EF4444" : "#10B981";
+            if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+                wsClient.send(JSON.stringify({ type: 'stream_deck_press', button_id: 0 }));
+            }
+        });
+    }
+}
+
+function setMasterVolumeByPercent(pct) {
+    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.send(JSON.stringify({
+            type: 'set_volume',
+            action: 'set',
+            level: pct
+        }));
+    }
+}
+
+function setDisplayBrightness(pct) {
+    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.send(JSON.stringify({
+            type: 'set_brightness',
+            level: pct
+        }));
+    }
+}
+
+// Swap two buttons order in array
+function swapStreamDeckButtons(idA, idB) {
+    if (!apiConfig || !apiConfig.stream_deck_buttons) return;
+    const idxA = apiConfig.stream_deck_buttons.findIndex(b => b.id === idA);
+    const idxB = apiConfig.stream_deck_buttons.findIndex(b => b.id === idB);
+    if (idxA !== -1 && idxB !== -1) {
+        const temp = apiConfig.stream_deck_buttons[idxA];
+        apiConfig.stream_deck_buttons[idxA] = apiConfig.stream_deck_buttons[idxB];
+        apiConfig.stream_deck_buttons[idxB] = temp;
+        renderStreamDeckButtons();
+        saveConfigOnServer();
+    }
 }
 
 function testButtonAction(buttonId, element) {
@@ -902,27 +1209,37 @@ function testButtonAction(buttonId, element) {
 function openEditButtonModal(id) {
     const btn = apiConfig.stream_deck_buttons.find(b => b.id === id);
     if (!btn) return;
-    
+
     editingButtonId = id;
-    document.getElementById('edit-label').value = btn.label;
-    document.getElementById('edit-type').value = btn.type;
+    document.getElementById('edit-label').value = btn.label || "";
+    document.getElementById('edit-type').value = btn.type || "hotkey";
+    
+    const colSelect = document.getElementById('edit-colspan');
+    if (colSelect) colSelect.value = (btn.col_span || 1).toString();
+
+    const rowSelect = document.getElementById('edit-rowspan');
+    if (rowSelect) rowSelect.value = (btn.row_span || 1).toString();
+
+    const colorInput = document.getElementById('edit-color');
+    if (colorInput) colorInput.value = btn.color || "#818CF8";
+
     const pageSelect = document.getElementById('edit-page');
     if (pageSelect) {
         pageSelect.value = (btn.page !== undefined ? btn.page : 0).toString();
     }
     document.getElementById('edit-type').dispatchEvent(new Event('change'));
-    
+
     const editValue = document.getElementById('edit-value');
-    editValue.value = btn.value;
-    
+    editValue.value = btn.value || "";
+
     const iconSelect = document.getElementById('edit-icon-select');
     const customIconGroup = document.getElementById('custom-icon-group');
     const customIconUploadGroup = document.getElementById('custom-icon-upload-group');
     const editIconCustom = document.getElementById('edit-icon-custom');
     const uploadStatus = document.getElementById('icon-upload-status');
-    
+
     uploadStatus.textContent = "Seçilmedi";
-    
+
     if (btn.icon && btn.icon.startsWith("custom:")) {
         iconSelect.value = "custom";
         customIconGroup.style.display = 'block';
@@ -934,7 +1251,7 @@ function openEditButtonModal(id) {
         customIconUploadGroup.style.display = iconSelect.value === 'custom' ? 'block' : 'none';
         editIconCustom.value = "";
     }
-    
+
     const editValueLabel = document.getElementById('edit-value-label');
     const appGroup = document.getElementById('installed-apps-group');
     document.getElementById('app-search-input').value = "";
@@ -947,12 +1264,20 @@ function openEditButtonModal(id) {
         editValue.placeholder = "mic_mute, speaker_mute, virtual_monitor veya ctrl+shift+m";
         appGroup.style.display = 'none';
     } else if (btn.type === 'volume_slider') {
-        editValueLabel.textContent = "Ses Kontrol Değeri / Eylemi";
-        editValue.placeholder = "master, mic, up, down";
+        editValueLabel.textContent = "Ses Kontrol Değeri (0 - 100)";
+        editValue.placeholder = "master_volume, 0-100";
+        appGroup.style.display = 'none';
+    } else if (btn.type === 'brightness_slider') {
+        editValueLabel.textContent = "Parlaklık Kontrol Değeri (0 - 100)";
+        editValue.placeholder = "display_brightness, 0-100";
         appGroup.style.display = 'none';
     } else if (btn.type === 'live_info') {
-        editValueLabel.textContent = "Canlı Bilgi Türü";
-        editValue.placeholder = "cpu, ram, stats";
+        editValueLabel.textContent = "Canlı Donanım Metriği";
+        editValue.placeholder = "cpu, ram";
+        appGroup.style.display = 'none';
+    } else if (btn.type === 'clock_widget') {
+        editValueLabel.textContent = "Saat Formatı";
+        editValue.placeholder = "digital_clock, analog_clock";
         appGroup.style.display = 'none';
     } else {
         editValueLabel.textContent = "Shell Komutu / Uygulama Adı (Örn. calc.exe)";
@@ -960,7 +1285,7 @@ function openEditButtonModal(id) {
         appGroup.style.display = 'block';
         loadInstalledApps();
     }
-    
+
     document.getElementById('edit-button-modal').classList.add('active');
 }
 
@@ -969,15 +1294,18 @@ function applyButtonEdit() {
     const type = document.getElementById('edit-type').value;
     const value = document.getElementById('edit-value').value;
     const page = parseInt(document.getElementById('edit-page')?.value || "0");
-    
+    const colSpan = parseInt(document.getElementById('edit-colspan')?.value || "1");
+    const rowSpan = parseInt(document.getElementById('edit-rowspan')?.value || "1");
+    const color = document.getElementById('edit-color')?.value || "#818CF8";
+
     const iconSelect = document.getElementById('edit-icon-select').value;
     const editIconCustom = document.getElementById('edit-icon-custom').value;
-    
+
     let icon = iconSelect;
     if (iconSelect === 'custom' && editIconCustom.trim().length > 0) {
         icon = "custom:" + editIconCustom.trim();
     }
-    
+
     const saveAndClose = (finalIcon) => {
         const idx = apiConfig.stream_deck_buttons.findIndex(b => b.id === editingButtonId);
         if (idx !== -1) {
@@ -988,7 +1316,10 @@ function applyButtonEdit() {
                 type,
                 value,
                 icon: finalIcon,
-                page
+                page,
+                col_span: colSpan,
+                row_span: rowSpan,
+                color
             };
             renderStreamDeckButtons();
             saveConfigOnServer();
@@ -996,7 +1327,6 @@ function applyButtonEdit() {
         document.getElementById('edit-button-modal').classList.remove('active');
     };
 
-    // If it's a command type and has a value, try to auto-extract the icon from the target EXE/LNK
     const lowerVal = value.trim().toLowerCase();
     const isAppPath = lowerVal.endsWith('.exe') || lowerVal.endsWith('.lnk') || value.includes('\\') || value.includes('/');
     if (type === 'command' && value.trim().length > 0 && iconSelect !== 'custom' && isAppPath) {
