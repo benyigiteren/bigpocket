@@ -1,15 +1,5 @@
 name: Release
 
-# Push a tag like "v1.2.0" -> builds Windows (portable zip + single-file Setup) and
-# Android, then publishes a GitHub Release with SHA256SUMS.txt.
-# The release body (update notes shown inside the apps) is taken from CHANGELOG.md's
-# section for that version, or auto-generated if missing.
-#
-# Required repository secrets for a signed APK (needed so in-app updates install over
-# the existing app):
-#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-# Without them the Gradle build falls back to the Android debug keystore.
-
 on:
   push:
     tags: ["v*"]
@@ -22,43 +12,69 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: desktop/go.mod
-      - name: Build portable app
-        working-directory: desktop
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows Tauri App
+        working-directory: desktop/src-tauri
+        run: cargo build --release
+      - name: Package Windows Artifacts
         shell: pwsh
         run: |
+          Copy-Item desktop/src-tauri/target/release/bigpocket.exe BigPocket.exe
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          # `.` compiles every package-main .go file in desktop/ (main.go, win32_native.go,
-          # qrcode_gen.go, security.go, updater.go, discovery.go, ...).
-          go build -ldflags "-H windowsgui -s -w" -o dist/BigPocket.exe .
-          # installer.go embeds BigPocket.exe from desktop/, so keep a copy next to it.
-          Copy-Item -Force dist/BigPocket.exe BigPocket.exe
-          Copy-Item -Recurse -Force frontend dist/frontend
-          Copy-Item -Recurse -Force usbmmidd dist/usbmmidd
-          Copy-Item -Recurse -Force VBCABLE dist/VBCABLE
-          Copy-Item -Force logo.ico dist/logo.ico
-          Compress-Archive -Path dist/* -DestinationPath ../bigpocket-windows.zip -Force
-      - name: Build single-file installer
-        working-directory: desktop
-        shell: pwsh
-        run: go build -ldflags "-H windowsgui -s -w" -o ../bigpocket-windows.exe installer.go
+          Copy-Item BigPocket.exe dist/BigPocket.exe
+          Copy-Item -Recurse -Force desktop/frontend dist/frontend
+          Copy-Item -Recurse -Force desktop/usbmmidd dist/usbmmidd
+          Copy-Item -Recurse -Force desktop/VBCABLE dist/VBCABLE
+          Copy-Item -Force desktop/logo.ico dist/logo.ico
+          Compress-Archive -Path dist/* -DestinationPath bigpocket-windows.zip -Force
       - uses: actions/upload-artifact@v4
         with:
           name: windows
           path: |
+            BigPocket.exe
             bigpocket-windows.zip
-            bigpocket-windows.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build macOS Tauri App
+        working-directory: desktop/src-tauri
+        run: cargo build --release
+      - name: Rename macOS Binary
+        run: |
+          cp desktop/src-tauri/target/release/bigpocket bigpocket-macos
+          chmod +x bigpocket-macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: bigpocket-macos
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libx11-dev libxdo-dev libxtst-dev libxi-dev libxrandr-dev libasound2-dev
+      - name: Build Linux Tauri App
+        working-directory: desktop/src-tauri
+        run: cargo build --release
+      - name: Rename Linux Binary
+        run: |
+          cp desktop/src-tauri/target/release/bigpocket bigpocket-linux
+          chmod +x bigpocket-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: bigpocket-linux
 
   android:
     runs-on: ubuntu-latest
     env:
-      # The secret is hoisted to job level on purpose: the `env` context is
-      # available inside a step-level `if:`, while the `secrets` context is not
-      # (see "Context availability" in the GitHub Actions contexts reference).
-      # The previous per-step `env: KS:` could never be read by that step's own
-      # `if: env.KS != ''`, so the keystore was never decoded.
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
     steps:
       - uses: actions/checkout@v4
@@ -78,14 +94,14 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/*.apk ../bigpocket.apk
+          cp app/build/outputs/apk/release/*.apk ../BigPocket.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: bigpocket.apk
+          path: BigPocket.apk
 
   release:
-    needs: [windows, android]
+    needs: [windows, macos, linux, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,14 +114,16 @@ jobs:
           awk -v v="$VER" '/^## /{p = index($0, v) > 0; next} p' CHANGELOG.md > notes.md || true
       - name: Generate checksums
         run: |
-          sha256sum bigpocket-windows.zip bigpocket-windows.exe bigpocket.apk > SHA256SUMS.txt
+          sha256sum BigPocket.exe bigpocket-windows.zip bigpocket-macos bigpocket-linux BigPocket.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           body_path: notes.md
           generate_release_notes: true
           files: |
+            BigPocket.exe
             bigpocket-windows.zip
-            bigpocket-windows.exe
-            bigpocket.apk
+            bigpocket-macos
+            bigpocket-linux
+            BigPocket.apk
             SHA256SUMS.txt
