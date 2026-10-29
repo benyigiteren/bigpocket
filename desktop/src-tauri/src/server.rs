@@ -2056,7 +2056,7 @@ fn capture_primary_display_png() -> Result<(String, i64), String> {
     let monitors = xcap::Monitor::all().map_err(|e| format!("Ekran bulunamadı: {e}"))?;
     let monitor = monitors
         .iter()
-        .find(|m| m.is_primary())
+        .find(|m| m.is_primary().unwrap_or(false))
         .or_else(|| monitors.first())
         .ok_or_else(|| "Ekran bulunamadı".to_string())?;
     let image = monitor

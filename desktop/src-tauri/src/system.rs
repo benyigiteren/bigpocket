@@ -468,7 +468,7 @@ pub fn capture_screen_jpeg(quality: u8) -> Result<Vec<u8>, String> {
         Monitor::all().map_err(|error| format!("failed to enumerate monitors: {error}"))?;
     let monitor = monitors
         .iter()
-        .find(|monitor| monitor.is_primary())
+        .find(|monitor| monitor.is_primary().unwrap_or(false))
         .or_else(|| monitors.first())
         .ok_or_else(|| "no active display found".to_string())?;
 
@@ -492,7 +492,12 @@ pub fn capture_monitor_jpeg(index: usize, quality: u8) -> Result<Vec<u8>, String
 pub fn monitor_bounds(index: usize) -> Option<(i32, i32, u32, u32)> {
     let monitors = Monitor::all().ok()?;
     let monitor = monitors.get(index)?;
-    Some((monitor.x(), monitor.y(), monitor.width(), monitor.height()))
+    Some((
+        monitor.x().unwrap_or(0),
+        monitor.y().unwrap_or(0),
+        monitor.width().unwrap_or(0),
+        monitor.height().unwrap_or(0),
+    ))
 }
 
 fn encode_monitor_jpeg(monitor: &Monitor, quality: u8) -> Result<Vec<u8>, String> {
