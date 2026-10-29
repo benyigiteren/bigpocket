@@ -279,6 +279,7 @@ pub struct InputController {
     enigo: Enigo,
 }
 
+unsafe impl Send for InputController {}
 impl InputController {
     pub fn new() -> Result<Self, String> {
         let enigo = Enigo::new(&Settings::default())
