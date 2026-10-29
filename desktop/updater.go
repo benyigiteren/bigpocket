@@ -146,17 +146,21 @@ func resolveReleaseDownloadURL(rel GitHubRelease) string {
 	return ""
 }
 
-func checkForUpdate(force bool) *UpdateInfo {
+func checkForUpdate(force bool, forceBeta ...bool) *UpdateInfo {
 	updateMu.Lock()
 	defer updateMu.Unlock()
 	if !force && updateCache != nil && time.Since(updateCachedAt) < 30*time.Minute {
 		return updateCache
 	}
 
-	info := &UpdateInfo{CurrentVersion: AppVersion}
+	curVer := strings.TrimPrefix(AppVersion, "v")
+	info := &UpdateInfo{CurrentVersion: curVer}
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	isBeta := loadConfig().BetaChannel
+	if len(forceBeta) > 0 {
+		isBeta = forceBeta[0]
+	}
 	var targetURL string
 	if isBeta {
 		targetURL = "https://api.github.com/repos/" + GitHubRepo + "/releases?per_page=5"
@@ -564,7 +568,17 @@ func setupUpdateRoutes() {
 
 	http.HandleFunc("/api/update/check", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(checkForUpdate(r.URL.Query().Get("force") == "1"))
+		force := r.URL.Query().Get("force") == "1"
+		qBeta := r.URL.Query().Get("beta")
+		var isBeta bool
+		if qBeta == "1" || qBeta == "true" {
+			isBeta = true
+		} else if qBeta == "0" || qBeta == "false" {
+			isBeta = false
+		} else {
+			isBeta = loadConfig().BetaChannel
+		}
+		json.NewEncoder(w).Encode(checkForUpdate(force, isBeta))
 	})
 
 	http.HandleFunc("/api/update/progress", func(w http.ResponseWriter, r *http.Request) {

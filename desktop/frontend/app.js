@@ -5081,10 +5081,13 @@ function checkMobileMode() {
 
     window.checkForUpdates = async function (manual = false) {
         try {
-            const info = await fetch('/api/update/check' + (manual ? '?force=1' : '')).then(r => r.json());
+            const isBeta = (apiConfig && !!apiConfig.beta_channel) || (document.getElementById('settings-beta-channel-toggle')?.checked);
+            const betaParam = isBeta ? '&beta=1' : '&beta=0';
+            const info = await fetch('/api/update/check' + (manual ? '?force=1' : '?force=0') + betaParam).then(r => r.json());
+            const curVerClean = (info.current_version || '1.4.1').replace(/^v+/, '');
             const currentVerEl = document.getElementById('settings-current-ver');
-            if (currentVerEl && info.current_version) {
-                currentVerEl.textContent = 'v' + info.current_version;
+            if (currentVerEl) {
+                currentVerEl.textContent = 'v' + curVerClean;
             }
             if (info.available) {
                 if (!manual && localStorage.getItem(SKIP_KEY) === info.latest_version) return;
@@ -5097,10 +5100,10 @@ function checkMobileMode() {
                         updateStatusEl.textContent = 'Hata: ' + info.error;
                     } else {
                         updateStatusEl.style.color = '#10b981';
-                        updateStatusEl.textContent = `En güncel sürümü kullanıyorsunuz (v${info.current_version})`;
+                        updateStatusEl.textContent = `En güncel sürümü kullanıyorsunuz (v${curVerClean})`;
                     }
                 } else {
-                    alert(info.error ? ('Güncelleme kontrol edilemedi: ' + info.error) : `En güncel sürümü kullanıyorsunuz (v${info.current_version}).`);
+                    alert(info.error ? ('Güncelleme kontrol edilemedi: ' + info.error) : `En güncel sürümü kullanıyorsunuz (v${curVerClean}).`);
                 }
             }
         } catch (_) { /* offline */ }
@@ -5129,7 +5132,7 @@ function checkMobileMode() {
             betaToggle.addEventListener('change', async (e) => {
                 if (apiConfig) {
                     apiConfig.beta_channel = e.target.checked;
-                    if (window.saveConfig) window.saveConfig();
+                    saveConfigOnServer(true);
                 }
                 if (window.checkForUpdates) {
                     await window.checkForUpdates(true);
