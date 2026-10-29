@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	AppVersion = "v1.4.2-beta"
+	AppVersion = "v1.5.0-beta"
 	// GitHubRepo is "owner/repo" of the public repository that publishes releases.
 	GitHubRepo = "benyigiteren/bigpocket"
 )

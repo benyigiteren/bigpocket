@@ -3,8 +3,16 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
-## v1.4.2-beta
+## v1.5.0-beta
 
+### 🦀 Rust + Tauri v2 Mimari Dönüşümü
+- **Tamamı Rust Backend:** Masaüstü sunucusu Go'dan sıfır gecikmeli, bellek güvenli ve asenkron Rust (Tauri v2 + Tokio + Axum) mimarisine taşındı.
+- **Çapraz Platform Mimarisi:** macOS ve Linux için platform soyutlamaları eklendi; Windows Defender yanlış alarmları (false-positive) sıfırlandı.
+- **Sıfır Gecikmeli Ekran & Giriş:** Rust `xcap` ile donanım seviyesi ekran yakalama ve `enigo` ile platform bağımsız klavye/fare kontrolü.
+- **Yerel QR & Vektör Render:** Harici internet servisine ihtiyaç duymadan Rust içinde sıfır milisaniyede üretilen SVG QR kod eşleştirmesi.
+- **Android v1.5.0-beta:** versionCode 8, SemVer 2.0 çift kanal otomatik güncelleme desteği.
+
+## v1.4.2-beta
 ### 🧪 Çift Kanal Sürüm & Beta Önizleme Motoru
 - **Beta Güncelleme Kanalı:** Kullanıcılar Ayarlar penceresinden tek dokunuşla "Beta Güncellemelerini Al" modunu açarak yeni özellikleri resmi kararlı sürümden önce test edebilir.
 - **SemVer 2.0 Algoritması:** `v1.4.2 > v1.4.2-beta` ve `v1.4.2-beta.2 > v1.4.2-beta.1` kuralı ile beta kullananlar resmi tam sürüm çıktığında sorunsuz ana sürüme yükseltilir.

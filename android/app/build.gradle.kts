@@ -28,8 +28,8 @@ android {
         applicationId = "com.ygt.bigpocket"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.4.2-beta"
+        versionCode = 8
+        versionName = "1.5.0-beta"
 
         // Ship only real device ABIs; x86/x86_64 emulator payloads only bloat
         // the release APK (the emulator is a debug-only target).

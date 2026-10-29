@@ -1,6 +1,6 @@
 [package]
 name = "bigpocket"
-version = "1.4.2"
+version = "1.5.0"
 description = "BigPocket Control Panel & Stream Deck Desktop Server"
 authors = ["benyigiteren"]
 edition = "2021"
