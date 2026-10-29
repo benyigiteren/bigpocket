@@ -52,15 +52,15 @@ jobs:
           path: bigpocket-macos
 
   linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libx11-dev libxdo-dev libxtst-dev libxi-dev libxrandr-dev libasound2-dev libpipewire-0.3-dev libclang-dev
-      - name: Build Linux Tauri App
+          sudo apt-get install -y pkg-config libwebkit2gtk-4.1-dev librsvg2-dev patchelf libx11-dev libxdo-dev libxtst-dev libxi-dev libxrandr-dev libasound2-dev libpipewire-0.3-dev libclang-dev
+          sudo apt-get install -y libayatana-appindicator3-dev || sudo apt-get install -y libappindicator3-dev
         working-directory: desktop/src-tauri
         run: cargo build --release
       - name: Rename Linux Binary
