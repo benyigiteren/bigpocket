@@ -42,3 +42,8 @@ desktop/scratch/
 config.json
 SharedFiles/
 .agents/
+
+# Rust / Tauri build artifacts
+desktop/src-tauri/target/
+target/
+desktop/src-tauri/gen/
