@@ -47,3 +47,8 @@ SharedFiles/
 desktop/src-tauri/target/
 target/
 desktop/src-tauri/gen/
+bigpocket-macos
+macos_artifact.zip
+*.dmg
+*.deb
+*.tar.gz

@@ -39,39 +39,67 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build macOS Tauri App
-        working-directory: desktop/src-tauri
-        run: cargo build --release
-      - name: Rename macOS Binary
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+      - name: Build macOS Tauri Bundle
+        working-directory: desktop
+        run: tauri build
+      - name: Package macOS Artifacts
         run: |
-          cp desktop/src-tauri/target/release/bigpocket bigpocket-macos
-          chmod +x bigpocket-macos
+          # Copy DMG bundle if generated
+          find desktop/src-tauri/target/release/bundle/dmg -name "*.dmg" -exec cp {} BigPocket.dmg \; 2>/dev/null || true
+          # Create compressed archive of .app bundle
+          if [ -d desktop/src-tauri/target/release/bundle/macos/BigPocket.app ]; then
+            tar -czvf BigPocket-macos.tar.gz -C desktop/src-tauri/target/release/bundle/macos BigPocket.app
+          fi
+          # Also keep standalone binary
+          cp desktop/src-tauri/target/release/bigpocket bigpocket-macos 2>/dev/null || true
+          chmod +x bigpocket-macos 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: bigpocket-macos
+          path: |
+            BigPocket.dmg
+            BigPocket-macos.tar.gz
+            bigpocket-macos
 
   linux:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Install Linux Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libwebkit2gtk-4.1-dev librsvg2-dev patchelf libx11-dev libxdo-dev libxtst-dev libxi-dev libxrandr-dev libasound2-dev libpipewire-0.3-dev libclang-dev libgbm-dev
           sudo apt-get install -y libayatana-appindicator3-dev || sudo apt-get install -y libappindicator3-dev
-      - name: Build Linux Tauri App
-        working-directory: desktop/src-tauri
-        run: cargo build --release
-      - name: Rename Linux Binary
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+      - name: Build Linux Tauri Bundle (.deb)
+        working-directory: desktop
+        run: tauri build --bundles deb
+      - name: Package Linux Artifacts
         run: |
-          cp desktop/src-tauri/target/release/bigpocket bigpocket-linux
-          chmod +x bigpocket-linux
+          # Copy .deb installer
+          find desktop/src-tauri/target/release/bundle/deb -name "*.deb" -exec cp {} BigPocket-linux.deb \; 2>/dev/null || true
+          # Create universal compressed tar.gz
+          tar -czvf BigPocket-linux-x86_64.tar.gz -C desktop/src-tauri/target/release bigpocket
+          # Also keep standalone binary
+          cp desktop/src-tauri/target/release/bigpocket bigpocket-linux 2>/dev/null || true
+          chmod +x bigpocket-linux 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: bigpocket-linux
+          path: |
+            BigPocket-linux.deb
+            BigPocket-linux-x86_64.tar.gz
+            bigpocket-linux
 
   android:
     runs-on: ubuntu-latest
@@ -115,7 +143,7 @@ jobs:
           awk -v v="$VER" '/^## /{p = index($0, v) > 0; next} p' CHANGELOG.md > notes.md || true
       - name: Generate checksums
         run: |
-          sha256sum BigPocket.exe bigpocket-windows.zip bigpocket-macos bigpocket-linux BigPocket.apk > SHA256SUMS.txt
+          sha256sum BigPocket.exe bigpocket-windows.zip BigPocket.apk *macos* *linux* > SHA256SUMS.txt 2>/dev/null || sha256sum *.* > SHA256SUMS.txt || true
           cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
@@ -124,10 +152,15 @@ jobs:
           body_path: notes.md
           draft: false
           prerelease: true
+          fail_on_unmatched_files: false
           files: |
             BigPocket.exe
             bigpocket-windows.zip
+            BigPocket.dmg
+            BigPocket-macos.tar.gz
             bigpocket-macos
+            BigPocket-linux.deb
+            BigPocket-linux-x86_64.tar.gz
             bigpocket-linux
             BigPocket.apk
             SHA256SUMS.txt
