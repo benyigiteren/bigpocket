@@ -82,12 +82,12 @@ func runInstaller(silent bool) {
 
 	// 4. Create Shortcuts (Desktop & Start Menu)
 	targetExe := filepath.Join(installPath, "BigPocket.exe")
-	
+
 	homeDir, _ := os.UserHomeDir()
 	desktopShortcut := filepath.Join(homeDir, "Desktop", "BigPocket.lnk")
 	os.Remove(desktopShortcut)
 	createShortcut(targetExe, desktopShortcut, installPath, targetExe+",0")
- 
+
 	startMenuDir := filepath.Join(os.Getenv("ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs")
 	os.MkdirAll(startMenuDir, 0755)
 	startMenuShortcut := filepath.Join(startMenuDir, "BigPocket.lnk")
@@ -115,7 +115,7 @@ func runInstaller(silent bool) {
 func runUninstaller() {
 	// 1. Ask for confirmation
 	ret := MessageBox("BigPocket Kaldırma", "BigPocket programını bilgisayarınızdan kaldırmak istediğinize emin misiniz?", 0x24) // MB_YESNO | MB_ICONQUESTION
-	if ret != 6 { // IDYES is 6
+	if ret != 6 {                                                                                                                // IDYES is 6
 		return
 	}
 
@@ -132,7 +132,6 @@ func runUninstaller() {
 	refreshShellIcons()
 
 	// 5. Create background cleanup batch file to delete installer files and itself
-	tempBatch := filepath.Join(os.Getenv("TEMP"), "bigpocket_cleanup.bat")
 	batchContent := fmt.Sprintf(`@echo off
 :retry
 timeout /t 1 /nobreak > NUL
@@ -141,7 +140,19 @@ if exist "%s" goto retry
 del "%%~f0"
 `, installPath, installPath)
 
-	os.WriteFile(tempBatch, []byte(batchContent), 0755)
+	batFile, err := os.CreateTemp("", "bigpocket_cleanup_*.bat")
+	if err != nil {
+		MessageBox("BigPocket Kaldırma", "Temizlik betiği oluşturulamadı: "+err.Error(), 0x10)
+		return
+	}
+	tempBatch := batFile.Name()
+	if _, err := batFile.WriteString(batchContent); err != nil {
+		batFile.Close()
+		os.Remove(tempBatch)
+		MessageBox("BigPocket Kaldırma", "Temizlik betiği yazılamadı: "+err.Error(), 0x10)
+		return
+	}
+	batFile.Close()
 
 	// Run batch file in background
 	execCommandHidden("cmd", "/c", tempBatch).Start()
@@ -161,7 +172,7 @@ func extractEmbedFS(fs embed.FS, srcDir, destDir string) error {
 		if srcDir == "." {
 			srcPath = entry.Name()
 		}
-		
+
 		// Skip compiling setup/installer itself from copying
 		if entry.Name() == "setup" || entry.Name() == "installer.go" {
 			continue
@@ -227,7 +238,7 @@ func registerUninstall() {
 	defer k.Close()
 
 	k.SetStringValue("DisplayName", "BigPocket")
-	k.SetStringValue("DisplayVersion", "1.3.0")
+	k.SetStringValue("DisplayVersion", "1.4")
 	k.SetStringValue("Publisher", "benyigiteren")
 	k.SetStringValue("InstallLocation", installPath)
 	k.SetStringValue("UninstallString", filepath.Join(installPath, "uninstall.exe"))

@@ -38,11 +38,16 @@ fun SettingsDialog(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val currentVersion = UpdateManager.currentVersion(context)
+    val prefs = remember { context.getSharedPreferences("bigpocket_prefs", Context.MODE_PRIVATE) }
+    var bgCameraEnabled by remember { mutableStateOf(prefs.getBoolean("bg_camera_enabled", true)) }
+    var bgMicEnabled by remember { mutableStateOf(prefs.getBoolean("bg_mic_enabled", true)) }
+    var bgScreenEnabled by remember { mutableStateOf(prefs.getBoolean("bg_screen_enabled", false)) }
+    var bgServiceEnabled by remember { mutableStateOf(prefs.getBoolean("bg_service_enabled", true)) }
+    var betaUpdatesEnabled by remember { mutableStateOf(prefs.getBoolean("beta_updates", false)) }
 
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var updateCheckStatus by remember { mutableStateOf<String?>(null) }
     var updateCheckIsSuccess by remember { mutableStateOf<Boolean?>(null) }
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -51,7 +56,7 @@ fun SettingsDialog(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 .heightIn(max = 620.dp),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MinimalistSurface),
             border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder)
         ) {
@@ -71,7 +76,7 @@ fun SettingsDialog(
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(MinimalistAccent.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
@@ -117,7 +122,7 @@ fun SettingsDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Card(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MinimalistSurfaceElevated),
                     border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder),
                     modifier = Modifier.fillMaxWidth()
@@ -145,7 +150,7 @@ fun SettingsDialog(
 
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
+                                    .clip(RoundedCornerShape(999.dp))
                                     .background(StatusGreenText.copy(alpha = 0.15f))
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
@@ -247,7 +252,7 @@ fun SettingsDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Card(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MinimalistSurfaceElevated),
                     border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder),
                     modifier = Modifier.fillMaxWidth()
@@ -265,10 +270,28 @@ fun SettingsDialog(
                             Switch(
                                 checked = keepScreenOn,
                                 onCheckedChange = onKeepScreenOnChange,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MinimalistPrimary,
-                                    checkedTrackColor = MinimalistAccent
-                                )
+                                colors = bigPocketSwitchColors()
+                            )
+                        }
+
+                        HorizontalDivider(color = MinimalistBorder, modifier = Modifier.padding(vertical = 4.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Beta Güncellemelerini Al", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistPrimary)
+                                Text("Önizleme ve test sürümlerini denetle (v1.4.2-beta)", fontSize = 11.5.sp, color = MinimalistSecondary)
+                            }
+                            Switch(
+                                checked = betaUpdatesEnabled,
+                                onCheckedChange = {
+                                    betaUpdatesEnabled = it
+                                    prefs.edit().putBoolean("beta_updates", it).apply()
+                                },
+                                colors = bigPocketSwitchColors()
                             )
                         }
                     }
@@ -276,6 +299,110 @@ fun SettingsDialog(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
+                // Card 2b: Arka Planda Yayın Kontrolleri
+                Text(
+                    text = "ARKA PLANDA YAYIN & ÇALIŞMA",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MinimalistSecondary,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MinimalistSurfaceElevated),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Switch 1: Kamera
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Arka Planda Kamera Yayını", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistPrimary)
+                                Text("Ekran kapandığında veya başka uygulamaya geçildiğinde web kamerası açık kalsın", fontSize = 11.5.sp, color = MinimalistSecondary)
+                            }
+                            Switch(
+                                checked = bgCameraEnabled,
+                                onCheckedChange = {
+                                    bgCameraEnabled = it
+                                    prefs.edit().putBoolean("bg_camera_enabled", it).apply()
+                                },
+                                colors = bigPocketSwitchColors()
+                            )
+                        }
+
+                        HorizontalDivider(color = MinimalistBorder)
+
+                        // Switch 2: Mikrofon
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Arka Planda Mikrofon Yayını", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistPrimary)
+                                Text("Arka planda PC sanal mikrofon akışını sürdür", fontSize = 11.5.sp, color = MinimalistSecondary)
+                            }
+                            Switch(
+                                checked = bgMicEnabled,
+                                onCheckedChange = {
+                                    bgMicEnabled = it
+                                    prefs.edit().putBoolean("bg_mic_enabled", it).apply()
+                                },
+                                colors = bigPocketSwitchColors()
+                            )
+                        }
+
+                        HorizontalDivider(color = MinimalistBorder)
+
+                        // Switch 3: 2. Ekran
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Arka Planda 2. Ekran Akışı", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistPrimary)
+                                Text("Ekran kilitlendiğinde 2. monitör akışını sürdür (daha fazla pil tüketir)", fontSize = 11.5.sp, color = MinimalistSecondary)
+                            }
+                            Switch(
+                                checked = bgScreenEnabled,
+                                onCheckedChange = {
+                                    bgScreenEnabled = it
+                                    prefs.edit().putBoolean("bg_screen_enabled", it).apply()
+                                },
+                                colors = bigPocketSwitchColors()
+                            )
+                        }
+
+                        HorizontalDivider(color = MinimalistBorder)
+
+                        // Switch 4: Sürekli Servis & WakeLock
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Sürekli Arka Plan Servisi", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistPrimary)
+                                Text("Doze modunu engelleyerek kesintisiz Wi-Fi bağlantısı sağlar", fontSize = 11.5.sp, color = MinimalistSecondary)
+                            }
+                            Switch(
+                                checked = bgServiceEnabled,
+                                onCheckedChange = {
+                                    bgServiceEnabled = it
+                                    prefs.edit().putBoolean("bg_service_enabled", it).apply()
+                                },
+                                colors = bigPocketSwitchColors()
+                            )
+                        }
+                    }
+                }
                 // Card 3: Ağ & Proje
                 Text(
                     text = "AĞ & AÇIK KAYNAK",
@@ -287,7 +414,7 @@ fun SettingsDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Card(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MinimalistSurfaceElevated),
                     border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder),
                     modifier = Modifier.fillMaxWidth()
@@ -317,7 +444,7 @@ fun SettingsDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(MinimalistBackground)
                                 .clickable {
                                     try {
@@ -356,7 +483,7 @@ fun SettingsDialog(
                 // Close Button
                 Button(
                     onClick = onDismiss,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MinimalistSurfaceElevated,
                         contentColor = MinimalistPrimary

@@ -3,8 +3,23 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
-## v1.4
+## v1.4.2-beta
 
+### 🧪 Çift Kanal Sürüm & Beta Önizleme Motoru
+- **Beta Güncelleme Kanalı:** Kullanıcılar Ayarlar penceresinden tek dokunuşla "Beta Güncellemelerini Al" modunu açarak yeni özellikleri resmi kararlı sürümden önce test edebilir.
+- **SemVer 2.0 Algoritması:** `v1.4.2 > v1.4.2-beta` ve `v1.4.2-beta.2 > v1.4.2-beta.1` kuralı ile beta kullananlar resmi tam sürüm çıktığında sorunsuz ana sürüme yükseltilir.
+
+## v1.4.1
+
+### 💬 WhatsApp Tarzı Hızlı Akış (Flow) & Bütünsel Editorial Monokrom
+- **Hızlı Akış (WhatsApp Modu):** Bilgisayar ve telefon arasında sıfır kurulumla konuşma balonu, web bağlantısı, fotoğraf ve dosya transferi.
+- **Apple Standart Zümrüt Yeşili Anahtarlar:** Açık/kapalı durumu %100 net ayırt edilen iOS yeşili switchler (`#22C55E` track + beyaz thumb).
+- **İsteğe Bağlı Arka Plan Yayını:** Telefon ekranı kilitlendiğinde veya başka uygulamadayken kamera ve mikrofon açık kalabilir (Medya sekmesinden veya Ayarlar'dan tek tıkla kontrol edilebilir).
+- **Sıfır GC Ekran Akışı:** Windows `sync.Pool` ve Android çift tamponlu `inBitmap` ile sıfır bellek sızıntısı ve takılmasız 30 FPS.
+- **Hızlı Komut Paleti (Ctrl+K):** Raycast tarzı arama ve sistem kısayolları.
+- **Windows WASAPI Ses Mikseri:** Spotify, Chrome, Discord gibi uygulamaların sesini bağımsız ayarlayan per-app kapsül kaydırıcı.
+
+## v1.4
 ### 🍏 Apple Control Center Tarzı Kapsül Kaydırıcılar (Ses & Parlaklık)
 - **Akıcı Dokunmatik Kapsül (Pill Slider):** Eski basit butonlar yerine iOS Denetim Merkezi'ndeki gibi akıcı, dikey/yatay parmak sürükleme ve tıklamayla %0-%100 seviyesini anında ayarlayan Apple kapsül kaydırıcıları entegre edildi.
 - **Akıllı Kontrast & Dinamik İkonlar:** Doluluk arttıkça metin ve simgeler arka plana göre otomatik olarak açık/koyu renk kontrastına geçer. Ses düzeyi simgesi sessiz, düşük ve yüksek seviyelere göre dinamik güncellenir; parlaklık için güneş simgesi ve sıcak amber ışıltısı eklendi.
@@ -26,8 +41,24 @@ uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 - **Dijital Saat Widget'ı:** Canlı saniyeli split-flap saat, nabız atan `:` ayracı ve Türkçe gün/tarih rozeti.
 - **Donanım Telemetri Kartı:** CPU % + Sıcaklık (°C) ve RAM GB kullanım çubuğu.
 
+### 📈 Canlı Performans Sparkline Grafikleri
+- **Kayan Geçmiş Penceresi:** CPU, RAM ve ağ hızı (indirme/yükleme) için son 24-30 veri noktası tutan kayan tampon eklendi.
+- **PC Web Paneli:** `telemetry_combo`, `cpu`, `ram` ve `net_speed` kartlarının altında/arkasında ince monokrom bir SVG sparkline çizilir; eğrinin altında %4 opaklıkta gradyan dolgu bulunur.
+- **Android Stream Deck:** Aynı kartlarda Canvas ile yumuşak bezier geçmiş eğrisi (`MinimalistPrimary` %60 çizgi, %6 alt dolgu) çizilir; RAM ve yükleme ikinci, daha soluk bir eğri olarak eklenir.
+
 ### 🔆 Yerel Monitör Parlaklığı Entegrasyonu
 - **WMI Parlaklık Kontrolü:** Windows monitör parlaklığı WMI API ile doğrudan PC üzerinden ayarlanır ve telefonla senkronize çalışır.
+
+### ⌨️ Hızlı Komut Paleti (Ctrl+K)
+- **Raycast Tarzı Cam Palet:** Masaüstü kontrol panelinde `Ctrl+K` (macOS: `Cmd+K`) veya kenar çubuğundaki büyüteç düğmesiyle ekranın ortasında açılan, bulanık cam zeminli ve tamamen monokrom komut paleti eklendi.
+- **Sekme · Sistem · Uygulama Komutları:** Sekmeler, hızlı sistem eylemleri (ses aç/kıs/sustur, ekran kilidi, sanal monitör aç/kapat, ekran görüntüsü, pano eşitleme) ve uygulamalar (Görev Yöneticisi, Hesap Makinesi, Not Defteri, Terminal, VS Code, Tarayıcı) tek arama listesinde birleştirildi.
+- **Klavye Odaklı Kullanım:** Yazarken anında filtreleme, `↑` `↓` ile seçim, `Enter` ile çalıştırma, `Esc` ile kapatma; sonuçlar alt köşede monokrom bildirimle raporlanır.
+
+### 🔊 Uygulama Bazlı Ses Mikseri (Per-App Volume)
+- **Core Audio (WASAPI) Oturum Listesi:** Varsayılan çıkış aygıtına ses gönderen tüm uygulamalar yerel COM API'siyle (`IMMDeviceEnumerator` → `IAudioSessionManager2` → `IAudioSessionEnumerator`) listelenir; PID, exe adı, canlı seviye ve çalma durumu raporlanır. Yeni `GET /api/audio_sessions` REST uç noktası bu listeyi paylaşır.
+- **Uygulama Sesi Widget'ı:** Stream Deck bileşen seçicisine "Uygulama Sesi" kartı eklendi. Kart oluşturulurken ses çalan uygulamalar otomatik listelenir; Spotify, Chrome, Discord veya Steam oyunları seçilip iOS tarzı kapsül kaydırıcı ile yalnızca o uygulamanın sesi kısılıp açılır.
+- **Anlık Kapsül Sürükleme:** Kapsül üzerindeki parmak/fare sürüklemesi `{"type":"set_app_volume"}` WebSocket mesajına dönüşür ve hedef uygulamanın tüm WASAPI oturumları `ISimpleAudioVolume` ile anında güncellenir; yeni seviye tüm bağlı istemcilere yayınlanır.
+- **Canlı Senkronizasyon:** Uygulama sesi BigPocket dışından değiştirildiğinde kart seviyesi periyodik olarak yenilenir.
 
 ## v1.3
 

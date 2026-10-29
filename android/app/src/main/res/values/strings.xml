@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">BigPocket</string>
+    <string name="share_sheet_label">BigPocket ile PC\'ye Gönder</string>
+    <string name="notif_channel_name">BigPocket Bağlantısı</string>
+    <string name="notif_channel_desc">PC bağlantısı ve canlı kamera/mikrofon yayını durumu</string>
+    <string name="notif_connected_title">BigPocket PC\'ye Bağlı</string>
+    <string name="notif_connected_text">Bağlantı aktif — uygulamaya dönmek için dokunun</string>
+    <string name="notif_streaming_title">BigPocket Yayını Açık</string>
+    <string name="notif_streaming_text">Kamera/mikrofon PC\'ye aktarılıyor</string>
+    <string name="notif_disconnect_action">Bağlantıyı Kes</string>
 </resources>

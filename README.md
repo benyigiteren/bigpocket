@@ -54,6 +54,11 @@ Go (Masaüstü Sunucusu) ve Kotlin/Jetpack Compose (Android İstemcisi) mimarisi
 *   **Dosya Paylaşımı:** Sürükle-bırak yöntemiyle telefonunuzdan bilgisayara, bilgisayardan telefonunuza sınırsız boyutta dosya aktarabilirsiniz.
 *   **Anlık Pano (Clipboard) Eşitleme:** Bilgisayarda kopyaladığınız bir metin anında telefona, telefonda kopyaladığınız metin ise anında bilgisayar panosuna aktarılır.
 
+### 7. Hızlı Komut Paleti (Ctrl+K) ⌨️
+*   **Raycast / Spotlight Tarzı Palet:** Masaüstü kontrol panelinde `Ctrl+K` (macOS: `Cmd+K`) veya kenar çubuğundaki büyüteç düğmesine basıldığında ekranın ortasında cam efektli, monokrom bir komut paleti açılır.
+*   **Tek Listede Her Şey:** Sekmeler (Gösterge Paneli, Stream Deck, 2. Monitör, Kamera Akışı, Dosya Transferi, Ayarlar), hızlı sistem eylemleri (ses aç/kıs/sustur, ekran kilidi, sanal monitör, ekran görüntüsü, pano eşitleme) ve uygulamalar (Görev Yöneticisi, Hesap Makinesi, Not Defteri, Terminal, VS Code, Tarayıcı) aynı arama listesinde toplanır.
+*   **Klavye Odaklı Akış:** Yazdıkça anında filtreleme, `↑` `↓` ile gezinme, `Enter` ile çalıştırma ve `Esc` ile kapatma.
+
 ---
 
 ## 🔌 Bağlantı Seçenekleri

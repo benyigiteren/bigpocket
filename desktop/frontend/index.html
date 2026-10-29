@@ -21,35 +21,41 @@
                 <span class="brand-name" style="font-size: 17px; font-weight: 700; letter-spacing: -0.3px;">BigPocket</span>
             </div>
             
+            <button type="button" class="sidebar-search-btn" id="cmdk-trigger" data-tooltip="Hızlı Komut Paleti (Ctrl+K)" aria-label="Hızlı komut paletini aç">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <span class="sidebar-search-label">Ara / Komut</span>
+                <kbd>Ctrl K</kbd>
+            </button>
+
             <nav class="sidebar-nav">
-                <button class="nav-item active" data-tab="dashboard">
+                <button class="nav-item active" data-tab="dashboard" data-tooltip="Gösterge Paneli">
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
                     <span>Gösterge Paneli</span>
                 </button>
-                <button class="nav-item" data-tab="streamdeck">
+                <button class="nav-item" data-tab="streamdeck" data-tooltip="Stream Deck Düzenleyici">
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>
                     <span>Stream Deck</span>
                 </button>
-                <button class="nav-item" data-tab="monitor">
+                <button class="nav-item" data-tab="monitor" data-tooltip="Sanal 2. Monitör">
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                     <span>2. Monitör</span>
                 </button>
-                <button class="nav-item" data-tab="webcam">
+                <button class="nav-item" data-tab="webcam" data-tooltip="Kamera Akışı">
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
                     <span>Kamera Akışı</span>
                 </button>
-                <button class="nav-item" data-tab="files">
+                <button class="nav-item" data-tab="files" data-tooltip="Pano &amp; Dosya Transferi">
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                     <span>Dosya Transferi</span>
                 </button>
-                <button class="nav-item" data-tab="settings">
+                <button class="nav-item" data-tab="settings" data-tooltip="Ayarlar">
                     <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     <span>Ayarlar</span>
                 </button>
             </nav>
             
             <div class="sidebar-footer">
-                <button class="btn-shutdown" id="btn-shutdown">
+                <button class="btn-shutdown" id="btn-shutdown" data-tooltip="BigPocket sunucusunu kapat">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
                     <span>Sunucuyu Kapat</span>
                 </button>
@@ -65,7 +71,7 @@
                     <h1 id="tab-title">Gösterge Paneli</h1>
                     <p id="tab-subtitle" class="serif-subtitle">Bağlantı durumunu izleyin ve telefonunuzu eşleştirin.</p>
                 </div>
-                <div class="status-indicator">
+                <div class="status-indicator" data-tooltip="PC ↔ Telefon bağlantı durumu">
                     <div class="status-dot" id="status-pulse"></div>
                     <span id="status-text" class="mono-text">BAĞLANTI BEKLENİYOR</span>
                 </div>
@@ -82,7 +88,7 @@
                         </div>
                         <div class="pairing-container">
                             <div class="pairing-qr">
-                                <img id="qr-code" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=BigPocket" alt="QR Code">
+                                <img id="qr-code" src="/api/qr?data=BigPocket" alt="QR Code">
                                 <p class="qr-desc">Telefon kamerasından taratın</p>
                             </div>
                             <div class="pairing-info">
@@ -90,7 +96,7 @@
                                     <label class="info-label">Bilgisayar IP Adresi</label>
                                     <div class="value-copy">
                                         <select id="pc-ip-select" class="highlight-ip font-mono" style="background: transparent; border: none; color: var(--text-main); font-family: inherit; font-size: inherit; outline: none; cursor: pointer; width: calc(100% - 24px);"></select>
-                                        <button class="btn-icon" id="btn-copy-ip" title="IP Adresini Kopyala">
+                                        <button class="btn-icon" id="btn-copy-ip" data-tooltip="IP Adresini Kopyala" aria-label="IP Adresini Kopyala">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                                         </button>
                                     </div>
@@ -148,31 +154,31 @@
                         <div class="stats-list">
                             <div class="stat-item">
                                 <span class="stat-label">Sanal Ekran Sürücüsü</span>
-                                <span class="status-pill status-red" id="driver-badge">HATA</span>
+                                <span class="status-pill status-red" id="driver-badge" data-tooltip="Sanal ekran sürücüsü durumu (2. Monitör)">HATA</span>
                             </div>
                             <div class="stat-item">
                                 <span class="stat-label">Pano Senkronizasyonu</span>
-                                <span class="status-pill status-green">AKTİF</span>
+                                <span class="status-pill status-green" data-tooltip="PC ↔ Telefon pano senkronizasyonu">AKTİF</span>
                             </div>
                             <div class="stat-item">
                                 <span class="stat-label">Ses Çıkışı (Oto v3)</span>
-                                <span class="status-pill status-green">HAZIR</span>
+                                <span class="status-pill status-green" data-tooltip="Telefon sesini PC hoparlörüne yönlendirme">HAZIR</span>
                             </div>
                             <div class="stat-item">
                                 <span class="stat-label">Sanal Mikrofon Sürücüsü</span>
-                                <span class="status-pill status-red" id="mic-driver-badge">EKSİK</span>
+                                <span class="status-pill status-red" id="mic-driver-badge" data-tooltip="VB-Cable sanal mikrofon sürücüsü durumu">EKSİK</span>
                             </div>
                             <div class="stat-item">
                                 <span class="stat-label">RAM Kullanımı</span>
-                                <span class="status-pill status-green" id="stat-ram" style="font-family: var(--font-mono); font-size: 11px;">HESAPLANIYOR</span>
+                                <span class="status-pill status-green" id="stat-ram" data-tooltip="Anlık PC bellek kullanımı" style="font-family: var(--font-mono); font-size: 11px;">HESAPLANIYOR</span>
                             </div>
                             <div class="stat-item">
                                 <span class="stat-label">İşletim Sistemi</span>
-                                <span class="status-pill status-green font-mono" id="stat-os" style="background: rgba(255,255,255,0.06); color: var(--text-main);">Windows 11</span>
+                                <span class="status-pill status-green font-mono" id="stat-os" data-tooltip="Algılanan işletim sistemi sürümü" style="background: rgba(255,255,255,0.06); color: var(--text-main);">Windows 11</span>
                             </div>
                             <div class="stat-item" style="display: flex; justify-content: space-between; align-items: center;">
-                                <span class="stat-label">⚡ USB 1ms Sıfır Gecikme</span>
-                                <button class="btn btn-secondary" id="btn-setup-adb-reverse" style="height: 26px; padding: 0 10px; font-size: 11px;">1ms ADB Başlat</button>
+                                <span class="stat-label">USB 1ms Sıfır Gecikme</span>
+                                <button class="btn btn-secondary" id="btn-setup-adb-reverse" data-tooltip="ADB ters bağlantısını kur (USB 1ms)" style="height: 26px; padding: 0 10px; font-size: 11px;">1ms ADB Başlat</button>
                             </div>
                         </div>
                     </div>
@@ -220,219 +226,425 @@
 
             <!-- TAB CONTENT: Stream Deck -->
             <section class="tab-panel" id="panel-streamdeck">
-                <div class="card animate-slide-in" style="--index: 1;">
-                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
-                        <div>
-                            <span class="meta-tag">STUDIO DECK V2 • DRAG & DROP & WIDGET ENGINE</span>
-                            <h2>Gelişmiş Stream Deck & Widget Tasarımcısı</h2>
-                            <p class="section-desc text-muted">Öğeleri sürükleyip bırakarak sıralayın, boyutlarını (1x1, 2x1, 1x2, 2x2) canlı büyütün, donanım monitörleri, saat ve ses kaydırıcıları ekleyin.</p>
-                        </div>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <button class="btn btn-secondary" id="btn-add-widget-quick" style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 8px 14px;">
-                                <span>➕</span> Widget / Buton Ekle
+                <div class="card animate-slide-in deck-studio-card" style="--index: 1;">
+                    <!-- Studio Toolbar: 3 sade grup — Sayfalar · Düzen · Aksiyonlar -->
+                    <div class="deck-top-bar">
+                        <!-- 1) Sayfalar -->
+                        <div class="deck-top-group deck-top-left">
+                            <div class="deck-page-tabs-wrap" id="deck-page-tabs">
+                                <!-- Dynamic page pills -->
+                            </div>
+                            <button type="button" class="deck-top-btn deck-top-btn-primary" id="btn-add-deck-page" data-tooltip="Yeni sayfa ekle">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <span>Yeni Sayfa</span>
                             </button>
-                            <button class="btn btn-primary" id="btn-save-config" style="padding: 8px 18px; font-size: 12.5px;">
-                                💾 Değişiklikleri Kaydet
+                            <!-- Hidden selects kept for state mirroring -->
+                            <select id="deck-rows" style="display: none;"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select>
+                            <select id="deck-cols" style="display: none;"><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select>
+                        </div>
+
+                        <!-- 2) Düzen Seçici: 3 net hap -->
+                        <div class="deck-top-group deck-top-center">
+                            <div class="deck-device-pills" id="deck-device-pills">
+                                <button type="button" class="deck-device-pill active" data-preset="phone_landscape" data-tooltip="Yatay 4×2 düzen">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><line x1="19" y1="10" x2="19" y2="14"/></svg>
+                                    <span>Yatay (4×2)</span>
+                                </button>
+                                <button type="button" class="deck-device-pill" data-preset="phone_portrait" data-tooltip="Dikey 2×4 düzen">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="10" y1="19" x2="14" y2="19"/></svg>
+                                    <span>Dikey (2×4)</span>
+                                </button>
+                                <button type="button" class="deck-device-pill" data-preset="deck_standard" data-tooltip="Geniş 5×3 düzen">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                                    <span>Geniş (5×3)</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 3) Aksiyonlar -->
+                        <div class="deck-top-group deck-top-right">
+                            <button type="button" class="deck-top-btn deck-top-btn-primary" id="btn-open-widget-picker" data-tooltip="Bileşen seçiciyi aç">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <span>Bileşen Ekle</span>
+                            </button>
+                            <button type="button" class="deck-top-btn" id="btn-templates-modal" data-tooltip="Hazır şablon düzenleri">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+                                <span>Şablonlar</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Page Selector Bar -->
-                    <div class="deck-pages-bar" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 8px 14px; border-radius: 8px;">
-                        <div style="display: flex; align-items: center; gap: 8px;" id="deck-page-tabs">
-                            <span style="font-size: 12px; font-weight: 600; color: var(--text-muted); margin-right: 4px;">SAYFA:</span>
-                            <!-- Dynamic page pill buttons -->
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <button class="btn btn-secondary" id="btn-add-deck-page" style="height: 28px; padding: 0 10px; font-size: 11px;">+ Yeni Sayfa</button>
-                        </div>
-                    </div>
-
-                    <!-- Grid Settings & Widget Palette Drawer -->
-                    <div class="deck-settings-bar" style="display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; background: var(--bg-main); padding: 14px; border-radius: 8px; border: 1px solid var(--border-color); align-items: flex-end;">
-                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 100px;">
-                            <label for="deck-rows">Satır Sayısı</label>
-                            <select id="deck-rows" style="width: 100%;">
-                                <option value="1">1 Satır</option>
-                                <option value="2" selected>2 Satır</option>
-                                <option value="3">3 Satır</option>
-                                <option value="4">4 Satır</option>
-                                <option value="5">5 Satır</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 100px;">
-                            <label for="deck-cols">Sütun Sayısı</label>
-                            <select id="deck-cols" style="width: 100%;">
-                                <option value="2">2 Sütun</option>
-                                <option value="3">3 Sütun</option>
-                                <option value="4" selected>4 Sütun</option>
-                                <option value="5">5 Sütun</option>
-                                <option value="6">6 Sütun</option>
-                                <option value="7">7 Sütun</option>
-                                <option value="8">8 Sütun</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0; flex: 1.5; min-width: 160px;">
-                            <label for="deck-preset">Hazır Şablonlar</label>
-                            <select id="deck-preset" style="width: 100%;">
-                                <option value="">-- Şablon Seçin --</option>
-                                <option value="pro_studio">Pro Studio (Ses Barı + Donanım + Saat + Kontroller)</option>
-                                <option value="media">Medya & Müzik Masası</option>
-                                <option value="hardware">Donanım & Sistem İzleme</option>
-                                <option value="obs">OBS & Yayın Kontrolü</option>
-                                <option value="windows">Windows Üretkenlik</option>
-                                <option value="gaming">Oyun & Discord</option>
-                            </select>
-                        </div>
-                        <button class="btn btn-secondary" id="btn-apply-grid-settings" style="height: 38px;">Düzeni Yenile</button>
-                    </div>
-
-                    <!-- Live Visual Interactive Deck Canvas -->
-                    <div class="deck-canvas-container" style="background: #09090C; border: 1px solid #1F1F27; border-radius: 12px; padding: 18px; box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);">
-                        <div class="deck-canvas-hint" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); margin-bottom: 12px; font-family: var(--font-mono);">
-                            <span>💡 İPUCU: Kartları sürükleyip bırakarak yerini değiştirin • Boyut haplarına tıklayarak genişletin</span>
-                            <span id="deck-canvas-dimensions">Matris: 2x4</span>
-                        </div>
-                        <div class="buttons-grid" id="deck-buttons-list">
-                            <!-- Populated with interactive draggable and resizable tiles -->
-                        </div>
-
-                        <!-- Elgato Stream Deck+ Rotary Knobs Section -->
-                        <div class="deck-rotary-strip">
-                            <div class="deck-rotary-unit" id="rotary-volume-control">
-                                <span class="deck-rotary-label">Ana Ses</span>
-                                <div class="deck-rotary-knob" title="Çevirerek Sesi Ayarlayın">
-                                    <div class="deck-rotary-notch"></div>
+                    <!-- Orta Sahne: telefon/deck önizlemesi tüm sahneyi kullanır -->
+                    <div class="deck-studio-workspace" id="deck-studio-workspace">
+                        <!-- Grid + boş yuvalar burada çizilir; kütüphane ve denetçi çekmeceleri kaldırıldı -->
+                        <div class="deck-canvas-stage" id="deck-canvas-stage">
+                            <div class="deck-phone-mockup is-landscape" id="deck-phone-mockup">
+                                <div class="deck-hardware-frame" id="deck-hardware-frame">
+                                    <span class="phone-dynamic-island" aria-hidden="true"></span>
+                                    <!-- Center Grid: Live Bento Buttons & Empty Ghost Slots -->
+                                    <div class="buttons-grid" id="deck-buttons-list">
+                                        <!-- Populated dynamically with active tiles AND ghost drop targets -->
+                                    </div>
+                                    <span class="phone-home-indicator" aria-hidden="true"></span>
                                 </div>
-                                <span class="deck-rotary-val" id="rotary-volume-val">70%</span>
-                            </div>
-                            <div class="deck-rotary-unit" id="rotary-bright-control">
-                                <span class="deck-rotary-label">Parlaklık</span>
-                                <div class="deck-rotary-knob" title="Çevirerek Parlaklığı Ayarlayın">
-                                    <div class="deck-rotary-notch" style="background: #FBBF24; box-shadow: 0 0 6px #FBBF24;"></div>
-                                </div>
-                                <span class="deck-rotary-val" id="rotary-bright-val" style="color: #FBBF24;">85%</span>
-                            </div>
-                            <div class="deck-rotary-unit" id="rotary-mic-control">
-                                <span class="deck-rotary-label">Mikrofon</span>
-                                <div class="deck-rotary-knob" title="Mikrofon Kazancı">
-                                    <div class="deck-rotary-notch" style="background: #10B981; box-shadow: 0 0 6px #10B981;"></div>
-                                </div>
-                                <span class="deck-rotary-val" id="rotary-mic-val" style="color: #10B981;">100%</span>
-                            </div>
-                            <div class="deck-rotary-unit" id="rotary-cpu-control">
-                                <span class="deck-rotary-label">Sistem Yükü</span>
-                                <div class="deck-rotary-knob" style="cursor: default;">
-                                    <div class="deck-rotary-notch" style="background: #38BDF8; box-shadow: 0 0 6px #38BDF8;"></div>
-                                </div>
-                                <span class="deck-rotary-val" id="rotary-cpu-val" style="color: #38BDF8;">Canlı</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Edit Button Modal -->
+                <!-- Sade Kart Düzenleme Penceresi -->
                 <div class="modal" id="edit-button-modal">
-                    <div class="modal-content card">
-                        <div class="card-header">
-                            <span class="meta-tag">KART DÜZENLEYİCİ</span>
-                            <h2>Buton Yapılandırması</h2>
+                    <div class="modal-content card edit-modal-card">
+                        <div class="modal-header-sticky">
+                            <div>
+                                <span class="meta-tag">KART DÜZENLEYİCİ</span>
+                                <h2 class="edit-modal-title">Kartı Düzenle</h2>
+                            </div>
+                            <button type="button" class="btn-modal-close" id="btn-close-modal-x" data-tooltip="Kapat" aria-label="Kapat"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                         </div>
-                        <div class="form-group">
-                            <label for="edit-label">Buton İsmi</label>
-                            <input type="text" id="edit-label" placeholder="Örn. Mikrofonu Kapat">
-                        </div>
-                        <div class="form-group">
-                            <label for="edit-type">Eylem & Widget Türü</label>
-                            <select id="edit-type">
-                                <option value="hotkey">⌨️ Klavye Kısayolu (Hotkey)</option>
-                                <option value="command">⚡ Terminal / Uygulama (CMD / EXE)</option>
-                                <option value="toggle">💡 Aç/Kapa Anahtarı (Canlı LED Toggle)</option>
-                                <option value="volume_slider">🎚️ Ses Seviyesi Kapsülü (Apple Audio Capsule)</option>
-                                <option value="brightness_slider">☀️ Ekran Parlaklığı Kapsülü (Apple Display Slider)</option>
-                                <option value="live_info">📈 Canlı Donanım Monitörü (CPU / RAM / Isı)</option>
-                                <option value="clock_widget">🕒 Canlı Flipping / OLED Saat & Takvim</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="display: flex; gap: 12px;">
-                            <div style="flex: 1;">
-                                <label for="edit-colspan">Genişlik (Sütun)</label>
-                                <select id="edit-colspan">
-                                    <option value="1">1 Hücre (1x)</option>
-                                    <option value="2">2 Hücre Geniş (2x)</option>
-                                    <option value="3">3 Hücre Ultra Geniş (3x)</option>
+
+                        <div class="edit-modal-body">
+                            <div class="form-group">
+                                <label for="edit-label">1 · Başlık</label>
+                                <input type="text" id="edit-label" placeholder="Örn. Mikrofonu Kapat" autocomplete="off">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="edit-type">2 · Bileşen Türü</label>
+                                <select id="edit-type">
+                                    <option value="hotkey">Kısayol Tuşu</option>
+                                    <option value="command">Uygulama Aç / Komut</option>
+                                    <option value="url">Web Sitesi</option>
+                                    <option value="weather">Hava Durumu (Şehir)</option>
+                                    <option value="live_info">PC Sıcaklık &amp; Durum (Sensör)</option>
+                                    <option value="now_playing">Şimdi Çalıyor</option>
+                                    <option value="media_widget">Medya Kontrolü (Tek Buton)</option>
+                                    <option value="media_control">Medya Kontrol Masası (3 Buton)</option>
+                                    <option value="clock_widget">Saat &amp; Tarih</option>
+                                    <option value="volume_slider">Ses Kaydırıcı</option>
+                                    <option value="app_volume_slider">Uygulama Sesi (Per-App Ses)</option>
+                                    <option value="brightness_slider">Parlaklık</option>
+                                    <option value="toggle">Anahtar (Aç / Kapa)</option>
+                                    <option value="media_widget">Medya Kontrolü</option>
+                                    <option value="text_snippet">Hızlı Metin</option>
                                 </select>
                             </div>
-                            <div style="flex: 1;">
-                                <label for="edit-rowspan">Yükseklik (Satır)</label>
-                                <select id="edit-rowspan">
-                                    <option value="1">1 Hücre (1x)</option>
-                                    <option value="2">2 Hücre Yüksek (2x)</option>
+
+                            <div class="form-group">
+                                <label for="edit-value" id="edit-value-label">Görev / Değer</label>
+                                <input type="text" id="edit-value" placeholder="ctrl+alt+t" autocomplete="off">
+                            </div>
+
+                            <div class="form-group" id="installed-apps-group" style="display: none;">
+                                <label for="edit-app-select">Kurulu Uygulama</label>
+                                <div class="edit-inline-row">
+                                    <input type="text" id="app-search-input" placeholder="Uygulama ara..." autocomplete="off">
+                                    <select id="edit-app-select">
+                                        <option value="">-- Uygulama Seçin --</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group" id="audio-sessions-group" style="display: none;">
+                                <label for="edit-audio-app-select">Sesi Yönetilecek Uygulama</label>
+                                <div class="edit-inline-row">
+                                    <select id="edit-audio-app-select">
+                                        <option value="">-- Ses Oturumu Bekleniyor --</option>
+                                    </select>
+                                    <button type="button" class="btn btn-secondary" id="btn-refresh-audio-sessions" data-tooltip="Ses oturumlarını yenile">Yenile</button>
+                                </div>
+                                <p class="text-muted" style="font-size: 11px; margin-top: 6px;">Ses çalan uygulamalar otomatik listelenir. Kart üzerindeki kapsülü tıklayıp sürükleyerek o uygulamanın sesini kısıp açabilirsiniz.</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label>3 · Boyut</label>
+                                <div class="size-pill-row" id="edit-size-row">
+                                    <button type="button" class="size-pill active" data-col="1" data-row="1">1×1</button>
+                                    <button type="button" class="size-pill" data-col="2" data-row="1">2×1</button>
+                                    <button type="button" class="size-pill" data-col="1" data-row="2">1×2</button>
+                                    <button type="button" class="size-pill" data-col="2" data-row="2">2×2</button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <div class="edit-icon-head">
+                                    <label>4 · İkon</label>
+                                    <span class="mono-text text-muted" id="selected-icon-preview-label">Aktif: mic</span>
+                                </div>
+                                <select id="edit-icon-select" style="display: none;">
+                                    <option value="mic">Mikrofon</option>
+                                    <option value="volup">Ses Aç</option>
+                                    <option value="voldown">Ses Kıs</option>
+                                    <option value="volume">Ses Seviyesi</option>
+                                    <option value="app_session">Uygulama Sesi</option>
+                                    <option value="play">Oynat / Durdur</option>
+                                    <option value="calc">Hesap Makinesi</option>
+                                    <option value="web">Web Tarayıcısı</option>
+                                    <option value="lock">Ekranı Kilitle</option>
+                                    <option value="task">Görev Yöneticisi</option>
+                                    <option value="cpu">CPU / İşlemci</option>
+                                    <option value="ram">RAM / Bellek</option>
+                                    <option value="clock">Saat &amp; Zaman</option>
+                                    <option value="desktop">Masaüstü</option>
+                                    <option value="link">Web Bağlantısı</option>
+                                    <option value="terminal">Terminal</option>
+                                    <option value="custom">Özel İkon</option>
                                 </select>
+                                <div class="icon-picker-gallery" id="icon-picker-gallery"></div>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label for="edit-page">Sayfa Seçimi</label>
-                            <select id="edit-page">
-                                <option value="0">Sayfa 1 (Ana Sayfa)</option>
-                                <option value="1">Sayfa 2 (Medya & Ses)</option>
-                                <option value="2">Sayfa 3 (Sistem & PC)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit-value" id="edit-value-label">Kısayol Kombinasyonu / Değer</label>
-                            <input type="text" id="edit-value" placeholder="ctrl+alt+t veya calc.exe">
-                        </div>
-                        <div class="form-group" id="installed-apps-group" style="display: none;">
-                            <label for="edit-app-select">Bilgisayardaki Uygulamalar</label>
-                            <div style="display: flex; gap: 8px;">
-                                <input type="text" id="app-search-input" placeholder="Uygulama ara..." style="flex: 1; min-width: 100px;">
-                                <select id="edit-app-select" style="flex: 2; min-width: 150px;">
-                                    <option value="">-- Uygulama Seçin --</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-group" style="display: flex; gap: 12px;">
-                            <div style="flex: 2;">
-                                <label for="edit-icon-select">Görsel / İkon Tipi</label>
-                                <select id="edit-icon-select">
-                                    <option value="mic">🎤 Mikrofon</option>
-                                    <option value="volup">🔊 Ses Aç</option>
-                                    <option value="voldown">🔉 Ses Kıs</option>
-                                    <option value="volume">🎚️ Ses Seviyesi</option>
-                                    <option value="play">⏯️ Oynat / Durdur</option>
-                                    <option value="calc">🧮 Hesap Makinesi</option>
-                                    <option value="web">🌐 Tarayıcı</option>
-                                    <option value="lock">🔒 Ekranı Kilitle</option>
-                                    <option value="task">📊 Görev Yöneticisi</option>
-                                    <option value="cpu">💻 CPU / İşlemci</option>
-                                    <option value="ram">🧠 RAM / Bellek</option>
-                                    <option value="clock">🕒 Saat & Zaman</option>
-                                    <option value="custom">⭐ Özel İkon</option>
-                                </select>
-                            </div>
-                            <div style="flex: 1;">
-                                <label for="edit-color">Vurgu Rengi</label>
-                                <input type="color" id="edit-color" value="#818CF8" style="height: 38px; width: 100%; padding: 2px; border-radius: 6px; background: transparent; cursor: pointer; border: 1px solid var(--border-color);">
-                            </div>
-                        </div>
-                        <div class="form-group" id="custom-icon-group" style="display: none;">
-                            <label for="edit-icon-custom">Özel İkon SVG Kodu veya URL'si</label>
-                            <input type="text" id="edit-icon-custom" placeholder="Örn. /icons/custom.svg veya SVG kodu">
-                        </div>
-                        <div class="form-group" id="custom-icon-upload-group" style="display: none;">
-                            <label>Özel İkon Dosyası Yükle (Görsel)</label>
-                            <div style="display: flex; gap: 8px;">
-                                <input type="file" id="edit-icon-file" accept="image/*" style="display: none;">
-                                <button class="btn btn-secondary" id="btn-trigger-icon-upload" style="flex: 1; font-size: 12px; padding: 8px;">Dosya Seç</button>
-                                <span id="icon-upload-status" class="mono-text" style="align-self: center; font-size: 11px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 120px;">Seçilmedi</span>
-                            </div>
-                        </div>
-                        <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px;">
-                            <button class="btn btn-secondary" id="btn-delete-button" style="color: #EF4444; border-color: rgba(239,68,68,0.3);">🗑️ Sil</button>
-                            <div style="display: flex; gap: 8px;">
+
+                        <div class="modal-footer-sticky">
+                            <button class="btn btn-secondary" id="btn-delete-button">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                <span>Sil</span>
+                            </button>
+                            <div class="edit-modal-actions">
                                 <button class="btn btn-secondary" id="btn-close-modal">Vazgeç</button>
-                                <button class="btn btn-primary" id="btn-apply-edit">Uygula</button>
+                                <button class="btn btn-primary" id="btn-apply-edit">Kaydet</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bileşen Seçici -->
+                <div class="modal" id="widget-picker-modal">
+                    <div class="modal-content card picker-modal-card">
+                        <div class="modal-header-sticky">
+                            <div>
+                                <span class="meta-tag">BİLEŞEN SEÇİCİ</span>
+                                <h2 class="edit-modal-title">Bileşen Ekle</h2>
+                            </div>
+                            <button type="button" class="btn-modal-close" id="btn-close-picker-modal" data-tooltip="Kapat" aria-label="Kapat"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                        </div>
+
+                        <div class="picker-search-wrapper">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" id="picker-search-input" placeholder="Bileşen ara... (saat, hava, ses, pomodoro)" autocomplete="off">
+                            <button type="button" id="picker-search-clear" class="picker-search-clear" style="display: none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                        </div>
+
+                        <div class="picker-groups" id="picker-presets-grid">
+                            <div class="widget-picker-group" data-group="clock">
+                                <h3 class="widget-picker-group-title">Zaman & Odak</h3>
+                                <div class="widget-presets-grid">
+                                <div class="widget-preset-card" data-preset="clock" data-cat="clock" data-search="saat tarih takvim zaman clock">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Saat & Tarih</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Canlı saat, tarih ve takvim</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="pomodoro_timer" data-cat="clock" data-search="pomodoro odak mola sayac timer">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="9" y1="2" x2="15" y2="2"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Pomodoro</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>25 dakikalık odak sayacı</p>
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            <div class="widget-picker-group" data-group="clock">
+                                <h3 class="widget-picker-group-title">Hava Durumu</h3>
+                                <div class="widget-presets-grid">
+                                <div class="widget-preset-card" data-preset="weather" data-cat="clock" data-search="hava durumu sicaklik sehir weather">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Hava Durumu</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>Şehir, sıcaklık ve rüzgar</p>
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            <div class="widget-picker-group" data-group="telemetry">
+                                <h3 class="widget-picker-group-title">PC Sıcaklık & Durum</h3>
+                                <div class="widget-presets-grid">
+                                <div class="widget-preset-card" data-preset="telemetry_combo" data-cat="telemetry" data-search="cpu ram islemci bellek sicaklik donanim telemetry">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>PC Sıcaklık & Durum</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>CPU & RAM yükü ve ısı</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="net_speed" data-cat="telemetry" data-search="ag hizi internet indirme yukleme net">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Ağ Hızı</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>İndirme ve yükleme hızı</p>
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            <div class="widget-picker-group" data-group="audio">
+                                <h3 class="widget-picker-group-title">Medya & Ses</h3>
+                                <div class="widget-presets-grid">
+                                <div class="widget-preset-card" data-preset="now_playing" data-cat="audio" data-search="simdi caliyor muzik spotify medya now playing">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Şimdi Çalıyor</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Şarkı, sanatçı ve kontroller</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="volume" data-cat="audio" data-search="ses volume kaydirici seviye">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Ses Kaydırıcı</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Sistem ana ses seviyesi</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="app_session" data-cat="audio" data-search="uygulama sesi per app volume spotify chrome discord steam oyun mixer karistirici">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="4" x2="6" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><circle cx="6" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="18" cy="7" r="2"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Uygulama Sesi</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Spotify, Chrome, Discord sesini tek kapsülden ayarla</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="brightness" data-cat="audio" data-search="parlaklik ekran brightness">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.1" y2="4.9"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Parlaklık</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Ekran parlaklığı</p>
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            <div class="widget-picker-group" data-group="app">
+                                <h3 class="widget-picker-group-title">Aksiyonlar</h3>
+                                <div class="widget-presets-grid">
+                                <div class="widget-preset-card" data-preset="app_open" data-cat="app" data-search="uygulama ac baslat program app">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Uygulama Aç</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>Kurulu bir uygulamayı başlat</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="hotkey" data-cat="app" data-search="kisayol tus hotkey klavye">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="3"/><line x1="6" y1="10" x2="6" y2="14"/><line x1="10" y1="10" x2="10" y2="14"/><line x1="14" y1="10" x2="14" y2="14"/><line x1="18" y1="10" x2="18" y2="14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Kısayol Tuşu</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>Klavye kombinasyonu tetikle</p>
+                                    </div>
+                                </div>
+                                </div>
+                            </div>
+                            <div class="widget-picker-group" data-group="custom">
+                                <h3 class="widget-picker-group-title">Özel</h3>
+                                <div class="widget-presets-grid">
+                                    <div class="widget-custom-card" id="btn-picker-create-custom" title="Sıfırdan kendi butonunuzu oluşturun">
+                                        <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+                                        <div class="widget-preset-info">
+                                            <div class="preset-title-row">
+                                                <h4>Özel Buton</h4>
+                                                <span class="widget-preset-badge">1×1</span>
+                                            </div>
+                                            <p>Boş bir kart oluşturup başlık, tür, boyut ve ikonunu siz seçin</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Template Selector Modal (Hazır Şablonlar) -->
+                <div class="modal" id="deck-templates-modal">
+                    <div class="modal-content card" style="max-width: 720px; background: var(--bg-sidebar); border: 1px solid rgba(255,255,255,0.08);">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 12px; margin-bottom: 14px;">
+                            <div>
+                                <span class="meta-tag" style="font-size: 10px; letter-spacing: 0.8px;">HAZIR DÜZENLER</span>
+                                <h2 style="font-size: 18px; margin-top: 4px;">Stream Deck Şablonu Seçin</h2>
+                            </div>
+                            <button type="button" class="btn btn-secondary" id="btn-close-templates-modal" style="height: 28px; width: 28px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; border-radius: 6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                        </div>
+                        <p class="text-muted" style="font-size: 12px; margin-bottom: 16px;">Bir tıkla tüm sayfayı profesyonelce yerleştirilmiş butonlarla donatın. İstediğiniz şablona tıklayarak uygulayabilirsiniz.</p>
+                        
+                        <div class="deck-templates-grid">
+                            <div class="deck-template-card" data-template="pro_studio">
+                                <div class="deck-template-head">
+                                    <span class="deck-template-badge">ÖNERİLEN</span>
+                                    <h4>Pro Creator & Studio</h4>
+                                </div>
+                                <p>Canlı saat, ana ses kaydırıcısı, CPU/RAM monitörleri ve canlı mikrofon anahtarı.</p>
+                                <div class="deck-template-tags">
+                                    <span>Saat (2x1)</span><span>Ses (2x1)</span><span>CPU</span><span>RAM</span><span>Mikrofon</span>
+                                </div>
+                            </div>
+
+                            <div class="deck-template-card" data-template="media_lounge">
+                                <div class="deck-template-head">
+                                    <span class="deck-template-badge">MÜZİK & MEDYA</span>
+                                    <h4>Medya Masası & Dinleme</h4>
+                                </div>
+                                <p>Spotify / YouTube için tam kontrol: Ana ses, parça kontrolleri, ses kesme ve kulaklık modları.</p>
+                                <div class="deck-template-tags">
+                                    <span>Ses Barı</span><span>Oynat/Durdur</span><span>Önceki/Sonraki</span><span>Hoparlör Mute</span>
+                                </div>
+                            </div>
+
+                            <div class="deck-template-card" data-template="gaming_obs">
+                                <div class="deck-template-head">
+                                    <span class="deck-template-badge">YAYIN & OYUN</span>
+                                    <h4>Yayıncı & Gamer Masası</h4>
+                                </div>
+                                <p>Discord mikrofon/sağır tuşları, ekran alıntısı, GeForce Experience overlay ve oyun barı.</p>
+                                <div class="deck-template-tags">
+                                    <span>Discord Mute</span><span>Discord Deafen</span><span>Ekran Alıntısı</span><span>Game Bar</span>
+                                </div>
+                            </div>
+
+                            <div class="deck-template-card" data-template="developer">
+                                <div class="deck-template-head">
+                                    <span class="deck-template-badge">GELİŞTİRİCİ</span>
+                                    <h4>Yazılımcı & Terminal</h4>
+                                </div>
+                                <p>VS Code, Terminal (wt.exe), Git Bash, Google arama, Görev Yöneticisi ve ekran kilidi.</p>
+                                <div class="deck-template-tags">
+                                    <span>VS Code</span><span>Terminal</span><span>Git Bash</span><span>Taskmgr</span><span>Lock</span>
+                                </div>
+                            </div>
+
+                            <div class="deck-template-card" data-template="system_control">
+                                <div class="deck-template-head">
+                                    <span class="deck-template-badge">SİSTEM</span>
+                                    <h4>Donanım & Güç Merkezi</h4>
+                                </div>
+                                <p>CPU yükü ve ısısı, RAM kullanımı, Sanal 2. Monitör anahtarı, ekran parlaklığı ve PC kilitleme.</p>
+                                <div class="deck-template-tags">
+                                    <span>CPU %</span><span>RAM %</span><span>Parlaklık</span><span>Sanal Monitör</span><span>Kilitle</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -467,7 +679,7 @@
                                         <span class="slider"></span>
                                     </label>
                                 </div>
-                                <p class="admin-warning" id="admin-warning" style="display: none;">⚠️ Sürücü kurulum işlemleri için uygulamayı <strong>Yönetici Olarak</strong> çalıştırmalısınız.</p>
+                                <p class="admin-warning" id="admin-warning" style="display: none;"> Sürücü kurulum işlemleri için uygulamayı <strong>Yönetici Olarak</strong> çalıştırmalısınız.</p>
                             </div>
                         </div>
                     </div>
@@ -548,9 +760,76 @@
                 </div>
             </section>
 
-            <!-- TAB CONTENT: File Transfer -->
             <section class="tab-panel" id="panel-files">
-                <div class="bento-grid">
+                <!-- Mode Switcher: WhatsApp Flow vs Classic File Pool -->
+                <div class="flow-mode-switch-bar">
+                    <div class="flow-mode-pills">
+                        <button type="button" class="flow-mode-pill active" id="btn-flow-mode-chat">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <span>Hızlı Akış (WhatsApp Modu)</span>
+                        </button>
+                        <button type="button" class="flow-mode-pill" id="btn-flow-mode-classic">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <span>Klasik Dosya Havuzu</span>
+                        </button>
+                    </div>
+                    <div class="flow-mode-actions">
+                        <button type="button" class="btn btn-secondary" id="btn-flow-open-folder" title="Klasörü Aç">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <span>Klasör</span>
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-icon" id="btn-flow-clear" title="Akış Geçmişini Temizle">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- View 1: WhatsApp-Style Local Flow (Chat Feed) -->
+                <div class="card animate-slide-in flow-chat-card" id="flow-chat-card" style="--index: 1;">
+                    <!-- Drag and Drop Overlay -->
+                    <div class="flow-drop-overlay" id="flow-drop-overlay">
+                        <div class="flow-drop-box">
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <h3>Dosyayı Akışa Bırakın</h3>
+                            <p>Telefonunuza anında iletmek için herhangi bir dosyayı buraya bırakın.</p>
+                        </div>
+                    </div>
+
+                    <!-- Chat Feed -->
+                    <div class="flow-chat-feed" id="flow-chat-feed">
+                        <!-- Populated dynamically by flow.js -->
+                    </div>
+
+                    <!-- Bottom Action Toolbar & Input -->
+                    <div class="flow-chat-bottom-bar">
+                        <div class="flow-quick-chips">
+                            <button type="button" class="flow-chip-btn" id="btn-flow-attach" title="Dosya veya fotoğraf yükle">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                                <span>Dosya Ekle</span>
+                            </button>
+                            <button type="button" class="flow-chip-btn" id="btn-flow-screenshot" title="Masaüstü ekran görüntüsü al ve gönder">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                <span>Ekran Görüntüsü</span>
+                            </button>
+                            <button type="button" class="flow-chip-btn" id="btn-flow-clipboard" title="Pano metnini doğrudan gönder">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                <span>Pano</span>
+                            </button>
+                        </div>
+
+                        <div class="flow-input-row">
+                            <textarea id="flow-input" class="flow-input-textarea" placeholder="Mesaj, bağlantı veya not yazın... (Enter ile gönder, Shift+Enter alt satır)" rows="1"></textarea>
+                            <button type="button" class="btn btn-primary flow-send-btn" id="btn-flow-send" title="Gönder">
+                                <span>Gönder</span>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            </button>
+                        </div>
+                        <input type="file" id="flow-file-input" style="display: none;" multiple>
+                    </div>
+                </div>
+
+                <!-- View 2: Classic File Pool (Table & Direct Text Sync) -->
+                <div class="bento-grid" id="flow-classic-view" style="display: none;">
                     <!-- File Manager Card -->
                     <div class="card animate-slide-in" style="--index: 1;">
                         <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -621,11 +900,6 @@
 
             <!-- Settings View -->
             <section class="tab-panel" id="panel-settings">
-                <header class="view-header">
-                    <h1 class="view-title">Ayarlar</h1>
-                    <p class="view-desc">Uygulama tercihleri, sistem bilgileri ve güncelleme yönetimi.</p>
-                </header>
-
                 <div class="grid-layout" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
                     <!-- Update & Version Card -->
                     <div class="card">
@@ -635,16 +909,26 @@
                             <p class="text-muted">GitHub Releases üzerinden en son güncellemeleri kontrol edin.</p>
                         </div>
                         
-                        <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin: 12px 0;">
+                        <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin: 12px 0;">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <div style="font-weight: 600; font-size: 15px; color: var(--text-main);">BigPocket Masaüstü Sunucusu</div>
-                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.2</span></div>
+                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.4.1</span></div>
                                 </div>
-                                <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;">Aktif</span>
+                                <span class="badge" style="background: var(--bg-elevated); color: var(--accent-solid); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;">Aktif</span>
                             </div>
                         </div>
 
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;">
+                            <div>
+                                <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Beta Güncellemelerini Al</div>
+                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Önizleme ve test sürümlerini denetle (v1.4.2-beta vb.)</div>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="settings-beta-channel-toggle">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
                         <div style="display: flex; gap: 10px; margin-top: 14px;">
                             <button class="btn btn-primary" id="btn-check-update-manual" style="flex: 1; height: 42px;">
                                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
@@ -655,47 +939,47 @@
                     </div>
 
                     <!-- MCP (Model Context Protocol) & REST API Integration Card -->
-                    <div class="card" style="grid-column: 1 / -1; border-color: rgba(165, 166, 246, 0.25);">
+                    <div class="card" style="grid-column: 1 / -1; border-color: var(--border-color);">
                         <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
                             <div>
-                                <span class="meta-tag" style="color: var(--accent);">YAPAY ZEKA & GELİŞTİRİCİ ENTEGRASYONU</span>
+                                <span class="meta-tag" style="color: var(--accent-solid);">YAPAY ZEKA & GELİŞTİRİCİ ENTEGRASYONU</span>
                                 <h2>Model Context Protocol (MCP) & REST API</h2>
                                 <p class="text-muted" style="max-width: 650px;">Claude Desktop, Cursor, Cline, Windsurf ve harici AI ajanlarının Stream Deck'i yönetmesini ve PC otomasyonu yapmasını sağlayın.</p>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 6px 14px; border-radius: 99px;">
-                                <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; display: inline-block; box-shadow: 0 0 8px #10b981;"></span>
-                                <span style="font-size: 12px; font-weight: 600; color: #10b981;">Aktif (Port 8085)</span>
+                            <div style="display: flex; align-items: center; gap: 8px; background: var(--bg-elevated); border: 1px solid var(--border-color); padding: 6px 14px; border-radius: 99px;">
+                                <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--accent-solid); display: inline-block; box-shadow: 0 0 8px var(--accent-solid);"></span>
+                                <span style="font-size: 12px; font-weight: 600; color: var(--accent-solid);">Aktif (Port 8085)</span>
                             </div>
                         </div>
 
                         <!-- Protocol Switcher Tabs -->
                         <div style="display: flex; gap: 8px; margin-top: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
-                            <button class="mcp-tab-btn active" data-mcptab="http" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-main); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-                                📡 HTTP / SSE MCP (Modern)
+                            <button class="mcp-tab-btn active" data-mcptab="http" style="background: var(--bg-elevated); border: 1px solid var(--border-color); color: var(--text-main); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                                HTTP / SSE MCP (Modern)
                             </button>
                             <button class="mcp-tab-btn" data-mcptab="stdio" style="background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-                                ⚙️ Stdio MCP (Yerel Process)
+                                 Stdio MCP (Yerel Process)
                             </button>
                             <button class="mcp-tab-btn" data-mcptab="rest" style="background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-                                ⚡ REST API (curl / HTTP)
+                                REST API (curl / HTTP)
                             </button>
                         </div>
 
                         <!-- Tab 1: HTTP / SSE MCP -->
                         <div class="mcp-tab-content" id="mcp-tab-content-http" style="margin-top: 16px;">
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 14px;">
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                                     <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">MCP Uç Noktası (Endpoint)</div>
                                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                                        <code style="font-family: var(--font-mono); font-size: 13px; color: var(--accent); font-weight: 600;">http://127.0.0.1:8085/mcp</code>
+                                        <code style="font-family: var(--font-mono); font-size: 13px; color: var(--accent-solid); font-weight: 600;">http://127.0.0.1:8085/mcp</code>
                                         <button class="btn btn-secondary btn-copy-inline" data-copy="http://127.0.0.1:8085/mcp" style="font-size: 11px; padding: 3px 8px; height: auto;">Kopyala</button>
                                     </div>
                                 </div>
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                                     <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Protokol Türü & Yetkilendirme</div>
                                     <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
                                         <span style="font-size: 13px; color: var(--text-main); font-weight: 500;">HTTP POST (JSON-RPC) + SSE GET</span>
-                                        <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-size: 11px; padding: 2px 8px; border-radius: 4px;">Yerel Şifresiz</span>
+                                        <span class="badge" style="background: var(--bg-elevated); color: var(--accent-solid); font-size: 11px; padding: 2px 8px; border-radius: 4px;">Yerel Şifresiz</span>
                                     </div>
                                 </div>
                             </div>
@@ -710,13 +994,13 @@
                         <!-- Tab 2: Stdio MCP -->
                         <div class="mcp-tab-content" id="mcp-tab-content-stdio" style="margin-top: 16px; display: none;">
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 14px;">
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                                     <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">MCP Binary Dosyası</div>
                                     <div style="margin-top: 6px; font-size: 12px; font-family: var(--font-mono); color: var(--text-main); word-break: break-all;">
                                         bigpocket-streamdeck-mcp.exe
                                     </div>
                                 </div>
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
                                     <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Bağlantı & İletişim</div>
                                     <div style="margin-top: 6px; font-size: 12.5px; color: var(--text-muted);">
                                         Standart Girdi/Çıktı (stdin / stdout) üzerinden JSON-RPC 2.0
@@ -734,30 +1018,30 @@
                         <!-- Tab 3: REST API -->
                         <div class="mcp-tab-content" id="mcp-tab-content-rest" style="margin-top: 16px; display: none;">
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-bottom: 14px;">
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="badge" style="background: #2563eb; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
+                                        <span class="badge" style="background: var(--accent-solid); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
                                         <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/streamdeck/trigger</code>
                                     </div>
                                     <span style="font-size: 11px; color: var(--text-muted);">Buton tetikle</span>
                                 </div>
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="badge" style="background: #059669; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">GET</span>
+                                        <span class="badge" style="background: var(--accent-solid); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">GET</span>
                                         <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/streamdeck</code>
                                     </div>
                                     <span style="font-size: 11px; color: var(--text-muted);">Butonları listele</span>
                                 </div>
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="badge" style="background: #2563eb; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
+                                        <span class="badge" style="background: var(--accent-solid); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
                                         <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/clipboard</code>
                                     </div>
                                     <span style="font-size: 11px; color: var(--text-muted);">Panoya yaz</span>
                                 </div>
-                                <div style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="badge" style="background: #2563eb; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
+                                        <span class="badge" style="background: var(--accent-solid); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 700;">POST</span>
                                         <code style="font-size: 12px; color: var(--text-main); font-family: var(--font-mono);">/api/notify</code>
                                     </div>
                                     <span style="font-size: 11px; color: var(--text-muted);">Bildirim yolla</span>
@@ -777,14 +1061,20 @@
                         <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color);">
                             <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.05em;">Desteklenen MCP Araçları (Tools)</div>
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">⚡ get_streamdeck_config</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🛠️ set_streamdeck_button</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📐 set_grid_layout</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🚀 trigger_button</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">💻 list_installed_apps</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📊 get_system_status</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">🔔 send_pc_notification</span>
-                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">📋 sync_clipboard</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">get_streamdeck_config</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;"> set_streamdeck_button</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">set_grid_layout</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">trigger_button</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">list_installed_apps</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">get_system_status</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">send_pc_notification</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">sync_clipboard</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">get_network_stats</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">get_active_window</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">capture_screen</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;"> set_autostart</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">streamdeck_switch_page</span>
+                                <span class="badge" style="background: rgba(255,255,255,0.04); color: var(--text-main); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 6px; font-size: 11px;">setup_usb_reverse</span>
                             </div>
                         </div>
                     </div>
@@ -798,22 +1088,42 @@
                         </div>
                         
                         <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
                                 <span style="font-size: 13px; color: var(--text-muted);">Web Panel & WebSocket:</span>
                                 <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 8085</span>
                             </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
                                 <span style="font-size: 13px; color: var(--text-muted);">Otomatik Keşif (UDP):</span>
                                 <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 47800</span>
                             </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
                                 <span style="font-size: 13px; color: var(--text-muted);">Medya & Ekran Akışı (TCP):</span>
                                 <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 8083, 8084, 8086</span>
                             </div>
                         </div>
 
+                        <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                                <div>
+                                    <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">Windows ile Otomatik Başlat (Startup)</div>
+                                    <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Bilgisayar açıldığında BigPocket sessizce arka planda başlar.</div>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="chk-autostart" aria-label="Windows ile otomatik başlat">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
+                                <div>
+                                    <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">Pencere Kapatıldığında Sistem Tepsisine (Tray) Küçült</div>
+                                    <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Uygulama tamamen kapanmaz; sunucu, kamera/ses akışı ve bildirimler tepsi simgesinden arka planda çalışmaya devam eder.</div>
+                                </div>
+                                <span class="badge" style="background: var(--bg-elevated); color: var(--accent-solid); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;">HER ZAMAN AKTİF</span>
+                            </div>
+                        </div>
+
                         <div style="margin-top: 16px;">
-                            <a href="https://github.com/benyigiteren/bigpocket" target="_blank" style="display: flex; justify-content: space-between; align-items: center; text-decoration: none; padding: 12px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main);">
+                            <a href="https://github.com/benyigiteren/bigpocket" target="_blank" style="display: flex; justify-content: space-between; align-items: center; text-decoration: none; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main);">
                                 <span style="font-size: 13px; font-weight: 500;">GitHub Resmi Deposu</span>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                             </a>
@@ -846,6 +1156,27 @@
         </div>
     </div>
     
+    <!-- Hızlı Komut Paleti (Ctrl+K / Cmd+K veya kenar çubuğundaki büyüteç) -->
+    <div class="cmdk-overlay" id="cmdk-overlay" role="presentation" aria-hidden="true">
+        <div class="cmdk-panel" role="dialog" aria-modal="true" aria-label="Hızlı Komut Paleti">
+            <div class="cmdk-search">
+                <span class="cmdk-search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></span>
+                <input id="cmdk-input" type="text" role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Komut yazın veya arayın…">
+                <span class="cmdk-search-count" id="cmdk-count"></span>
+            </div>
+            <div class="cmdk-list" id="cmdk-list" role="listbox" aria-label="Komutlar"></div>
+            <div class="cmdk-empty" id="cmdk-empty" hidden>Sonuç bulunamadı</div>
+            <div class="cmdk-footer">
+                <span class="cmdk-legend"><kbd>↑</kbd><kbd>↓</kbd> gezinti</span>
+                <span class="cmdk-legend"><kbd>↵</kbd> çalıştır</span>
+                <span class="cmdk-legend"><kbd>esc</kbd> kapat</span>
+            </div>
+        </div>
+    </div>
+    <div class="cmdk-toast-host" id="cmdk-toast-host"></div>
+
     <script src="app.js"></script>
+    <script src="flow.js"></script>
+    <script src="command_palette.js"></script>
 </body>
 </html>

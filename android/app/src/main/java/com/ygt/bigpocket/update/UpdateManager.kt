@@ -48,15 +48,39 @@ object UpdateManager {
         "0"
     }
 
+    data class ParsedVersion(val nums: List<Int>, val pre: String)
+
+    fun parseSemVer(v: String): ParsedVersion {
+        val clean = v.trim().removePrefix("v")
+        val parts = clean.split("-", limit = 2)
+        val numParts = parts[0].split(".").map { it.toIntOrNull() ?: 0 }
+        val nums = (numParts + listOf(0, 0, 0)).take(3)
+        val pre = if (parts.size > 1) parts[1] else ""
+        return ParsedVersion(nums, pre)
+    }
+
     fun compareVersions(a: String, b: String): Int {
-        val pa = a.trim().removePrefix("v").split(".")
-        val pb = b.trim().removePrefix("v").split(".")
-        for (i in 0 until maxOf(pa.size, pb.size)) {
-            val x = pa.getOrNull(i)?.substringBefore("-")?.toIntOrNull() ?: 0
-            val y = pb.getOrNull(i)?.substringBefore("-")?.toIntOrNull() ?: 0
-            if (x != y) return x.compareTo(y)
+        val pa = parseSemVer(a)
+        val pb = parseSemVer(b)
+        for (i in 0 until 3) {
+            if (pa.nums[i] > pb.nums[i]) return 1
+            if (pa.nums[i] < pb.nums[i]) return -1
         }
-        return 0
+        if (pa.pre.isEmpty() && pb.pre.isNotEmpty()) return 1
+        if (pa.pre.isNotEmpty() && pb.pre.isEmpty()) return -1
+        if (pa.pre.isEmpty() && pb.pre.isEmpty()) return 0
+        return pa.pre.compareTo(pb.pre)
+    }
+
+    private fun findApkAsset(assets: org.json.JSONArray?): Pair<String, Long>? {
+        if (assets == null) return null
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
+                return a.optString("browser_download_url") to a.optLong("size")
+            }
+        }
+        return null
     }
 
     sealed class CheckResult {
@@ -68,36 +92,56 @@ object UpdateManager {
     /** Detailed check for manual button in Settings */
     suspend fun checkDetailed(context: Context): CheckResult = withContext(Dispatchers.IO) {
         try {
+            val isBeta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("beta_updates", false)
+            val targetUrl = if (isBeta) {
+                "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=5"
+            } else {
+                "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+            }
+
             val req = Request.Builder()
-                .url("https://api.github.com/repos/$GITHUB_REPO/releases/latest")
+                .url(targetUrl)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "BigPocket-Android")
                 .build()
+
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext CheckResult.Error("GitHub API HTTP ${resp.code}")
-                val json = JSONObject(resp.body?.string() ?: return@withContext CheckResult.Error("Boş yanıt"))
-                val latest = json.optString("tag_name").removePrefix("v")
+                val bodyStr = resp.body?.string() ?: return@withContext CheckResult.Error("Boş yanıt")
                 val current = currentVersion(context)
-                val assets = json.optJSONArray("assets") ?: return@withContext CheckResult.Error("Dosya bulunamadı")
-                var apkUrl = ""
-                var apkSize = 0L
-                for (i in 0 until assets.length()) {
-                    val a = assets.getJSONObject(i)
-                    if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
-                        apkUrl = a.optString("browser_download_url")
-                        apkSize = a.optLong("size")
-                        break
+
+                val releases = mutableListOf<JSONObject>()
+                if (isBeta) {
+                    val arr = org.json.JSONArray(bodyStr)
+                    for (i in 0 until arr.length()) {
+                        releases.add(arr.getJSONObject(i))
+                    }
+                } else {
+                    releases.add(JSONObject(bodyStr))
+                }
+
+                var bestRelease: JSONObject? = null
+                for (rel in releases) {
+                    val tag = rel.optString("tag_name").removePrefix("v")
+                    if (bestRelease == null || compareVersions(tag, bestRelease.optString("tag_name").removePrefix("v")) > 0) {
+                        bestRelease = rel
                     }
                 }
-                if (compareVersions(latest, current) > 0 && apkUrl.isNotEmpty()) {
+
+                if (bestRelease == null) return@withContext CheckResult.UpToDate(current)
+
+                val latestTag = bestRelease.optString("tag_name").removePrefix("v")
+                val assetInfo = findApkAsset(bestRelease.optJSONArray("assets"))
+
+                if (compareVersions(latestTag, current) > 0 && assetInfo != null) {
                     val info = UpdateInfo(
                         currentVersion = current,
-                        latestVersion = latest,
-                        title = json.optString("name").ifBlank { "BigPocket $latest" },
-                        notes = json.optString("body"),
-                        apkUrl = apkUrl,
-                        apkSize = apkSize,
-                        htmlUrl = json.optString("html_url")
+                        latestVersion = latestTag,
+                        title = bestRelease.optString("name").ifBlank { "BigPocket $latestTag" },
+                        notes = bestRelease.optString("body"),
+                        apkUrl = assetInfo.first,
+                        apkSize = assetInfo.second,
+                        htmlUrl = bestRelease.optString("html_url")
                     )
                     CheckResult.UpdateAvailable(info)
                 } else {
@@ -112,44 +156,62 @@ object UpdateManager {
     /** Returns update info when a newer release with an APK exists, otherwise null. */
     suspend fun check(context: Context, ignoreSkipped: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
+            val isBeta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("beta_updates", false)
+            val targetUrl = if (isBeta) {
+                "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=5"
+            } else {
+                "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+            }
+
             val req = Request.Builder()
-                .url("https://api.github.com/repos/$GITHUB_REPO/releases/latest")
+                .url(targetUrl)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "BigPocket-Android")
                 .build()
+
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
-                val json = JSONObject(resp.body?.string() ?: return@withContext null)
-                val latest = json.optString("tag_name").removePrefix("v")
+                val bodyStr = resp.body?.string() ?: return@withContext null
                 val current = currentVersion(context)
-                if (compareVersions(latest, current) <= 0) return@withContext null
+
+                val releases = mutableListOf<JSONObject>()
+                if (isBeta) {
+                    val arr = org.json.JSONArray(bodyStr)
+                    for (i in 0 until arr.length()) {
+                        releases.add(arr.getJSONObject(i))
+                    }
+                } else {
+                    releases.add(JSONObject(bodyStr))
+                }
+
+                var bestRelease: JSONObject? = null
+                for (rel in releases) {
+                    val tag = rel.optString("tag_name").removePrefix("v")
+                    if (bestRelease == null || compareVersions(tag, bestRelease.optString("tag_name").removePrefix("v")) > 0) {
+                        bestRelease = rel
+                    }
+                }
+
+                if (bestRelease == null) return@withContext null
+
+                val latestTag = bestRelease.optString("tag_name").removePrefix("v")
+                if (compareVersions(latestTag, current) <= 0) return@withContext null
 
                 if (!ignoreSkipped) {
                     val skipped = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SKIP, null)
-                    if (skipped == latest) return@withContext null
+                    if (skipped == latestTag) return@withContext null
                 }
 
-                val assets = json.optJSONArray("assets") ?: return@withContext null
-                var apkUrl = ""
-                var apkSize = 0L
-                for (i in 0 until assets.length()) {
-                    val a = assets.getJSONObject(i)
-                    if (a.optString("name").endsWith(".apk", ignoreCase = true)) {
-                        apkUrl = a.optString("browser_download_url")
-                        apkSize = a.optLong("size")
-                        break
-                    }
-                }
-                if (apkUrl.isEmpty()) return@withContext null
+                val assetInfo = findApkAsset(bestRelease.optJSONArray("assets")) ?: return@withContext null
 
                 UpdateInfo(
                     currentVersion = current,
-                    latestVersion = latest,
-                    title = json.optString("name").ifBlank { "BigPocket $latest" },
-                    notes = json.optString("body"),
-                    apkUrl = apkUrl,
-                    apkSize = apkSize,
-                    htmlUrl = json.optString("html_url"),
+                    latestVersion = latestTag,
+                    title = bestRelease.optString("name").ifBlank { "BigPocket $latestTag" },
+                    notes = bestRelease.optString("body"),
+                    apkUrl = assetInfo.first,
+                    apkSize = assetInfo.second,
+                    htmlUrl = bestRelease.optString("html_url")
                 )
             }
         } catch (e: Exception) {

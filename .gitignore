@@ -20,6 +20,7 @@ android/captures/
 desktop/BigPocket.exe
 desktop/Setup.exe
 desktop/bigpocket-windows.exe
+desktop/dist/
 /bigpocket-windows.exe
 /Setup.exe
 mcp/*.exe
@@ -28,6 +29,14 @@ mcp/*.exe
 bigpocket-windows.zip
 *.apk
 *.zip
+
+# Release tooling artifacts
+notes.md
+SHA256SUMS.txt
+
+# Throwaway experiment code (go run-only snippets, never part of the app)
+desktop/scratch/
+
 
 # Local data and configuration files
 config.json

@@ -3,18 +3,22 @@ package com.ygt.bigpocket.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 
 private val MinimalistColorScheme = darkColorScheme(
     primary = MinimalistPrimary,
-    secondary = MinimalistSecondary,
-    background = MinimalistBackground,
-    surface = MinimalistSurface,
     onPrimary = MinimalistBackground,
+    secondary = MinimalistSecondary,
     onSecondary = MinimalistPrimary,
+    background = MinimalistBackground,
     onBackground = MinimalistPrimary,
+    surface = MinimalistSurface,
     onSurface = MinimalistPrimary,
-    surfaceVariant = MinimalistSurfaceElevated
+    surfaceVariant = MinimalistSurfaceElevated,
+    onSurfaceVariant = MinimalistSecondary,
+    outline = MinimalistBorder,
+    outlineVariant = MinimalistBorder,
+    error = StatusRedText,
+    onError = MinimalistBackground
 )
 
 @Composable
@@ -29,3 +33,13 @@ fun BigPocketTheme(
         content = content
     )
 }
+
+@Composable
+fun bigPocketSwitchColors() = androidx.compose.material3.SwitchDefaults.colors(
+    checkedThumbColor = androidx.compose.ui.graphics.Color.White,
+    checkedTrackColor = SwitchCheckedTrack,
+    checkedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+    uncheckedThumbColor = MinimalistSecondary,
+    uncheckedTrackColor = MinimalistSurfaceElevated,
+    uncheckedBorderColor = MinimalistBorder
+)

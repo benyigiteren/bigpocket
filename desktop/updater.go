@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	AppVersion = "1.4"
+	AppVersion = "v1.4.1"
 	// GitHubRepo is "owner/repo" of the public repository that publishes releases.
 	GitHubRepo = "benyigiteren/bigpocket"
 )
@@ -69,26 +69,81 @@ var (
 	updateProgress = map[string]interface{}{"state": "idle", "percent": 0}
 )
 
-// compareVersions returns 1 if a>b, -1 if a<b, 0 if equal. Accepts "v1.2.3" style.
+// parseSemVer parses "v1.4.2-beta.1" into numeric segments [1, 4, 2] and pre-release tag "beta.1".
+func parseSemVer(v string) ([]int, string) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	parts := strings.SplitN(v, "-", 2)
+	numStr := parts[0]
+	pre := ""
+	if len(parts) > 1 {
+		pre = parts[1]
+	}
+
+	numParts := strings.Split(numStr, ".")
+	nums := make([]int, 3)
+	for i := 0; i < len(numParts) && i < 3; i++ {
+		nums[i], _ = strconv.Atoi(numParts[i])
+	}
+	return nums, pre
+}
+
+// compareVersions returns 1 if a>b, -1 if a<b, 0 if equal.
+// Follows SemVer 2.0: numeric precedence first; when numbers are equal, stable > prerelease.
 func compareVersions(a, b string) int {
-	pa := strings.Split(strings.TrimPrefix(strings.TrimSpace(a), "v"), ".")
-	pb := strings.Split(strings.TrimPrefix(strings.TrimSpace(b), "v"), ".")
-	for i := 0; i < len(pa) || i < len(pb); i++ {
-		var x, y int
-		if i < len(pa) {
-			x, _ = strconv.Atoi(strings.SplitN(pa[i], "-", 2)[0])
+	numsA, preA := parseSemVer(a)
+	numsB, preB := parseSemVer(b)
+
+	for i := range 3 {
+		if numsA[i] > numsB[i] {
+			return 1
 		}
-		if i < len(pb) {
-			y, _ = strconv.Atoi(strings.SplitN(pb[i], "-", 2)[0])
-		}
-		if x != y {
-			if x > y {
-				return 1
-			}
+		if numsA[i] < numsB[i] {
 			return -1
 		}
 	}
-	return 0
+
+	// Numbers are equal:
+	// A stable release (empty pre) is GREATER than a beta/prerelease!
+	if preA == "" && preB != "" {
+		return 1 // e.g. 1.4.2 > 1.4.2-beta
+	}
+	if preA != "" && preB == "" {
+		return -1 // e.g. 1.4.2-beta < 1.4.2
+	}
+	if preA == "" && preB == "" {
+		return 0
+	}
+
+	// Both are prereleases:
+	if preA == preB {
+		return 0
+	}
+	return strings.Compare(preA, preB)
+}
+
+func resolveReleaseDownloadURL(rel GitHubRelease) string {
+	// 1. Prioritize full installer executable
+	for _, a := range rel.Assets {
+		n := strings.ToLower(a.Name)
+		if strings.HasSuffix(n, ".exe") && (strings.Contains(n, "windows") || strings.Contains(n, "setup") || strings.Contains(n, "installer")) {
+			return a.BrowserDownloadURL
+		}
+	}
+	// 2. Fall back to zip bundle
+	for _, a := range rel.Assets {
+		n := strings.ToLower(a.Name)
+		if strings.HasSuffix(n, ".zip") && strings.Contains(n, "win") {
+			return a.BrowserDownloadURL
+		}
+	}
+	// 3. Fall back to bare exe
+	for _, a := range rel.Assets {
+		n := strings.ToLower(a.Name)
+		if strings.HasSuffix(n, ".exe") {
+			return a.BrowserDownloadURL
+		}
+	}
+	return ""
 }
 
 func checkForUpdate(force bool) *UpdateInfo {
@@ -100,7 +155,16 @@ func checkForUpdate(force bool) *UpdateInfo {
 
 	info := &UpdateInfo{CurrentVersion: AppVersion}
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, _ := http.NewRequest("GET", "https://api.github.com/repos/"+GitHubRepo+"/releases/latest", nil)
+
+	isBeta := loadConfig().BetaChannel
+	var targetURL string
+	if isBeta {
+		targetURL = "https://api.github.com/repos/" + GitHubRepo + "/releases?per_page=5"
+	} else {
+		targetURL = "https://api.github.com/repos/" + GitHubRepo + "/releases/latest"
+	}
+
+	req, _ := http.NewRequest("GET", targetURL, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "BigPocket-Updater")
 	resp, err := client.Do(req)
@@ -113,47 +177,46 @@ func checkForUpdate(force bool) *UpdateInfo {
 		info.Error = fmt.Sprintf("GitHub API status %d", resp.StatusCode)
 		return info
 	}
-	var rel GitHubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		info.Error = err.Error()
+
+	var candidates []GitHubRelease
+	if isBeta {
+		if err := json.NewDecoder(resp.Body).Decode(&candidates); err != nil {
+			info.Error = err.Error()
+			return info
+		}
+	} else {
+		var single GitHubRelease
+		if err := json.NewDecoder(resp.Body).Decode(&single); err != nil {
+			info.Error = err.Error()
+			return info
+		}
+		candidates = []GitHubRelease{single}
+	}
+
+	if len(candidates) == 0 {
+		info.Error = "No releases found"
 		return info
 	}
 
-	info.LatestVersion = strings.TrimPrefix(rel.TagName, "v")
-	info.Title = rel.Name
-	info.Notes = rel.Body
-	info.URL = rel.HTMLURL
-	info.PublishedAt = rel.PublishedAt
+	// Select the highest version available
+	var bestRelease *GitHubRelease
+	for i := range candidates {
+		rel := &candidates[i]
+		if bestRelease == nil || compareVersions(rel.TagName, bestRelease.TagName) > 0 {
+			bestRelease = rel
+		}
+	}
 
-	// 1. Prioritize full installer executable (bigpocket-windows.exe) for cleanest seamless update
-	for _, a := range rel.Assets {
-		n := strings.ToLower(a.Name)
-		if strings.HasSuffix(n, ".exe") && (strings.Contains(n, "windows") || strings.Contains(n, "setup") || strings.Contains(n, "installer")) {
-			info.DownloadURL = a.BrowserDownloadURL
-			break
-		}
+	if bestRelease != nil {
+		rel := *bestRelease
+		info.LatestVersion = strings.TrimPrefix(rel.TagName, "v")
+		info.Title = rel.Name
+		info.Notes = rel.Body
+		info.URL = rel.HTMLURL
+		info.PublishedAt = rel.PublishedAt
+		info.DownloadURL = resolveReleaseDownloadURL(rel)
+		info.Available = compareVersions(info.LatestVersion, AppVersion) > 0 && info.DownloadURL != ""
 	}
-	// 2. Fall back to zip bundle
-	if info.DownloadURL == "" {
-		for _, a := range rel.Assets {
-			n := strings.ToLower(a.Name)
-			if strings.HasSuffix(n, ".zip") && strings.Contains(n, "win") {
-				info.DownloadURL = a.BrowserDownloadURL
-				break
-			}
-		}
-	}
-	// 3. Fall back to bare exe
-	if info.DownloadURL == "" {
-		for _, a := range rel.Assets {
-			n := strings.ToLower(a.Name)
-			if strings.HasSuffix(n, ".exe") {
-				info.DownloadURL = a.BrowserDownloadURL
-				break
-			}
-		}
-	}
-	info.Available = compareVersions(info.LatestVersion, AppVersion) > 0 && info.DownloadURL != ""
 
 	updateCache = info
 	updateCachedAt = time.Now()
@@ -204,7 +267,7 @@ func installUpdate(downloadURL string) {
 	}
 	dir := filepath.Dir(exePath)
 
-	isInstaller := strings.HasSuffix(strings.ToLower(downloadURL), ".exe") && 
+	isInstaller := strings.HasSuffix(strings.ToLower(downloadURL), ".exe") &&
 		(strings.Contains(strings.ToLower(downloadURL), "windows") || strings.Contains(strings.ToLower(downloadURL), "setup") || strings.Contains(strings.ToLower(downloadURL), "installer"))
 
 	// Create temp file for download
@@ -266,7 +329,6 @@ func installUpdate(downloadURL string) {
 		// Directory is write-protected (e.g., C:\Program Files\BigPocket as standard user).
 		// We elevate via a clean one-shot batch script in Temp to apply the update and relaunch!
 		os.Remove(testFile)
-		batPath := filepath.Join(os.TempDir(), "bp_update_elevated.bat")
 		var batContent string
 		if strings.HasSuffix(strings.ToLower(downloadURL), ".zip") {
 			batContent = fmt.Sprintf(`@echo off
@@ -287,7 +349,25 @@ start "" "%s" --after-update
 del "%%~f0"
 `, tmpPath, exePath, tmpPath, exePath)
 		}
-		os.WriteFile(batPath, []byte(batContent), 0644)
+		// Unique, owner-only temp file: a predictable %TEMP% path could be hijacked
+		// by another local process (symlink/replace race).
+		batFile, err := os.CreateTemp("", "bp_update_elevated_*.bat")
+		if err != nil {
+			fail(err)
+			return
+		}
+		batPath := batFile.Name()
+		if _, err := batFile.WriteString(batContent); err != nil {
+			batFile.Close()
+			os.Remove(batPath)
+			fail(err)
+			return
+		}
+		if err := batFile.Close(); err != nil {
+			os.Remove(batPath)
+			fail(err)
+			return
+		}
 
 		setUpdateProgress("restarting", 100, "")
 		shell32 := syscall.NewLazyDLL("shell32.dll")
@@ -395,13 +475,21 @@ func extractUpdateZip(zipPath, destDir, exeName string) error {
 	foundExe := false
 	for _, f := range r.File {
 		name := strings.TrimPrefix(f.Name, prefix)
-		if name == "" || strings.Contains(name, "..") {
+		if name == "" {
 			continue
 		}
-		target := filepath.Join(destDir, filepath.FromSlash(name))
+		// safeZipEntryPath rejects absolute paths and any "../" escape (Zip Slip).
+		target, err := safeZipEntryPath(destDir, name)
+		if err != nil {
+			continue
+		}
 		baseName := filepath.Base(name)
 		if strings.EqualFold(baseName, exeName) || strings.EqualFold(baseName, "bigpocket.exe") {
-			target = filepath.Join(destDir, exeName)
+			exeTarget, err := safeJoinPath(destDir, exeName)
+			if err != nil {
+				return err
+			}
+			target = exeTarget
 			foundExe = true
 		}
 		if f.FileInfo().IsDir() {
