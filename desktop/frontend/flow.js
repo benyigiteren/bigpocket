@@ -77,8 +77,8 @@
                     <div class="flow-empty-icon">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     </div>
-                    <h3>Akışınız Boş</h3>
-                    <p>Buraya mesaj, bağlantı veya dosya bırakarak telefonunuzla anında paylaşmaya başlayın.</p>
+                    <h3>Akış boş</h3>
+                    <p>Mesaj, bağlantı veya dosya paylaşın.</p>
                 </div>
             `;
             return;
@@ -227,7 +227,7 @@
             }));
             const data = await res.json();
             if (data.success && window.showToast) {
-                window.showToast('📸 Ekran görüntüsü akışa gönderildi');
+                window.showToast('Ekran görüntüsü gönderildi');
             }
         } catch (e) {
             console.error('Flow screenshot error:', e);
@@ -268,7 +268,7 @@
     }
 
     async function clearFlow() {
-        if (!confirm('Tüm akış geçmişini temizlemek istediğinize emin misiniz?')) return;
+        if (!confirm('Tüm akış geçmişi silinsin mi?')) return;
         try {
             await (window.authFetch ? window.authFetch('/api/flow', { method: 'DELETE' }) : fetch('/api/flow', { method: 'DELETE' }));
             flowMessages = [];

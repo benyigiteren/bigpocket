@@ -163,7 +163,7 @@ function setupDashboardPassword() {
             .then(data => {
                 if (data.success) {
                     setAuthPassword(newPassword);
-                    alert("Erişim şifresi başarıyla güncellendi!");
+                    alert("Şifre güncellendi.");
                     fetchSystemInfo(); // Refresh pairing QR code with new password
                     updateMcpCardUI();
                 }
@@ -172,7 +172,7 @@ function setupDashboardPassword() {
                 console.error("Failed to update password", err);
             });
         } else {
-            alert("Sistem yapılandırması yüklenemedi. Lütfen sayfayı yenileyin.");
+            alert("Yapılandırma yüklenemedi. Sayfayı yenileyin.");
         }
     });
 }
@@ -319,7 +319,7 @@ function setupAutostart() {
                     updateMcpCardUI();
                 }
                 if (window.showToast) {
-                    window.showToast(enable ? 'Windows ile birlikte başlatma açıldı.' : 'Otomatik başlatma kapatıldı.');
+                    window.showToast(enable ? 'Otomatik başlatma açıldı.' : 'Otomatik başlatma kapatıldı.');
                 }
             })
             .catch(err => {
@@ -531,19 +531,20 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupUsbBridge() {
     const adbBtn = document.getElementById('btn-setup-adb-reverse');
     if (adbBtn) {
+        const defaultLabel = adbBtn.textContent;
         adbBtn.addEventListener('click', () => {
             adbBtn.textContent = "Kuruluyor...";
             adbBtn.disabled = true;
             authFetch('/api/usb/forward', { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
-                    alert(data.message || (data.success ? "1ms USB Köprüsü Başarıyla Kuruldu!" : "ADB hatası"));
-                    adbBtn.textContent = "1ms ADB Başlat";
+                    alert(data.message || (data.success ? "USB köprüsü kuruldu." : "ADB hatası"));
+                    adbBtn.textContent = defaultLabel;
                     adbBtn.disabled = false;
                 })
                 .catch(err => {
                     alert("USB köprüsü kurulamadı: " + err);
-                    adbBtn.textContent = "1ms ADB Başlat";
+                    adbBtn.textContent = defaultLabel;
                     adbBtn.disabled = false;
                 });
         });
@@ -553,11 +554,11 @@ function setupUsbBridge() {
 // Setup Shutdown
 function setupShutdown() {
     shutdownBtn.addEventListener('click', () => {
-        if (confirm("BigPocket arka plan sunucusunu kapatmak istediğinize emin misiniz?")) {
+        if (confirm("BigPocket sunucusu kapatılsın mı?")) {
             authFetch('/shutdown')
                 .then(res => res.json())
                 .then(data => {
-                    alert("Sunucu kapatıldı. Tarayıcı penceresini kapatabilirsiniz.");
+                    alert("Sunucu kapatıldı.");
                     window.close();
                 })
                 .catch(err => {
@@ -1653,10 +1654,10 @@ function renameDeckPage(id) {
 function deleteDeckPage(id) {
     if (!apiConfig || !apiConfig.stream_deck_pages) return;
     if (apiConfig.stream_deck_pages.length <= 1) {
-        alert("En az bir sayfa kalmalıdır!");
+        alert("En az bir sayfa kalmalı.");
         return;
     }
-    if (!confirm("Bu sayfayı ve üzerindeki butonları silmek istediğinize emin misiniz?")) return;
+    if (!confirm("Bu sayfa ve butonları silinsin mi?")) return;
     apiConfig.stream_deck_buttons = (apiConfig.stream_deck_buttons || []).filter(b => (b.page || 0) !== id);
     apiConfig.stream_deck_pages = apiConfig.stream_deck_pages.filter(p => p.id !== id);
     if ((apiConfig.active_page || 0) === id) apiConfig.active_page = apiConfig.stream_deck_pages[0].id;
@@ -4814,12 +4815,12 @@ function updateDriverUI(data) {
         title.textContent = "Sanal Ekran Sürücüsü Aktif";
         
         if (data.monitors > 1) {
-            desc.textContent = `Toplam monitör sayısı: ${data.monitors}. Sanal monitör aktif ve sinyal gönderiliyor.`;
+            desc.textContent = `Toplam monitör: ${data.monitors}.`;
             badge.className = "status-pill status-green";
             badge.textContent = "AKTİF";
             chkEnable.checked = true;
         } else {
-            desc.textContent = "Sürücü yüklü ancak sanal monitör şu an pasif durumda.";
+            desc.textContent = "Sürücü yüklü, sanal monitör kapalı.";
             badge.className = "status-pill status-yellow";
             badge.textContent = "KAPALI";
             chkEnable.checked = false;
@@ -4834,7 +4835,7 @@ function updateDriverUI(data) {
     } else {
         icon.className = "driver-status-icon error";
         title.textContent = "Sanal Ekran Sürücüsü Eksik";
-        desc.textContent = "Sanal ikinci ekran özelliğini kullanmak için sisteminize sürücüyü kurmanız gerekir.";
+        desc.textContent = "İkinci ekran için sürücüyü kurun.";
         badge.className = "status-pill status-red";
         badge.textContent = "EKSİK";
         
@@ -4928,7 +4929,7 @@ function uploadMultipleFiles(files) {
         })
         .catch(err => {
             console.error("Upload error:", err);
-            alert("Dosya yüklenirken bir sorun oluştu.");
+            alert("Dosya yüklenemedi.");
         });
 }
 
@@ -4997,7 +4998,7 @@ function renderFilesList(files) {
 }
 
 function deleteFile(filename) {
-    if (confirm("Bu dosyayı silmek istediğinize emin misiniz?")) {
+    if (confirm("Bu dosya silinsin mi?")) {
         authFetch(`/files/${filename}`, { method: 'DELETE' })
             .then(res => res.json())
             .then(data => {
@@ -5061,9 +5062,9 @@ function setupPCClipboardSync() {
                     text: text
                 }));
                 sendArea.value = '';
-                alert("Metin telefona gönderildi!");
+                alert("Metin gönderildi.");
             } else if (!text) {
-                alert("Lütfen telefona gönderilecek bir metin girin.");
+                alert("Gönderilecek metin girin.");
             } else {
                 alert("Mobil bağlantı aktif değil.");
             }
@@ -5076,7 +5077,7 @@ function setupPCClipboardSync() {
         btnCopy.addEventListener('click', () => {
             if (previewArea.value) {
                 navigator.clipboard.writeText(previewArea.value)
-                    .then(() => alert("Metin bilgisayar panosuna kopyalandı!"))
+                    .then(() => alert("Metin panoya kopyalandı."))
                     .catch(err => console.error("Metin kopyalanamadı", err));
             } else {
                 alert("Kopyalanacak metin yok.");
@@ -5101,7 +5102,7 @@ function setupIPSelectHandler() {
         copyIpBtn.addEventListener('click', () => {
             const selectedIp = document.getElementById('pc-ip-select')?.value || "127.0.0.1";
             navigator.clipboard.writeText(selectedIp)
-                .then(() => alert(`IP adresi (${selectedIp}) panoya kopyalandı!`))
+                .then(() => alert(`IP kopyalandı: ${selectedIp}`))
                 .catch(err => console.error("IP kopyalanamadı", err));
         });
     }
@@ -5121,7 +5122,7 @@ function setupMicDriverManager() {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    if (confirm("Sanal Mikrofon Sürücüsü kuruldu!\n\nWindows varsayılan ses çıkış cihazını 'CABLE Input' yapmış olabilir. Eğer bilgisayarınızdan ses gelmiyorsa ses kontrol panelini açıp kendi hoparlörünüzü varsayılan yapmak ister misiniz?")) {
+                    if (confirm("Sanal Mikrofon Sürücüsü kuruldu.\n\nWindows varsayılan çıkışı 'CABLE Input' olabilir. Ses gelmiyorsa ses ayarlarını açmak ister misiniz?")) {
                         authFetch('/open_sound_settings', { method: 'POST' });
                     }
                 } else {
@@ -5391,7 +5392,7 @@ function checkMobileMode() {
                 manualBtn.disabled = true;
                 if (updateStatusEl) {
                     updateStatusEl.style.color = 'var(--text-muted)';
-                    updateStatusEl.textContent = 'GitHub üzerinden güncellemeler denetleniyor...';
+                    updateStatusEl.textContent = 'Güncellemeler kontrol ediliyor...';
                 }
                 try {
                     await window.checkForUpdates(true);
@@ -5447,7 +5448,7 @@ function checkMobileMode() {
                     if (progressMsg) {
                         progressMsg.style.display = 'block';
                         progressMsg.style.color = '#38bdf8';
-                        progressMsg.textContent = 'Sistem kayıtları ve dosyalar temizleniyor, lütfen bekleyin...';
+                        progressMsg.textContent = 'Kaldırılıyor...';
                     }
 
                     try {
@@ -5460,7 +5461,7 @@ function checkMobileMode() {
                         if (data && data.success) {
                             if (progressMsg) {
                                 progressMsg.style.color = '#22c55e';
-                                progressMsg.textContent = 'BigPocket başarıyla kaldırıldı. Uygulama kapatılıyor...';
+                                progressMsg.textContent = 'BigPocket kaldırıldı. Kapatılıyor...';
                             }
                             setTimeout(() => {
                                 window.close();
