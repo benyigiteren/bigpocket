@@ -2947,18 +2947,9 @@ function setupEdgeResize(item, btn) {
             document.body.classList.remove('deck-resizing');
 
             if (hasMoved) {
-                renderStreamDeckButtons();
-                debouncedSaveConfig(300);
+                setStreamDeckButtonSize(btn.id, btn.col_span || 1, btn.row_span || 1);
             } else if (handle.classList.contains('deck-resize-se')) {
-                // Quick cycle on single click
-                const cCol = btn.col_span || 1;
-                const cRow = btn.row_span || 1;
-                if (cCol === 1 && cRow === 1) { btn.col_span = 2; btn.row_span = 1; }
-                else if (cCol === 2 && cRow === 1) { btn.col_span = 1; btn.row_span = 2; }
-                else if (cCol === 1 && cRow === 2) { btn.col_span = 2; btn.row_span = 2; }
-                else { btn.col_span = 1; btn.row_span = 1; }
-                renderStreamDeckButtons();
-                debouncedSaveConfig(300);
+                cycleStreamDeckButtonSize(btn.id);
             }
         };
 
@@ -3108,6 +3099,11 @@ function setStreamDeckButtonSize(id, colSpan, rowSpan) {
     if (btn.grid_row >= 0) btn.grid_row = Math.max(0, Math.min(maxRows - btn.row_span, btn.grid_row));
     if (btn.grid_col >= 0) btn.grid_col = Math.max(0, Math.min(maxCols - btn.col_span, btn.grid_col));
 
+    const activePage = (apiConfig && apiConfig.active_page) || 0;
+    const pageButtons = apiConfig.stream_deck_buttons.filter(b => (b.page || 0) === activePage);
+
+    resolveStreamDeckCollisions(pageButtons, btn, null, maxRows, maxCols);
+
     renderStreamDeckButtons();
     debouncedSaveConfig(300);
     showAppleToast(`Boyut: ${btn.col_span}×${btn.row_span}`);
@@ -3132,13 +3128,7 @@ function cycleStreamDeckButtonSize(id) {
         nextCol = 1; nextRow = 1; // 1x1 standard
     }
 
-    btn.col_span = Math.min(nextCol, Math.max(1, apiConfig.stream_deck_cols || 4));
-    btn.row_span = Math.min(nextRow, Math.max(1, apiConfig.stream_deck_rows || 2));
-    if (btn.grid_row >= 0) btn.grid_row = Math.max(0, Math.min((apiConfig.stream_deck_rows || 2) - btn.row_span, btn.grid_row));
-    if (btn.grid_col >= 0) btn.grid_col = Math.max(0, Math.min((apiConfig.stream_deck_cols || 4) - btn.col_span, btn.grid_col));
-    renderStreamDeckButtons();
-    debouncedSaveConfig(300);
-    showAppleToast(`Boyut: ${btn.col_span}×${btn.row_span}`);
+    setStreamDeckButtonSize(id, nextCol, nextRow);
 }
 
 function closeActiveContextMenu() {
@@ -3492,29 +3482,30 @@ function turkishTimeWords(date) {
 // create an implicit column/row outside the matrix (zero overflow guarantee).
 // PASS 1 honours an explicit (grid_row, grid_col); PASS 2 auto-packs the rest.
 function packBentoGrid(pageButtons, rows, cols) {
-    const occupied = [];
-    for (let r = 0; r < rows; r++) occupied.push(new Array(cols).fill(false));
-
+    const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
+    const placed = new Map();
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const fits = (row, col, rs, cs) => {
-        if (row < 0 || col < 0 || row + rs > rows || col + cs > cols) return false;
-        for (let r = row; r < row + rs; r++) {
-            for (let c = col; c < col + cs; c++) {
-                if (occupied[r][c]) return false;
+
+    const canOccupy = (r, c, rs, cs, ignoreId = null) => {
+        if (r < 0 || c < 0 || r + rs > rows || c + cs > cols) return false;
+        for (let i = r; i < r + rs; i++) {
+            for (let j = c; j < c + cs; j++) {
+                if (grid[i][j] !== null && grid[i][j] !== ignoreId) return false;
             }
         }
         return true;
     };
-    const mark = (row, col, rs, cs) => {
-        for (let r = row; r < row + rs; r++) {
-            for (let c = col; c < col + cs; c++) occupied[r][c] = true;
+
+    const occupy = (r, c, rs, cs, id) => {
+        for (let i = r; i < r + rs; i++) {
+            for (let j = c; j < c + cs; j++) {
+                grid[i][j] = id;
+            }
         }
+        placed.set(id, { r, c, rs, cs });
     };
 
-    const placed = new Map();
-    let overflowCount = 0;
-
-    // PASS 1 — an explicit cell wins, exactly where the user dropped it
+    // PASS 1: Place buttons with existing valid coordinates
     pageButtons.forEach(btn => {
         const gr = Number(btn.grid_row);
         const gc = Number(btn.grid_col);
@@ -3523,48 +3514,67 @@ function packBentoGrid(pageButtons, rows, cols) {
         const rs = clamp(btn.row_span || 1, 1, rows);
         const r = clamp(gr, 0, rows - rs);
         const c = clamp(gc, 0, cols - cs);
-        if (!fits(r, c, rs, cs)) return;   // occupied -> falls through to auto-pack
-        mark(r, c, rs, cs);
-        placed.set(btn.id, { r, c, rs, cs });
+        if (canOccupy(r, c, rs, cs)) {
+            occupy(r, c, rs, cs, btn.id);
+            btn.grid_row = r;
+            btn.grid_col = c;
+        }
     });
 
-    // PASS 2 — first-fit with the shrink-then-place ladder
+    // PASS 2: Place remaining buttons in first available slot that fits their requested size
     pageButtons.forEach(btn => {
         if (placed.has(btn.id)) return;
-        let cs = clamp(btn.col_span || 1, 1, cols);
-        let rs = clamp(btn.row_span || 1, 1, rows);
-        let pos = null;
+        const cs = clamp(btn.col_span || 1, 1, cols);
+        const rs = clamp(btn.row_span || 1, 1, rows);
 
-        while (cs >= 1 && rs >= 1) {
-            for (let r = 0; r < rows && !pos; r++) {
-                for (let c = 0; c < cols && !pos; c++) {
-                    if (fits(r, c, rs, cs)) pos = { r, c, rs, cs };
+        let found = false;
+        for (let r = 0; r <= rows - rs; r++) {
+            for (let c = 0; c <= cols - cs; c++) {
+                if (canOccupy(r, c, rs, cs)) {
+                    occupy(r, c, rs, cs, btn.id);
+                    btn.grid_row = r;
+                    btn.grid_col = c;
+                    found = true;
+                    break;
                 }
             }
-            if (pos) break;
-            if (cs > 1 && cs >= rs) cs--;
-            else if (rs > 1) rs--;
-            else break;
+            if (found) break;
         }
 
-        if (!pos) {
-            overflowCount++;
-            return;
+        // If requested span doesn't fit in remaining space, fall back to 1x1 in first empty cell
+        if (!found) {
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (grid[r][c] === null) {
+                        btn.col_span = 1;
+                        btn.row_span = 1;
+                        btn.grid_row = r;
+                        btn.grid_col = c;
+                        occupy(r, c, 1, 1, btn.id);
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
         }
-        mark(pos.r, pos.c, pos.rs, pos.cs);
-        placed.set(btn.id, pos);
     });
 
+    // Compute empty holes
     const holes = [];
+    const occupiedMap = Array.from({ length: rows }, () => Array(cols).fill(false));
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-            if (!occupied[r][c]) holes.push({ r, c });
+            if (grid[r][c] === null) {
+                holes.push({ r, c });
+            } else {
+                occupiedMap[r][c] = true;
+            }
         }
     }
 
-    return { placed, holes, overflowCount, occupied };
+    return { placed, holes, occupied: occupiedMap };
 }
-
 // Render Stream Deck Interactive Grid with Drag & Drop, Edge Resizing, and Ghost Slots
 function renderStreamDeckButtons() {
     const list = document.getElementById('deck-buttons-list');
@@ -4159,11 +4169,11 @@ function renderStreamDeckButtons() {
 
         item.addEventListener('drop', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             item.classList.remove('drag-over');
             const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
             if (!isNaN(draggedId) && draggedId !== btn.id) {
-                const cell = cellFromEvent(e, list, rows, cols);
-                moveButtonToCell(draggedId, cell.row, cell.col);
+                swapStreamDeckButtons(draggedId, btn.id);
             }
         });
 
@@ -4205,10 +4215,12 @@ function renderStreamDeckButtons() {
 
         emptySlot.addEventListener('drop', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             emptySlot.classList.remove('drag-over');
-            // A card dragged onto a hole moves into it
             const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
-            if (!isNaN(draggedId)) moveButtonToCell(draggedId, hole.r, hole.c);
+            if (!isNaN(draggedId)) {
+                moveStreamDeckButtonToCell(draggedId, hole.r, hole.c);
+            }
         });
 
         list.appendChild(emptySlot);
@@ -4448,52 +4460,160 @@ function cellFromEvent(e, listEl, rows, cols) {
 // Drag a card onto a cell: it takes that (grid_row, grid_col). If the cell is
 // occupied the two cards trade coordinates (the occupant inherits the dragged
 // card's previous cell, or returns to auto-packing when it had none).
-function moveButtonToCell(draggedId, row, col) {
-    if (!apiConfig || !apiConfig.stream_deck_buttons) return;
-    const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
-    const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
-    const dragged = apiConfig.stream_deck_buttons.find(b => b.id === draggedId);
-    if (!dragged) return;
+function resolveStreamDeckCollisions(pageButtons, priorityBtn, secondaryBtn, rows, cols) {
+    const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
 
-    const prevRow = Number.isInteger(dragged.grid_row) ? dragged.grid_row : -1;
-    const prevCol = Number.isInteger(dragged.grid_col) ? dragged.grid_col : -1;
+    const canOccupy = (r, c, rs, cs, id) => {
+        if (r < 0 || c < 0 || r + rs > rows || c + cs > cols) return false;
+        for (let i = r; i < r + rs; i++) {
+            for (let j = c; j < c + cs; j++) {
+                if (grid[i][j] !== null && grid[i][j] !== id) return false;
+            }
+        }
+        return true;
+    };
 
-    let cs = Math.min(Math.max(1, dragged.col_span || 1), cols);
-    let rs = Math.min(Math.max(1, dragged.row_span || 1), rows);
-    let r = Math.max(0, Math.min(rows - rs, row));
-    let c = Math.max(0, Math.min(cols - cs, col));
+    const occupy = (r, c, rs, cs, id) => {
+        for (let i = r; i < r + rs; i++) {
+            for (let j = c; j < c + cs; j++) {
+                grid[i][j] = id;
+            }
+        }
+    };
 
-    // Never move a card on top of another one: shrink to the free rectangle first
-    const page = dragged.page || 0;
-    const pageButtons = apiConfig.stream_deck_buttons.filter(b => (b.page || 0) === page && b.id !== draggedId);
-    const layout = packBentoGrid(pageButtons, rows, cols);
-    if (layout.occupied && layout.occupied[r][c]) {
-        const span = freeSpanAt(layout.occupied, rows, cols, r, c, rs, cs);
-        rs = span.rs;
-        cs = span.cs;
+    // 1. Priority button (dragged or resized) takes its desired spot
+    if (priorityBtn) {
+        const rs = Math.min(rows, Math.max(1, priorityBtn.row_span || 1));
+        const cs = Math.min(cols, Math.max(1, priorityBtn.col_span || 1));
+        const r = Math.max(0, Math.min(rows - rs, priorityBtn.grid_row || 0));
+        const c = Math.max(0, Math.min(cols - cs, priorityBtn.grid_col || 0));
+        priorityBtn.grid_row = r;
+        priorityBtn.grid_col = c;
+        occupy(r, c, rs, cs, priorityBtn.id);
     }
 
-    const occupant = apiConfig.stream_deck_buttons.find(o =>
-        o.id !== draggedId && (o.page || 0) === page &&
-        o.grid_row >= 0 && o.grid_col >= 0 &&
-        r < o.grid_row + (o.row_span || 1) && o.grid_row < r + rs &&
-        c < o.grid_col + (o.col_span || 1) && o.grid_col < c + cs);
-
-    if (occupant) {
-        // Swap cells: the occupant inherits the dragged card's previous cell
-        if (prevRow >= 0 && prevCol >= 0) {
-            occupant.grid_row = prevRow;
-            occupant.grid_col = prevCol;
+    // 2. Secondary button (swapped partner) takes its spot
+    if (secondaryBtn) {
+        const rs = Math.min(rows, Math.max(1, secondaryBtn.row_span || 1));
+        const cs = Math.min(cols, Math.max(1, secondaryBtn.col_span || 1));
+        const r = Math.max(0, Math.min(rows - rs, secondaryBtn.grid_row || 0));
+        const c = Math.max(0, Math.min(cols - cs, secondaryBtn.grid_col || 0));
+        if (canOccupy(r, c, rs, cs, secondaryBtn.id)) {
+            secondaryBtn.grid_row = r;
+            secondaryBtn.grid_col = c;
+            occupy(r, c, rs, cs, secondaryBtn.id);
         } else {
-            occupant.grid_row = -1;
-            occupant.grid_col = -1;
+            let placed = false;
+            for (let ir = 0; ir <= rows - rs && !placed; ir++) {
+                for (let ic = 0; ic <= cols - cs && !placed; ic++) {
+                    if (canOccupy(ir, ic, rs, cs, secondaryBtn.id)) {
+                        secondaryBtn.grid_row = ir;
+                        secondaryBtn.grid_col = ic;
+                        occupy(ir, ic, rs, cs, secondaryBtn.id);
+                        placed = true;
+                    }
+                }
+            }
         }
     }
 
-    dragged.grid_row = r;
-    dragged.grid_col = c;
+    // 3. For all other buttons: if still free, keep them; if colliding, find nearest free cell
+    pageButtons.forEach(btn => {
+        if (priorityBtn && btn.id === priorityBtn.id) return;
+        if (secondaryBtn && btn.id === secondaryBtn.id) return;
+
+        const rs = Math.min(rows, Math.max(1, btn.row_span || 1));
+        const cs = Math.min(cols, Math.max(1, btn.col_span || 1));
+        const r = Number.isInteger(btn.grid_row) ? btn.grid_row : 0;
+        const c = Number.isInteger(btn.grid_col) ? btn.grid_col : 0;
+
+        if (canOccupy(r, c, rs, cs, btn.id)) {
+            occupy(r, c, rs, cs, btn.id);
+        } else {
+            let placed = false;
+            for (let ir = 0; ir <= rows - rs && !placed; ir++) {
+                for (let ic = 0; ic <= cols - cs && !placed; ic++) {
+                    if (canOccupy(ir, ic, rs, cs, btn.id)) {
+                        btn.grid_row = ir;
+                        btn.grid_col = ic;
+                        occupy(ir, ic, rs, cs, btn.id);
+                        placed = true;
+                    }
+                }
+            }
+            if (!placed) {
+                for (let ir = 0; ir < rows && !placed; ir++) {
+                    for (let ic = 0; ic < cols && !placed; ic++) {
+                        if (grid[ir][ic] === null) {
+                            btn.grid_row = ir;
+                            btn.grid_col = ic;
+                            btn.row_span = 1;
+                            btn.col_span = 1;
+                            grid[ir][ic] = btn.id;
+                            placed = true;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function swapStreamDeckButtons(draggedId, targetId) {
+    if (draggedId === targetId || !apiConfig || !apiConfig.stream_deck_buttons) return;
+    const activePage = (apiConfig && apiConfig.active_page) || 0;
+    const pageButtons = apiConfig.stream_deck_buttons.filter(b => (b.page || 0) === activePage);
+
+    const dragged = pageButtons.find(b => b.id === draggedId);
+    const target = pageButtons.find(b => b.id === targetId);
+    if (!dragged || !target) return;
+
+    const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
+    const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
+
+    const targetR = Number.isInteger(target.grid_row) ? target.grid_row : 0;
+    const targetC = Number.isInteger(target.grid_col) ? target.grid_col : 0;
+    const draggedR = Number.isInteger(dragged.grid_row) ? dragged.grid_row : 0;
+    const draggedC = Number.isInteger(dragged.grid_col) ? dragged.grid_col : 0;
+
+    dragged.grid_row = Math.max(0, Math.min(rows - (dragged.row_span || 1), targetR));
+    dragged.grid_col = Math.max(0, Math.min(cols - (dragged.col_span || 1), targetC));
+
+    target.grid_row = Math.max(0, Math.min(rows - (target.row_span || 1), draggedR));
+    target.grid_col = Math.max(0, Math.min(cols - (target.col_span || 1), draggedC));
+
+    resolveStreamDeckCollisions(pageButtons, dragged, target, rows, cols);
+
     renderStreamDeckButtons();
     debouncedSaveConfig(300);
+    showAppleToast(`Bileşenlerin yerleri değiştirildi.`);
+}
+
+function moveStreamDeckButtonToCell(draggedId, targetRow, targetCol) {
+    if (!apiConfig || !apiConfig.stream_deck_buttons) return;
+    const activePage = (apiConfig && apiConfig.active_page) || 0;
+    const pageButtons = apiConfig.stream_deck_buttons.filter(b => (b.page || 0) === activePage);
+    const dragged = pageButtons.find(b => b.id === draggedId);
+    if (!dragged) return;
+
+    const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
+    const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
+
+    const cs = Math.min(cols, Math.max(1, dragged.col_span || 1));
+    const rs = Math.min(rows, Math.max(1, dragged.row_span || 1));
+
+    dragged.grid_row = Math.max(0, Math.min(rows - rs, targetRow));
+    dragged.grid_col = Math.max(0, Math.min(cols - cs, targetCol));
+
+    resolveStreamDeckCollisions(pageButtons, dragged, null, rows, cols);
+
+    renderStreamDeckButtons();
+    debouncedSaveConfig(300);
+    showAppleToast(`"${dragged.label || 'Bileşen'}" taşındı.`);
+}
+
+function moveButtonToCell(draggedId, row, col) {
+    moveStreamDeckButtonToCell(draggedId, row, col);
 }
 
 function testButtonAction(buttonId, element) {
