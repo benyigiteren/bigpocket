@@ -94,28 +94,29 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 8px 0 18px 0;
+    padding: 10px 0 20px 0;
     border-bottom: 1px solid var(--border-color);
     width: 100%;
     overflow: hidden;
 }
 
 .brand-logo-img {
-    width: 94px !important;
-    height: 94px !important;
-    max-width: 94px !important;
-    max-height: 94px !important;
-    border-radius: 20px;
-    object-fit: cover;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+    width: 105px !important;
+    height: auto !important;
+    max-width: 105px !important;
+    max-height: none !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.55));
     transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), filter 0.25s ease;
     display: block;
     margin: 0 auto;
 }
 
 .brand-logo-img:hover {
-    transform: scale(1.05) translateY(-2px);
-    filter: brightness(1.08);
+    transform: scale(1.04);
+    filter: drop-shadow(0 6px 18px rgba(255, 255, 255, 0.16));
 }
 
 
