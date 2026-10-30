@@ -385,7 +385,7 @@ private fun saveStreamDeckConfig(
             bObj.put("bg_style", b.bgStyle)
             bObj.put("clock_style", b.clockStyle)
             bObj.put("font_family", b.fontFamily)
-            bObj.put("clock_font_size", b.clockFontSize)
+            bObj.put("clock_font_size", b.clockFontSize.toString())
             bObj.put("grid_row", b.gridRow)
             bObj.put("grid_col", b.gridCol)
             buttonsArray.put(bObj)
@@ -2224,7 +2224,7 @@ fun ConnectionTab(
             verticalArrangement = Arrangement.Center
         ) {
             BigPocketLogo(
-                modifier = Modifier.size(72.dp)
+                modifier = Modifier.size(84.dp)
             )
             
             Spacer(modifier = Modifier.height(18.dp))
@@ -6356,8 +6356,6 @@ fun BigPocketLogo(modifier: Modifier = Modifier) {
         painter = androidx.compose.ui.res.painterResource(id = com.ygt.bigpocket.R.drawable.logo),
         contentDescription = "BigPocket Logo",
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .border(1.dp, MinimalistBorder, RoundedCornerShape(18.dp))
     )
 }
 

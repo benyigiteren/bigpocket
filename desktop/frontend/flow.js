@@ -23,10 +23,25 @@
 
     function escapeHtml(text) {
         if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
+
+    window.sendWebSocketMessage = window.sendWebSocketMessage || function(msg) {
+        if (typeof wsClient !== 'undefined' && wsClient && wsClient.readyState === WebSocket.OPEN) {
+            wsClient.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+        }
+    };
+
+    window.showToast = window.showToast || function(msg) {
+        if (typeof showAppleToast === 'function') {
+            showAppleToast(msg);
+        }
+    };
 
     function linkify(text) {
         const safe = escapeHtml(text);

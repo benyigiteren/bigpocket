@@ -206,7 +206,7 @@ pub fn is_allowed_origin(headers: &HeaderMap) -> bool {
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
         .unwrap_or("");
-    if origin.is_empty() || origin == "null" {
+    if origin.is_empty() {
         return true;
     }
     // Tauri custom-protocol origin (macOS/Linux webviews). Windows serves the
@@ -514,6 +514,8 @@ pub struct AppState {
     pub last_volume: StdMutex<u8>,
     /// Signalled by `/shutdown`-style callers to stop the axum server.
     pub shutdown: Notify,
+    /// Latest JPEG frame from phone camera.
+    pub camera_frame: Arc<tokio::sync::RwLock<Vec<u8>>>,
 }
 
 impl AppState {
@@ -531,6 +533,7 @@ impl AppState {
             pomodoro: StdMutex::new(Pomodoro::new()),
             last_volume: StdMutex::new(50),
             shutdown: Notify::new(),
+            camera_frame: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 
@@ -603,11 +606,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/uninstall", post(api_uninstall_post))
         .route("/api/clear_cache", post(api_clear_cache_post))
+        .route("/palette/action", post(palette_action))
+        .route("/upload_icon", post(upload_icon_handler))
+        .route("/extract_icon", post(extract_icon_handler))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     let public = Router::new()
         .route("/ws", get(ws_handler))
         .route("/system_info", get(system_info))
+        .route("/video_feed", get(video_feed_handler))
+        .route("/camera_frame", get(camera_frame_handler))
         .route("/api/update/check", get(update_check))
         .route("/api/qr", get(api_qr))
         .fallback_service(static_service());
@@ -1257,9 +1265,11 @@ async fn monitor_touch(state: &Arc<AppState>, payload: &Value) {
     let action = as_str(payload, "action").unwrap_or("");
 
     if let (Some(rx), Some(ry)) = (as_f64(payload, "x"), as_f64(payload, "y")) {
-        let px = mx + (rx * mw as f64) as i32;
-        let py = my + (ry * mh as f64) as i32;
-        with_input(state, move |c| c.move_to(px, py)).await;
+        if action != "scroll" && !(action == "up" && rx == 0.0 && ry == 0.0) {
+            let px = mx + (rx * mw as f64) as i32;
+            let py = my + (ry * mh as f64) as i32;
+            with_input(state, move |c| c.move_to(px, py)).await;
+        }
     }
 
     match action {
@@ -1273,7 +1283,10 @@ async fn monitor_touch(state: &Arc<AppState>, payload: &Value) {
             with_input(state, |c| c.click(Button::Left)).await;
         }
         "scroll" => {
-            let dy = as_i64(payload, "dy").unwrap_or(120) as i32;
+            let dy = as_f64(payload, "dy")
+                .map(|v| v as i32)
+                .or_else(|| as_i64(payload, "dy").map(|v| v as i32))
+                .unwrap_or(120);
             with_input(state, move |c| c.scroll(dy)).await;
         }
         _ => {}
@@ -1711,6 +1724,11 @@ fn merge_button(button: &Value, previous: &HashMap<i64, Map<String, Value>>) -> 
     };
 
     let mut merged = current.clone();
+    if let Some(cfs) = current.get("clock_font_size") {
+        if let Some(num) = cfs.as_i64() {
+            merged.insert("clock_font_size".to_string(), Value::String(num.to_string()));
+        }
+    }
     // Cosmetic strings: an empty/absent value keeps the stored one.
     for key in ["color", "bg_style", "clock_style", "font_family", "clock_font_size"] {
         let empty = current
@@ -2764,6 +2782,8 @@ pub async fn bind_and_start_server(
 
     spawn_stats_ticker(state.clone());
     start_screen_stream_server(state.clone());
+    start_camera_stream_server(state.clone());
+    start_audio_stream_server(state.clone());
     let state_clone = state.clone();
     let handle = tokio::spawn(async move {
         let app = router(state_clone.clone()).into_make_service_with_connect_info::<SocketAddr>();
@@ -2885,6 +2905,289 @@ fn get_stream_monitor() -> Option<xcap::Monitor> {
         return Some(monitors[1].clone());
     }
     monitors.first().cloned()
+}
+
+/// TCP camera stream server on port 8083.
+pub fn start_camera_stream_server(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let addr = SocketAddr::from(([0, 0, 0, 0], CAMERA_TCP_PORT));
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(err) => {
+                tracing::error!("Cannot bind camera stream server on port {CAMERA_TCP_PORT}: {err}");
+                return;
+            }
+        };
+        tracing::info!("Camera stream server listening on TCP port {CAMERA_TCP_PORT}");
+
+        loop {
+            let (mut socket, peer) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(_) => continue,
+            };
+
+            let _ = socket.set_nodelay(true);
+            let state_clone = state.clone();
+            tracing::info!("Camera client connected from {peer}");
+
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut size_buf = [0u8; 4];
+                loop {
+                    if socket.read_exact(&mut size_buf).await.is_err() {
+                        break;
+                    }
+                    let length = u32::from_be_bytes(size_buf) as usize;
+                    if length == 0 || length > 10 * 1024 * 1024 {
+                        break;
+                    }
+                    let mut frame_buf = vec![0u8; length];
+                    if socket.read_exact(&mut frame_buf).await.is_err() {
+                        break;
+                    }
+                    *state_clone.camera_frame.write().await = frame_buf;
+                }
+                tracing::info!("Camera client disconnected from {peer}");
+            });
+        }
+    })
+}
+
+/// TCP audio stream server on port 8084.
+pub fn start_audio_stream_server(_state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let addr = SocketAddr::from(([0, 0, 0, 0], AUDIO_TCP_PORT));
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(err) => {
+                tracing::error!("Cannot bind audio stream server on port {AUDIO_TCP_PORT}: {err}");
+                return;
+            }
+        };
+        tracing::info!("Audio stream server listening on TCP port {AUDIO_TCP_PORT}");
+
+        loop {
+            let (mut socket, peer) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(_) => continue,
+            };
+
+            let _ = socket.set_nodelay(true);
+            tracing::info!("Audio client connected from {peer}");
+
+            tokio::spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut pcm_buf = [0u8; 4096];
+                loop {
+                    match socket.read(&mut pcm_buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_n) => {
+                            // Audio PCM received and socket kept alive
+                        }
+                    }
+                }
+                tracing::info!("Audio client disconnected from {peer}");
+            });
+        }
+    })
+}
+
+async fn camera_frame_handler(State(state): State<Arc<AppState>>) -> Response {
+    let frame = state.camera_frame.read().await;
+    if frame.is_empty() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let mut resp = (StatusCode::OK, frame.clone()).into_response();
+    resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+    resp
+}
+
+async fn video_feed_handler(State(state): State<Arc<AppState>>) -> Response {
+    let stream = futures_util::stream::unfold(state, |state| async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let bytes = {
+            let frame = state.camera_frame.read().await;
+            if frame.is_empty() {
+                Vec::new()
+            } else {
+                let mut part = Vec::with_capacity(frame.len() + 128);
+                let header = format!("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", frame.len());
+                part.extend_from_slice(header.as_bytes());
+                part.extend_from_slice(&frame);
+                part.extend_from_slice(b"\r\n");
+                part
+            }
+        };
+        Some((Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from(bytes)), state))
+    });
+    let body = axum::body::Body::from_stream(stream);
+    let mut resp = (StatusCode::OK, body).into_response();
+    resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("multipart/x-mixed-replace; boundary=frame"),
+    );
+    resp
+}
+
+#[derive(serde::Deserialize)]
+struct PaletteActionRequest {
+    action: String,
+}
+
+async fn palette_action(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PaletteActionRequest>,
+) -> Response {
+    let action = body.action.as_str();
+    match action {
+        "volume_up" => {
+            apply_volume(&state, "up", 0.0);
+            json_response(StatusCode::OK, json!({"success": true, "message": "Ses artırıldı."}))
+        }
+        "volume_down" => {
+            apply_volume(&state, "down", 0.0);
+            json_response(StatusCode::OK, json!({"success": true, "message": "Ses kısıldı."}))
+        }
+        "volume_mute" => {
+            apply_volume(&state, "mute", 0.0);
+            json_response(StatusCode::OK, json!({"success": true, "message": "Ses kapatıldı/açıldı."}))
+        }
+        "lock_screen" => {
+            #[cfg(windows)]
+            {
+                #[link(name = "user32")]
+                extern "system" {
+                    fn LockWorkStation() -> i32;
+                }
+                unsafe { LockWorkStation(); }
+            }
+            json_response(StatusCode::OK, json!({"success": true, "message": "Ekran kilitlendi."}))
+        }
+        "monitor_toggle" => {
+            let active = xcap::Monitor::all().map(|m| m.len() > 1).unwrap_or(false);
+            set_virtual_monitor(!active);
+            json_response(StatusCode::OK, json!({"success": true, "message": "Monitör durumu değiştirildi."}))
+        }
+        "screenshot" => {
+            match capture_primary_display_png() {
+                Ok((name, size)) => {
+                    let mut message = FlowMessage::new("pc", "image", "📸 Ekran Görüntüsü");
+                    message.file_name = name.clone();
+                    message.file_size = size;
+                    message.file_url = format!("/download/{name}");
+                    message.timestamp = now_millis();
+                    let msg = state.flow.add_message(message).await;
+                    state.broadcast(json!({"type": "flow_new", "message": msg}));
+                    json_response(StatusCode::OK, json!({"success": true, "message": "Ekran görüntüsü alındı."}))
+                }
+                Err(err) => json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({"success": false, "error": err}))
+            }
+        }
+        "clipboard_sync" => {
+            let text = get_clipboard().unwrap_or_default();
+            state.broadcast(json!({"type": "clipboard_sync", "text": text}));
+            json_response(StatusCode::OK, json!({"success": true, "message": "Pano eşitlendi."}))
+        }
+        "app_taskmgr" => {
+            let _ = spawn_detached("taskmgr.exe");
+            json_response(StatusCode::OK, json!({"success": true, "message": "Görev Yöneticisi açıldı."}))
+        }
+        "app_calc" => {
+            let _ = spawn_detached("calc.exe");
+            json_response(StatusCode::OK, json!({"success": true, "message": "Hesap Makinesi açıldı."}))
+        }
+        "app_notepad" => {
+            let _ = spawn_detached("notepad.exe");
+            json_response(StatusCode::OK, json!({"success": true, "message": "Not Defteri açıldı."}))
+        }
+        "app_terminal" => {
+            #[cfg(windows)]
+            let _ = spawn_detached("wt.exe").or_else(|_| spawn_detached("cmd.exe"));
+            #[cfg(not(windows))]
+            let _ = spawn_detached("x-terminal-emulator");
+            json_response(StatusCode::OK, json!({"success": true, "message": "Terminal açıldı."}))
+        }
+        "app_vscode" => {
+            let _ = spawn_detached("code");
+            json_response(StatusCode::OK, json!({"success": true, "message": "VS Code açıldı."}))
+        }
+        "app_browser" => {
+            let _ = spawn_detached("https://www.google.com");
+            json_response(StatusCode::OK, json!({"success": true, "message": "Tarayıcı açıldı."}))
+        }
+        _ => json_response(StatusCode::BAD_REQUEST, json!({"success": false, "error": "Bilinmeyen eylem"}))
+    }
+}
+
+async fn upload_icon_handler(
+    State(state): State<Arc<AppState>>,
+    mut multipart: axum::extract::Multipart,
+) -> Response {
+    let mut button_id: Option<i32> = None;
+    let mut file_bytes: Option<Vec<u8>> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "button_id" {
+            if let Ok(text) = field.text().await {
+                button_id = text.parse::<i32>().ok();
+            }
+        } else if name == "file" {
+            if let Ok(bytes) = field.bytes().await {
+                file_bytes = Some(bytes.to_vec());
+            }
+        }
+    }
+
+    let Some(id) = button_id else {
+        return json_response(StatusCode::BAD_REQUEST, json!({"success": false, "error": "button_id missing"}));
+    };
+    let Some(bytes) = file_bytes else {
+        return json_response(StatusCode::BAD_REQUEST, json!({"success": false, "error": "file bytes missing"}));
+    };
+
+    let icons_dir = frontend_dir().join("icons");
+    let _ = std::fs::create_dir_all(&icons_dir);
+    let save_name = format!("button_{id}.png");
+    let target_path = icons_dir.join(&save_name);
+
+    if std::fs::write(&target_path, bytes).is_err() {
+        return json_response(StatusCode::INTERNAL_SERVER_ERROR, json!({"success": false, "error": "Cannot write icon file"}));
+    }
+
+    let mut cfg = config::load_config();
+    if let Some(btn) = cfg.stream_deck_buttons.iter_mut().find(|b| b.id == id) {
+        btn.icon = format!("icons/{save_name}");
+        let _ = config::save_config(&cfg);
+        state.broadcast(json!({"type": "config_update", "source": "upload_icon"}));
+    }
+
+    json_response(StatusCode::OK, json!({"success": true, "icon_url": format!("icons/{save_name}")}))
+}
+
+#[derive(serde::Deserialize)]
+struct ExtractIconRequest {
+    path: String,
+    button_id: Option<i32>,
+}
+
+async fn extract_icon_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<ExtractIconRequest>,
+) -> Response {
+    let id = body.button_id.unwrap_or(0);
+    let save_name = format!("button_{id}.png");
+    let icons_dir = frontend_dir().join("icons");
+    let _ = std::fs::create_dir_all(&icons_dir);
+
+    let mut cfg = config::load_config();
+    if let Some(btn) = cfg.stream_deck_buttons.iter_mut().find(|b| b.id == id) {
+        btn.icon = format!("icons/{save_name}");
+        let _ = config::save_config(&cfg);
+        state.broadcast(json!({"type": "config_update", "source": "extract_icon"}));
+    }
+
+    json_response(StatusCode::OK, json!({"success": true, "icon": format!("icons/{save_name}")}))
 }
 // ---------------------------------------------------------------------------
 // Windows autostart (HKCU Run key, written through reg.exe)

@@ -89,8 +89,52 @@ pub struct StreamDeckButton {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub font_family: String,
     /// auto, compact, regular, large, huge
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "deserialize_string_or_int", skip_serializing_if = "String::is_empty")]
     pub clock_font_size: String,
+}
+
+fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrInt;
+    impl<'de> serde::de::Visitor<'de> for StringOrInt {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("string or integer")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<String, E> {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<String, E> {
+            Ok((value as i64).to_string())
+        }
+
+        fn visit_none<E>(self) -> Result<String, E> {
+            Ok(String::new())
+        }
+
+        fn visit_unit<E>(self) -> Result<String, E> {
+            Ok(String::new())
+        }
+    }
+
+    deserializer.deserialize_any(StringOrInt)
 }
 
 fn one() -> i32 {

@@ -324,6 +324,7 @@ object SocketManager {
     }
 
     private fun cleanupAudio() {
+        isAudioStreaming = false
         try {
             audioRecord?.stop()
             audioRecord?.release()
