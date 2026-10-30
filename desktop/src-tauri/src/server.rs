@@ -2763,7 +2763,7 @@ pub async fn bind_and_start_server(
     tracing::info!("BigPocket control server listening on http://0.0.0.0:{port}");
 
     spawn_stats_ticker(state.clone());
-
+    start_screen_stream_server(state.clone());
     let state_clone = state.clone();
     let handle = tokio::spawn(async move {
         let app = router(state_clone.clone()).into_make_service_with_connect_info::<SocketAddr>();
@@ -2801,6 +2801,91 @@ fn spawn_stats_ticker(state: Arc<AppState>) {
     });
 }
 
+
+/// TCP screen stream server on port 8086.
+pub fn start_screen_stream_server(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let addr = SocketAddr::from(([0, 0, 0, 0], SCREEN_TCP_PORT));
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(err) => {
+                tracing::error!("Cannot bind screen stream server on port {SCREEN_TCP_PORT}: {err}");
+                return;
+            }
+        };
+        tracing::info!("Screen stream server listening on TCP port {SCREEN_TCP_PORT}");
+
+        loop {
+            let (socket, peer) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(_) => continue,
+            };
+
+            let host = peer.ip().to_string();
+            let cfg = config::load_config();
+            if !peer.ip().is_loopback() && !cfg.password.is_empty() && !state.auth.is_authorized_stream_ip(&host) {
+                tracing::warn!("Rejected unauthorized screen stream from {host}");
+                continue;
+            }
+
+            tracing::info!("Screen stream client connected from {peer}");
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                handle_screen_stream_client(socket, state_clone).await;
+            });
+        }
+    })
+}
+
+async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, _state: Arc<AppState>) {
+    use tokio::io::AsyncWriteExt;
+    let _ = socket.set_nodelay(true);
+
+    let mut interval = tokio::time::interval(Duration::from_millis(33)); // ~30 FPS
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+
+        let capture_res = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+            let monitor = get_stream_monitor()?;
+            let img = monitor.capture_image().ok()?;
+            let rgb = image::DynamicImage::ImageRgba8(img).into_rgb8();
+            let mut jpeg = Vec::with_capacity(64 * 1024);
+            let mut cursor = std::io::Cursor::new(&mut jpeg);
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 60);
+            encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8).ok()?;
+            Some(jpeg)
+        }).await;
+
+        let jpeg_bytes = match capture_res {
+            Ok(Some(bytes)) => bytes,
+            _ => continue,
+        };
+
+        let length = jpeg_bytes.len() as u32;
+        let len_bytes = length.to_be_bytes();
+
+        if socket.write_all(&len_bytes).await.is_err() {
+            break;
+        }
+        if socket.write_all(&jpeg_bytes).await.is_err() {
+            break;
+        }
+    }
+    tracing::info!("Screen stream client disconnected");
+}
+
+fn get_stream_monitor() -> Option<xcap::Monitor> {
+    let monitors = xcap::Monitor::all().ok()?;
+    if monitors.len() > 1 {
+        if let Some(second) = monitors.iter().find(|m| !m.is_primary().unwrap_or(false)) {
+            return Some(second.clone());
+        }
+        return Some(monitors[1].clone());
+    }
+    monitors.first().cloned()
+}
 // ---------------------------------------------------------------------------
 // Windows autostart (HKCU Run key, written through reg.exe)
 // ---------------------------------------------------------------------------
