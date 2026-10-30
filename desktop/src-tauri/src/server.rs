@@ -641,6 +641,10 @@ async fn gate_middleware(headers: HeaderMap, req: Request, next: Next) -> Respon
 
     let mut response = next.run(req).await;
     apply_cors(response.headers_mut(), origin.as_deref());
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, must-revalidate"),
+    );
     response
 }
 

@@ -93,16 +93,22 @@ body {
 .sidebar-brand {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 12px 24px 12px;
+    justify-content: center;
+    padding: 8px 0 22px 0;
     border-bottom: 1px solid var(--border-color);
 }
 
-.brand-name {
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-    color: var(--text-main);
+.brand-logo-img {
+    width: 140px;
+    height: 140px;
+    border-radius: 26px;
+    object-fit: cover;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.brand-logo-img:hover {
+    transform: scale(1.03);
 }
 
 .sidebar-nav {
