@@ -2,6 +2,7 @@ import os
 import base64
 from io import BytesIO
 from PIL import Image, ImageDraw
+import numpy as np
 
 def make_squircle(img, radius_ratio=0.20):
     w, h = img.size
@@ -27,7 +28,7 @@ def make_circle(img):
     return out
 
 def make_adaptive_fg(img, target_size):
-    scale_dim = int(target_size * 0.76)
+    scale_dim = int(target_size * 0.78)
     resized = img.resize((scale_dim, scale_dim), Image.Resampling.LANCZOS)
     fg = Image.new("RGBA", (target_size, target_size), (0, 0, 0, 0))
     offset = (target_size - scale_dim) // 2
@@ -53,8 +54,18 @@ def main():
     print(f"Loading master logo from {src_path}...")
     orig = Image.open(src_path).convert("RGBA")
 
-    master_squircle = make_squircle(orig, 0.20)
-    master_circle = make_circle(orig)
+    # Center crop to remove dead outer dark borders (content is 366x301)
+    cx, cy = 266, 255
+    half = 190
+    x0 = max(0, cx - half)
+    y0 = max(0, cy - half)
+    x1 = min(orig.width, cx + half)
+    y1 = min(orig.height, cy + half)
+    tight_square = orig.crop((x0, y0, x1, y1))
+    master_zoomed = tight_square.resize((512, 512), Image.Resampling.LANCZOS)
+
+    master_squircle = make_squircle(master_zoomed, 0.20)
+    master_circle = make_circle(master_zoomed)
 
     desktop_dir = os.path.join(base_dir, "desktop")
     android_res = os.path.join(base_dir, "android", "app", "src", "main", "res")
@@ -131,10 +142,10 @@ def main():
         launcher_img.save(os.path.join(folder_path, "ic_launcher.png"), "PNG")
         round_img = master_circle.resize((icon_dim, icon_dim), Image.Resampling.LANCZOS)
         round_img.save(os.path.join(folder_path, "ic_launcher_round.png"), "PNG")
-        fg_img = make_adaptive_fg(orig, fg_dim)
+        fg_img = make_adaptive_fg(master_zoomed, fg_dim)
         fg_img.save(os.path.join(folder_path, "ic_launcher_foreground.png"), "PNG")
 
-    print("All logos and icons successfully refreshed across PC and Android!")
+    print("All zoomed logos and icons refreshed across PC and Android!")
 
 if __name__ == "__main__":
     main()
