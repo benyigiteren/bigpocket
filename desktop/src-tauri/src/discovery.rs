@@ -1,12 +1,12 @@
 //! LAN auto-discovery.
 //!
-//! The desktop periodically broadcasts a tiny `BigPocket|<ip>|<port>` packet over
-//! UDP so the Android app can find the PC automatically (KDE-Connect style)
-//! without the user typing an IP address. The Android client listens on
-//! [`DISCOVERY_PORT`].
+//! The desktop periodically broadcasts a JSON "hello" packet over UDP so the
+//! Android app can find the PC automatically (KDE-Connect style) without the
+//! user typing an IP address. The Android client listens on [`DISCOVERY_PORT`]
+//! and actively probes with "bigpocket_discover".
 
+use std::sync::Arc;
 use std::time::Duration;
-
 use tokio::net::UdpSocket;
 
 /// UDP port the Android app listens on for discovery broadcasts.
@@ -18,72 +18,69 @@ const BROADCAST_TARGET: &str = "255.255.255.255:47800";
 /// How often the "hello" packet is repeated.
 const BROADCAST_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Local bind address for the sending socket: an ephemeral port on all interfaces.
-const BIND_ADDR: &str = "0.0.0.0:0";
-
 /// Starts the background broadcaster and returns its task handle.
-///
-/// `port` is the HTTP port the desktop server listens on (8085); it is embedded
-/// in the packet as `BigPocket|<ip>|8085`. Dropping the handle does not stop the
-/// task — abort it explicitly to shut discovery down.
 pub fn start_discovery(port: u16) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run_discovery(port))
 }
 
-/// The discoverable address of this machine, falling back to loopback when no
-/// non-loopback IPv4 interface is up.
-pub fn local_ipv4() -> String {
-    match local_ip_address::local_ip() {
-        Ok(ip) => ip.to_string(),
-        Err(err) => {
-            eprintln!("discovery: local IP lookup failed ({err}); using 127.0.0.1");
-            "127.0.0.1".to_string()
-        }
-    }
-}
-
-/// Builds the broadcast payload, e.g. `BigPocket|192.168.1.20|8085`.
-fn format_payload(ip: &str, port: u16) -> String {
-    format!("BigPocket|{ip}|{port}")
+/// Builds the JSON discovery payload expected by `PcDiscovery.kt` in the Android app.
+pub fn format_payload(port: u16) -> String {
+    let host = sysinfo::System::host_name().unwrap_or_else(|| "BigPocket PC".to_string());
+    let cfg = crate::config::load_config();
+    let needs_password = !cfg.password.is_empty();
+    serde_json::json!({
+        "app": "bigpocket",
+        "name": host,
+        "port": port,
+        "version": "1.5.0",
+        "needsPassword": needs_password,
+    })
+    .to_string()
 }
 
 async fn run_discovery(port: u16) {
-    let socket = match UdpSocket::bind(BIND_ADDR).await {
-        Ok(socket) => socket,
-        Err(err) => {
-            eprintln!("discovery disabled: cannot bind {BIND_ADDR}: {err}");
-            return;
-        }
+    // Try binding to the well-known discovery port so we can answer active probes.
+    let socket = match UdpSocket::bind(format!("0.0.0.0:{DISCOVERY_PORT}")).await {
+        Ok(s) => s,
+        Err(_) => match UdpSocket::bind("0.0.0.0:0").await {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!("discovery disabled: cannot bind UDP socket: {err}");
+                return;
+            }
+        },
     };
 
     if let Err(err) = socket.set_broadcast(true) {
         eprintln!("discovery: cannot enable broadcast: {err}");
     }
 
+    let socket = Arc::new(socket);
+    let socket_rx = socket.clone();
+
+    // Answer active probes from Android ("bigpocket_discover") immediately
+    tokio::spawn(async move {
+        let mut buf = [0u8; 512];
+        loop {
+            match socket_rx.recv_from(&mut buf).await {
+                Ok((n, peer)) => {
+                    let text = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                    if text == "bigpocket_discover" {
+                        let payload = format_payload(port);
+                        let _ = socket_rx.send_to(payload.as_bytes(), peer).await;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
     eprintln!("Discovery broadcasting on UDP {DISCOVERY_PORT}...");
     loop {
-        let payload = format_payload(&local_ipv4(), port);
+        let payload = format_payload(port);
         if let Err(err) = socket.send_to(payload.as_bytes(), BROADCAST_TARGET).await {
             eprintln!("discovery: broadcast failed: {err}");
         }
         tokio::time::sleep(BROADCAST_INTERVAL).await;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn payload_matches_the_android_parser() {
-        assert_eq!(
-            format_payload("192.168.1.20", 8085),
-            "BigPocket|192.168.1.20|8085"
-        );
-    }
-
-    #[test]
-    fn local_ip_is_never_empty() {
-        assert!(!local_ipv4().is_empty());
     }
 }

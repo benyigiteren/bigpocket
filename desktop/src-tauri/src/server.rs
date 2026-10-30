@@ -431,6 +431,9 @@ fn is_authorized(state: &AppState, headers: &HeaderMap, uri: &Uri, peer: SocketA
         state.auth.register_authorized_ip(&host);
         return true;
     }
+    if state.auth.is_authorized_stream_ip(&host) {
+        return true;
+    }
     if constant_time_eq(&request_password(headers, uri), &cfg.password) {
         state.auth.record_success(&host);
         state.auth.register_authorized_ip(&host);
@@ -575,7 +578,6 @@ impl Default for AppState {
 /// Build the full application router.
 pub fn router(state: Arc<AppState>) -> Router {
     let protected = Router::new()
-        .route("/ws", get(ws_handler))
         .route(
             "/api/flow",
             get(flow_list).post(flow_create).delete(flow_clear),
@@ -604,6 +606,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     let public = Router::new()
+        .route("/ws", get(ws_handler))
         .route("/system_info", get(system_info))
         .route("/api/update/check", get(update_check))
         .route("/api/qr", get(api_qr))
@@ -751,10 +754,10 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
     });
 
     if needs_auth {
-        let _ = out_tx.send(json!({"type": "auth_required"}).to_string());
+        let _ = out_tx.send(json!({"type": "auth_required"}).to_string()).await;
     } else {
         authenticated.store(true, Ordering::Relaxed);
-        let _ = out_tx.send(json!({"type": "auth_success"}).to_string());
+        let _ = out_tx.send(json!({"type": "auth_success"}).to_string()).await;
         state.broadcast(json!({"type": "client_connected"}));
     }
 
@@ -791,7 +794,7 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
                     let _ = out_tx.send(json!({
                         "type": "auth_failed",
                         "message": "Too many attempts. Try again later."
-                    }).to_string());
+                    }).to_string()).await;
                     break;
                 }
                 let supplied = payload
@@ -802,14 +805,14 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
                     authenticated.store(true, Ordering::Relaxed);
                     state.auth.record_success(&host);
                     state.auth.register_authorized_ip(&host);
-                    let _ = out_tx.send(json!({"type": "auth_success"}).to_string());
+                    let _ = out_tx.send(json!({"type": "auth_success"}).to_string()).await;
                     state.broadcast(json!({"type": "client_connected"}));
                 } else {
                     state.auth.record_failure(&host);
                     let _ = out_tx.send(json!({
                         "type": "auth_failed",
                         "message": "Wrong password"
-                    }).to_string());
+                    }).to_string()).await;
                     break;
                 }
             }
