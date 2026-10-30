@@ -5412,6 +5412,137 @@ function checkMobileMode() {
                 }
             });
         }
+
+        // Uninstall Flow
+        const uninstallBtn = document.getElementById('btn-uninstall-app');
+        const uninstallModal = document.getElementById('uninstall-confirm-modal');
+        const closeUninstallBtn = document.getElementById('btn-close-uninstall-modal');
+        const cancelUninstallBtn = document.getElementById('btn-cancel-uninstall');
+        const confirmUninstallBtn = document.getElementById('btn-confirm-uninstall');
+        const cleanDataCheckbox = document.getElementById('uninstall-clean-data-checkbox');
+        const progressMsg = document.getElementById('uninstall-progress-msg');
+
+        if (uninstallBtn && uninstallModal) {
+            uninstallBtn.addEventListener('click', () => {
+                uninstallModal.classList.add('active');
+                if (progressMsg) progressMsg.style.display = 'none';
+                if (confirmUninstallBtn) {
+                    confirmUninstallBtn.disabled = false;
+                    confirmUninstallBtn.textContent = 'Evet, Uygulamayı Kaldır';
+                }
+            });
+
+            const hideUninstallModal = () => {
+                uninstallModal.classList.remove('active');
+            };
+
+            if (closeUninstallBtn) closeUninstallBtn.addEventListener('click', hideUninstallModal);
+            if (cancelUninstallBtn) cancelUninstallBtn.addEventListener('click', hideUninstallModal);
+
+            if (confirmUninstallBtn) {
+                confirmUninstallBtn.addEventListener('click', async () => {
+                    const cleanData = cleanDataCheckbox ? cleanDataCheckbox.checked : true;
+                    confirmUninstallBtn.disabled = true;
+                    confirmUninstallBtn.textContent = 'Kaldırılıyor...';
+                    if (progressMsg) {
+                        progressMsg.style.display = 'block';
+                        progressMsg.style.color = '#38bdf8';
+                        progressMsg.textContent = 'Sistem kayıtları ve dosyalar temizleniyor, lütfen bekleyin...';
+                    }
+
+                    try {
+                        const res = await authFetch('/api/uninstall', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ clean_data: cleanData })
+                        });
+                        const data = await res.json();
+                        if (data && data.success) {
+                            if (progressMsg) {
+                                progressMsg.style.color = '#22c55e';
+                                progressMsg.textContent = 'BigPocket başarıyla kaldırıldı. Uygulama kapatılıyor...';
+                            }
+                            setTimeout(() => {
+                                window.close();
+                            }, 1000);
+                        } else {
+                            throw new Error((data && data.error) || 'Kaldırma işlemi başarısız oldu.');
+                        }
+                    } catch (err) {
+                        if (progressMsg) {
+                            progressMsg.style.color = '#ef4444';
+                            progressMsg.textContent = 'Hata: ' + (err.message || err);
+                        }
+                        confirmUninstallBtn.disabled = false;
+                        confirmUninstallBtn.textContent = 'Tekrar Dene';
+                    }
+                });
+            }
+        }
+
+        // Clear Cache Handler
+        const clearCacheBtn = document.getElementById('btn-clear-cache');
+        const clearCacheStatus = document.getElementById('clear-cache-status');
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', async () => {
+                if (clearCacheBtn.disabled) return;
+                clearCacheBtn.disabled = true;
+                if (clearCacheStatus) {
+                    clearCacheStatus.textContent = 'Önbellek temizleniyor...';
+                    clearCacheStatus.style.color = 'var(--text-muted)';
+                }
+                try {
+                    const res = await authFetch('/api/clear_cache', { method: 'POST' });
+                    const data = await res.json();
+                    if (clearCacheStatus) {
+                        clearCacheStatus.style.color = '#22c55e';
+                        clearCacheStatus.textContent = `Önbellek temizlendi (${data.deleted_files || 0} geçici dosya silindi).`;
+                    }
+                } catch (e) {
+                    if (clearCacheStatus) {
+                        clearCacheStatus.style.color = '#ef4444';
+                        clearCacheStatus.textContent = 'Önbellek temizlenemedi.';
+                    }
+                } finally {
+                    clearCacheBtn.disabled = false;
+                }
+            });
+        }
+
+        // Settings Password Save Handler
+        const settingsPwBtn = document.getElementById('btn-settings-save-password');
+        const settingsPwInput = document.getElementById('settings-tab-password');
+        const settingsPwStatus = document.getElementById('settings-password-save-status');
+        if (settingsPwInput) {
+            settingsPwInput.value = (typeof getAuthPassword === 'function' ? getAuthPassword() : '') || (apiConfig && apiConfig.password) || '';
+        }
+        if (settingsPwBtn && settingsPwInput) {
+            settingsPwBtn.addEventListener('click', async () => {
+                const newPassword = settingsPwInput.value.trim();
+                if (apiConfig) {
+                    apiConfig.password = newPassword;
+                    try {
+                        const res = await authFetch('/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(apiConfig)
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            if (typeof setAuthPassword === 'function') setAuthPassword(newPassword);
+                            if (settingsPwStatus) {
+                                settingsPwStatus.style.display = 'block';
+                                setTimeout(() => { settingsPwStatus.style.display = 'none'; }, 3000);
+                            }
+                            if (typeof fetchSystemInfo === 'function') fetchSystemInfo();
+                            if (typeof updateMcpCardUI === 'function') updateMcpCardUI();
+                        }
+                    } catch (err) {
+                        alert('Şifre güncellenemedi: ' + err.message);
+                    }
+                }
+            });
+        }
     });
 
     window.addEventListener('load', () => setTimeout(() => window.checkForUpdates(false), 1500));

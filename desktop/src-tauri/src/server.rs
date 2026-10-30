@@ -599,6 +599,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/autostart",
             get(api_autostart_get).post(api_autostart_post),
         )
+        .route("/api/uninstall", post(api_uninstall_post))
+        .route("/api/clear_cache", post(api_clear_cache_post))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     let public = Router::new()
@@ -2909,6 +2911,114 @@ async fn api_autostart_post(
             json!({"success": false, "error": err}),
         ),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct UninstallRequest {
+    clean_data: Option<bool>,
+}
+
+#[cfg(windows)]
+fn perform_uninstall(clean_data: bool) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let _ = set_autostart(false);
+
+    let _ = std::process::Command::new("reg")
+        .args(["delete", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\BigPocket", "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    let _ = std::process::Command::new("reg")
+        .args(["delete", r"HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\BigPocket", "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    let mut shortcut_paths = Vec::new();
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        shortcut_paths.push(std::path::PathBuf::from(&user_profile).join("Desktop").join("BigPocket.lnk"));
+    }
+    if let Ok(public_dir) = std::env::var("PUBLIC") {
+        shortcut_paths.push(std::path::PathBuf::from(&public_dir).join("Desktop").join("BigPocket.lnk"));
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        shortcut_paths.push(std::path::PathBuf::from(&appdata).join(r"Microsoft\Windows\Start Menu\Programs\BigPocket.lnk"));
+    }
+    if let Ok(programdata) = std::env::var("PROGRAMDATA") {
+        shortcut_paths.push(std::path::PathBuf::from(&programdata).join(r"Microsoft\Windows\Start Menu\Programs\BigPocket.lnk"));
+    }
+
+    for path in shortcut_paths {
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    let app_data = config::get_app_data_dir();
+    let exe_path = std::env::current_exe().ok();
+    let exe_dir = exe_path.as_ref().and_then(|p| p.parent());
+
+    let mut cmd_parts = vec!["timeout /t 1 /nobreak >nul".to_string()];
+    if clean_data && app_data.exists() {
+        cmd_parts.push(format!(r#"rmdir /s /q "{}""#, app_data.display()));
+    }
+    if let Some(dir) = exe_dir {
+        let dir_str = dir.display().to_string();
+        if dir_str.contains("Programs") && dir_str.contains("BigPocket") {
+            cmd_parts.push(format!(r#"rmdir /s /q "{}""#, dir_str));
+        }
+    }
+
+    let batch = cmd_parts.join(" & ");
+    let _ = std::process::Command::new("cmd.exe")
+        .args(["/c", &batch])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn perform_uninstall(_clean_data: bool) -> Result<(), String> {
+    Ok(())
+}
+
+async fn api_uninstall_post(
+    Json(body): Json<UninstallRequest>,
+) -> Response {
+    let clean_data = body.clean_data.unwrap_or(true);
+    match perform_uninstall(clean_data) {
+        Ok(()) => {
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                std::process::exit(0);
+            });
+            Json(json!({
+                "success": true,
+                "message": "BigPocket başarıyla sistemden kaldırılıyor..."
+            })).into_response()
+        }
+        Err(err) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"success": false, "error": err}),
+        ),
+    }
+}
+
+async fn api_clear_cache_post() -> Response {
+    let shared_dir = get_shared_dir();
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(&shared_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_file() {
+                    let _ = std::fs::remove_file(entry.path());
+                    count += 1;
+                }
+            }
+        }
+    }
+    Json(json!({"success": true, "deleted_files": count})).into_response()
 }
 
 async fn api_qr(Query(params): Query<HashMap<String, String>>) -> Response {

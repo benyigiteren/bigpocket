@@ -1001,55 +1001,168 @@
 
             <!-- Settings View -->
             <section class="tab-panel" id="panel-settings">
-                <div class="grid-layout" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
-                    <!-- Update & Version Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="meta-tag">SÜRÜM & DAĞITIM</span>
-                            <h2>Uygulama Güncellemesi</h2>
-                            <p class="text-muted">GitHub Releases üzerinden en son güncellemeleri kontrol edin.</p>
-                        </div>
+                <div class="settings-container" style="display: flex; flex-direction: column; gap: 20px; max-width: 1200px; margin: 0 auto; width: 100%;">
+                    
+                    <!-- Row 1: 2-Column Bento Grid (Sistem Tercihleri & Ağ Güvenliği) -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px;">
                         
-                        <div style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin: 12px 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <div>
-                                    <div style="font-weight: 600; font-size: 15px; color: var(--text-main);">BigPocket Masaüstü Sunucusu</div>
-                                    <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px;">Mevcut Sürüm: <span id="settings-current-ver" style="color: var(--accent-solid);">v1.5.0-beta</span></div>
+                        <!-- Card 1: Sistem ve Başlangıç Tercihleri -->
+                        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                            <div>
+                                <div class="card-header">
+                                    <span class="meta-tag">SİSTEM &amp; ENTEGRASYON</span>
+                                    <h2>Sistem ve Başlangıç Tercihleri</h2>
+                                    <p class="text-muted">Windows açılışı ve arka plan çalışma davranışları.</p>
                                 </div>
-                                <span class="badge" style="background: var(--bg-elevated); color: var(--accent-solid); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 600;">Aktif</span>
+
+                                <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
+                                    <!-- Toggle 1: Windows ile Başlat -->
+                                    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                        <div>
+                                            <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Windows ile Birlikte Başlat</div>
+                                            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Bilgisayarınız açıldığında BigPocket arka planda otomatik çalışır.</div>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="settings-autostart-toggle" aria-label="Windows ile otomatik başlat">
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+
+                                    <!-- Item 2: Tepsiye Küçültme -->
+                                    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                        <div>
+                                            <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Pencere Kapatıldığında Tepsiye Küçült</div>
+                                            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">X'e basıldığında sunucu ve akışlar sistem tepsisinde kesintisiz çalışır.</div>
+                                        </div>
+                                        <span class="badge" style="background: rgba(99, 102, 241, 0.12); color: var(--accent-solid); border: 1px solid rgba(99, 102, 241, 0.25); padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;">HER ZAMAN AKTİF</span>
+                                    </div>
+
+                                    <!-- Item 3: Donanım Hızlandırma -->
+                                    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                        <div>
+                                            <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Donanım Hızlandırmalı Render</div>
+                                            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">GPU hızlandırması ile sıfır gecikmeli ekran ve kamera akışı.</div>
+                                        </div>
+                                        <span class="badge" style="background: rgba(34, 197, 94, 0.12); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.25); padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;">ETKİN</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 12px; color: var(--text-muted);">Masaüstü Motoru: <strong style="color: var(--text-main);">Rust (Tauri 2 + Axum)</strong></span>
+                                <span style="font-size: 12px; color: #22c55e; display: flex; align-items: center; gap: 6px;">
+                                    <span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block;"></span>
+                                    Sıfır Bellek Sızıntısı
+                                </span>
                             </div>
                         </div>
 
-                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;">
+                        <!-- Card 2: Ağ, Portlar ve Yerel Güvenlik -->
+                        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
                             <div>
-                                <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Beta Güncellemelerini Al</div>
-                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Önizleme ve test sürümlerini denetle (v1.5.0-beta vb.)</div>
+                                <div class="card-header">
+                                    <span class="meta-tag">GÜVENLİK &amp; BAĞLANTI</span>
+                                    <h2>Ağ ve Erişim Güvenliği</h2>
+                                    <p class="text-muted">Mobil istemcilerle güvenli eşleştirme ve yerel protokoller.</p>
+                                </div>
+
+                                <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
+                                    <!-- Portlar Listesi -->
+                                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 14px;">
+                                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Web &amp; Kontrol</div>
+                                            <div style="font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--accent-solid); margin-top: 2px;">Port 8085</div>
+                                        </div>
+                                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 14px;">
+                                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">LAN Otomatik Keşif</div>
+                                            <div style="font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--accent-solid); margin-top: 2px;">UDP 47800</div>
+                                        </div>
+                                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 14px;">
+                                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Kamera Akışı</div>
+                                            <div style="font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--accent-solid); margin-top: 2px;">TCP 8083</div>
+                                        </div>
+                                        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 14px;">
+                                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Sanal Ekran &amp; Ses</div>
+                                            <div style="font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--accent-solid); margin-top: 2px;">TCP 8086 / 8084</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Şifre Değiştirme Formu -->
+                                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                        <label for="settings-tab-password" style="font-size: 13px; font-weight: 600; color: var(--text-main); display: block; margin-bottom: 6px;">Erişim Şifresi / PIN Kodu</label>
+                                        <div style="display: flex; gap: 8px;">
+                                            <input type="password" id="settings-tab-password" placeholder="Şifresiz (Önerilmez)" style="flex: 1; height: 38px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 8px; padding: 0 12px; color: var(--text-main); font-size: 13px;">
+                                            <button class="btn btn-secondary" id="btn-settings-save-password" style="height: 38px; padding: 0 16px; font-size: 12.5px; white-space: nowrap;">Kaydet</button>
+                                        </div>
+                                        <div id="settings-password-save-status" style="font-size: 11.5px; color: #22c55e; margin-top: 6px; display: none;">Şifre başarıyla kaydedildi!</div>
+                                    </div>
+                                </div>
                             </div>
-                            <label class="switch">
-                                <input type="checkbox" id="settings-beta-channel-toggle">
-                                <span class="slider round"></span>
-                            </label>
+
+                            <div style="margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 12px; color: var(--text-muted);">USB Bağlantısı: <strong style="color: var(--text-main);">Tethering / ADB Reverse</strong></span>
+                                <span style="font-size: 12px; color: #22c55e; display: flex; align-items: center; gap: 6px;">
+                                    <span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e; display: inline-block;"></span>
+                                    Sıfır Gecikme Hazır
+                                </span>
+                            </div>
                         </div>
 
-                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;">
-                            <div>
-                                <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Windows ile Birlikte Başlat</div>
-                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Bilgisayarınız açıldığında BigPocket arka planda otomatik çalışır.</div>
-                            </div>
-                            <label class="switch">
-                                <input type="checkbox" id="settings-autostart-toggle" aria-label="Windows ile otomatik başlat">
-                                <span class="slider round"></span>
-                            </label>
-                        </div>
-                        <div style="display: flex; gap: 10px; margin-top: 14px;">
-                            <button class="btn btn-primary" id="btn-check-update-manual" style="flex: 1; height: 42px;">
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                                <span>Güncellemeleri Denetle</span>
-                            </button>
-                        </div>
-                        <div id="settings-update-status" style="font-size: 12.5px; margin-top: 10px; min-height: 18px; color: var(--text-muted);"></div>
                     </div>
 
+                    <!-- Row 2: Sürüm, Güncelleme & Bakım (Geniş Dengeli Kart) -->
+                    <div class="card" style="border-color: var(--border-color);">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+                            <div>
+                                <span class="meta-tag">SÜRÜM &amp; GÜNCELLEMELER</span>
+                                <h2>Uygulama Güncellemesi ve Bakım</h2>
+                                <p class="text-muted">GitHub Releases üzerinden en son güncellemeleri denetleyin ve sistem önbelleğini temizleyin.</p>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px; background: var(--bg-elevated); border: 1px solid var(--border-color); padding: 6px 14px; border-radius: 99px;">
+                                <span style="font-size: 12px; color: var(--text-muted);">Mevcut Sürüm:</span>
+                                <span id="settings-current-ver" style="font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--accent-solid);">v1.5.0-beta</span>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 16px;">
+                            <!-- Beta Toggle -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                <div>
+                                    <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Beta Güncellemelerini Al</div>
+                                    <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Önizleme ve test sürümlerini denetle</div>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="settings-beta-channel-toggle">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+
+                            <!-- Güncellemeleri Denetle Butonu -->
+                            <div style="display: flex; flex-direction: column; justify-content: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                <button class="btn btn-primary" id="btn-check-update-manual" style="height: 40px; width: 100%;">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                                    <span>Güncellemeleri Denetle</span>
+                                </button>
+                                <div id="settings-update-status" style="font-size: 11.5px; margin-top: 6px; min-height: 16px; color: var(--text-muted); text-align: center;"></div>
+                            </div>
+
+                            <!-- Önbellek Temizleme Butonu -->
+                            <div style="display: flex; flex-direction: column; justify-content: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                <button class="btn btn-secondary" id="btn-clear-cache" style="height: 40px; width: 100%;">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                    <span>Dosya Önbelleğini Temizle</span>
+                                </button>
+                                <div id="clear-cache-status" style="font-size: 11.5px; margin-top: 6px; min-height: 16px; color: var(--text-muted); text-align: center;">SharedFiles klasöründeki geçici aktarımları siler.</div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 14px; display: flex; justify-content: flex-end;">
+                            <a href="https://github.com/benyigiteren/bigpocket" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none; font-size: 12.5px; color: var(--text-muted); transition: color 0.2s;">
+                                <span>Resmi GitHub Deposu &amp; Sürüm Notları</span>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                            </a>
+                        </div>
+                    </div>
                     <!-- MCP (Model Context Protocol) & REST API Integration Card -->
                     <div class="card" style="grid-column: 1 / -1; border-color: var(--border-color);">
                         <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
@@ -1191,50 +1304,69 @@
                         </div>
                     </div>
 
-                    <!-- Network & Preferences Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="meta-tag">SİSTEM & AĞ</span>
-                            <h2>Bağlantı & Servis Portları</h2>
-                            <p class="text-muted">Mobil istemcilerin bilgisayarla haberleştiği aktif protokoller.</p>
-                        </div>
-                        
-                        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
-                                <span style="font-size: 13px; color: var(--text-muted);">Web Panel & WebSocket:</span>
-                                <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 8085</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
-                                <span style="font-size: 13px; color: var(--text-muted);">Otomatik Keşif (UDP):</span>
-                                <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 47800</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
-                                <span style="font-size: 13px; color: var(--text-muted);">Medya & Ekran Akışı (TCP):</span>
-                                <span style="font-family: var(--font-mono); font-size: 13px; color: var(--text-main); font-weight: 600;">Port 8083, 8084, 8086</span>
-                            </div>
-                        </div>
-
-                        <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 10px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
-                                <div>
-                                    <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">Pencere Kapatıldığında Sistem Tepsisine (Tray) Küçült</div>
-                                    <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Uygulama tamamen kapanmaz; sunucu, kamera/ses akışı ve bildirimler tepsi simgesinden arka planda çalışmaya devam eder.</div>
+                    <!-- Row 4: Tehlikeli Bölge (Danger Zone / Uygulamayı Kaldır) -->
+                    <div class="card" style="border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.03); border-radius: 16px; padding: 22px 24px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                            <div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="background: rgba(239, 68, 68, 0.15); color: #ef4444; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; letter-spacing: 0.05em; text-transform: uppercase;">Tehlikeli Bölge</span>
+                                    <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text-main);">Uygulamayı Kaldır (Uninstall)</h3>
                                 </div>
-                                <span class="badge" style="background: var(--bg-elevated); color: var(--accent-solid); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;">HER ZAMAN AKTİF</span>
+                                <p style="margin: 6px 0 0 0; font-size: 13px; color: var(--text-muted); max-width: 680px; line-height: 1.5;">
+                                    BigPocket'i bilgisayarınızdan tüm masaüstü kısayolları, Başlat menüsü kayıtları, otomatik başlangıç ve yapılandırma dosyalarıyla birlikte temizleyip tamamen kaldırın.
+                                </p>
                             </div>
-                        </div>
-
-                        <div style="margin-top: 16px;">
-                            <a href="https://github.com/benyigiteren/bigpocket" target="_blank" style="display: flex; justify-content: space-between; align-items: center; text-decoration: none; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main);">
-                                <span style="font-size: 13px; font-weight: 500;">GitHub Resmi Deposu</span>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                            </a>
+                            <button type="button" class="btn" id="btn-uninstall-app" style="background: #dc2626; color: #ffffff; border: 1px solid #b91c1c; padding: 10px 22px; font-size: 13.5px; font-weight: 600; border-radius: 10px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                <span>BigPocket'i Kaldır</span>
+                            </button>
                         </div>
                     </div>
                 </div>
             </section>
 
         </main>
+    </div>
+
+    <!-- Uninstall Confirmation Modal -->
+    <div class="modal" id="uninstall-confirm-modal">
+        <div class="modal-content card" style="width: 440px; border: 1px solid rgba(239, 68, 68, 0.4); box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7);">
+            <div class="modal-header-sticky" style="border-bottom: 1px solid var(--border-color); padding-bottom: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(239, 68, 68, 0.15); display: flex; align-items: center; justify-content: center; color: #ef4444;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    </div>
+                    <div>
+                        <span class="meta-tag" style="color: #ef4444;">KALDIRMA İŞLEMİ</span>
+                        <h2 style="font-size: 17px; margin: 2px 0 0 0; color: var(--text-main);">BigPocket'i Kaldır</h2>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" id="btn-close-uninstall-modal" data-tooltip="Kapat" aria-label="Kapat"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+
+            <div style="padding: 16px 0;">
+                <p style="font-size: 13.5px; color: var(--text-main); margin: 0 0 14px 0; line-height: 1.5;">
+                    BigPocket bilgisayarınızdan kaldırılmak üzere. Bu işlem sonucunda:
+                </p>
+                <ul style="font-size: 12.5px; color: var(--text-muted); margin: 0 0 16px 0; padding-left: 18px; line-height: 1.6;">
+                    <li>Masaüstü ve Başlat Menüsü kısayolları silinir.</li>
+                    <li>Windows başlangıç (otomatik açılma) kayıtları temizlenir.</li>
+                    <li>Çalışan arka plan sunucusu durdurulur ve kapatılır.</li>
+                </ul>
+
+                <label style="display: flex; align-items: center; gap: 10px; background: var(--bg-surface); padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border-color); cursor: pointer;">
+                    <input type="checkbox" id="uninstall-clean-data-checkbox" checked style="accent-color: #ef4444; width: 16px; height: 16px;">
+                    <span style="font-size: 12.5px; color: var(--text-main); font-weight: 500;">Yapılandırma ve önbellek dosyalarını da sil (%APPDATA%\BigPocket)</span>
+                </label>
+                
+                <div id="uninstall-progress-msg" style="font-size: 12px; color: #ef4444; margin-top: 10px; text-align: center; display: none;"></div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                <button type="button" class="btn btn-secondary" id="btn-cancel-uninstall" style="padding: 9px 18px; font-size: 13px;">İptal</button>
+                <button type="button" class="btn" id="btn-confirm-uninstall" style="background: #dc2626; color: #fff; border: 1px solid #b91c1c; padding: 9px 20px; font-size: 13px; font-weight: 600; border-radius: 8px;">Evet, Uygulamayı Kaldır</button>
+            </div>
+        </div>
     </div>
 
     <!-- Autostart & Security Warning Modal -->
