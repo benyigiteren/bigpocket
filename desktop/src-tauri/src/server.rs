@@ -3136,26 +3136,83 @@ fn get_installed_apps() -> Vec<InstalledAppItem> {
     apps
 }
 
+#[cfg(windows)]
+fn runas_elevated(installer: &std::path::Path, args: &str, dir: &std::path::Path) -> bool {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut std::ffi::c_void,
+            lpOperation: *const u16,
+            lpFile: *const u16,
+            lpParameters: *const u16,
+            lpDirectory: *const u16,
+            nShowCmd: i32,
+        ) -> isize;
+    }
+
+    let to_wide = |s: &OsStr| -> Vec<u16> { s.encode_wide().chain(Some(0)).collect() };
+
+    let verb = to_wide(OsStr::new("runas"));
+    let file = to_wide(installer.as_os_str());
+    let params = to_wide(OsStr::new(args));
+    let dir_w = to_wide(dir.as_os_str());
+
+    let res = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            params.as_ptr(),
+            dir_w.as_ptr(),
+            0, // SW_HIDE
+        )
+    };
+    res > 32
+}
+
 fn get_driver_dir() -> PathBuf {
+    let mut candidates = Vec::new();
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            let candidate = parent.join("usbmmidd");
-            if candidate.exists() {
-                return candidate;
-            }
+            candidates.push(parent.join("usbmmidd"));
+            candidates.push(parent.join("..").join("usbmmidd"));
+            candidates.push(parent.join("..").join("..").join("usbmmidd"));
+            candidates.push(parent.join("..").join("..").join("..").join("usbmmidd"));
         }
     }
+
+    if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(appdata).join(r"Programs\BigPocket\usbmmidd"));
+    }
+    if let Ok(progfiles) = std::env::var("ProgramFiles") {
+        candidates.push(PathBuf::from(progfiles).join(r"BigPocket\usbmmidd"));
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("usbmmidd"));
+        candidates.push(cwd.join("desktop").join("usbmmidd"));
+    }
+
+    for c in candidates {
+        if c.join("deviceinstaller64.exe").exists() {
+            return c;
+        }
+    }
+
     PathBuf::from("usbmmidd")
 }
 
 async fn driver_status() -> Response {
     let monitors = xcap::Monitor::all().map(|m| m.len()).unwrap_or(1);
-    let admin = is_admin();
     let driver_dir = get_driver_dir();
     let driver_exists = driver_dir.join("deviceinstaller64.exe").exists();
     json_response(StatusCode::OK, json!({
         "success": true,
-        "admin": admin,
+        "admin": true,
         "monitors": monitors,
         "driver_exists": driver_exists,
         "platform": std::env::consts::OS
@@ -3163,41 +3220,52 @@ async fn driver_status() -> Response {
 }
 
 async fn driver_install() -> Response {
-    if !is_admin() {
-        return json_response(StatusCode::OK, json!({
-            "success": false,
-            "message": "Yönetici yetkisi gerekmektedir."
-        }));
-    }
     let driver_dir = get_driver_dir();
     let installer = driver_dir.join("deviceinstaller64.exe");
+    if !installer.exists() {
+        return json_response(StatusCode::OK, json!({
+            "success": false,
+            "message": format!("Sürücü kurulum dosyası (deviceinstaller64.exe) bulunamadı: {}", driver_dir.display())
+        }));
+    }
+
     #[cfg(windows)]
     {
-        if !installer.exists() {
-            return json_response(StatusCode::OK, json!({
-                "success": false,
-                "message": format!("Sürücü kurulum dosyası (deviceinstaller64.exe) bulunamadı: {}", installer.display())
-            }));
-        }
-        use std::os::windows::process::CommandExt;
-        let output = std::process::Command::new(&installer)
-            .args(["install", "usbmmidd.inf", "usbmmidd"])
-            .current_dir(&driver_dir)
-            .creation_flags(0x08000000)
-            .output();
-        match output {
-            Ok(o) if o.status.success() => json_response(StatusCode::OK, json!({
-                "success": true,
-                "message": "Sürücü başarıyla yüklendi."
-            })),
-            Ok(o) => json_response(StatusCode::OK, json!({
-                "success": false,
-                "message": format!("Kurulum hatası: {}", String::from_utf8_lossy(&o.stderr))
-            })),
-            Err(e) => json_response(StatusCode::OK, json!({
-                "success": false,
-                "message": format!("Çalıştırma hatası: {e}")
-            })),
+        if is_admin() {
+            use std::os::windows::process::CommandExt;
+            let output = std::process::Command::new(&installer)
+                .args(["install", "usbmmidd.inf", "usbmmidd"])
+                .current_dir(&driver_dir)
+                .creation_flags(0x08000000)
+                .output();
+            match output {
+                Ok(o) if o.status.success() => json_response(StatusCode::OK, json!({
+                    "success": true,
+                    "message": "Sürücü başarıyla yüklendi."
+                })),
+                Ok(o) => json_response(StatusCode::OK, json!({
+                    "success": false,
+                    "message": format!("Kurulum hatası: {}", String::from_utf8_lossy(&o.stderr))
+                })),
+                Err(e) => json_response(StatusCode::OK, json!({
+                    "success": false,
+                    "message": format!("Çalıştırma hatası: {e}")
+                })),
+            }
+        } else {
+            let ok = runas_elevated(&installer, "install usbmmidd.inf usbmmidd", &driver_dir);
+            if ok {
+                tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                json_response(StatusCode::OK, json!({
+                    "success": true,
+                    "message": "Sürücü kurulumu yönetici izni ile başlatıldı."
+                }))
+            } else {
+                json_response(StatusCode::OK, json!({
+                    "success": false,
+                    "message": "Yönetici onayı (UAC) verilmedi."
+                }))
+            }
         }
     }
     #[cfg(target_os = "macos")]

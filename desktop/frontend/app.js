@@ -626,12 +626,6 @@ function fetchSystemInfo() {
                 document.getElementById('port-audio').textContent = info.ports.audio_tcp;
                 document.getElementById('port-screen').textContent = info.ports.screen_tcp;
                 
-                const adminWarning = document.getElementById('admin-warning');
-                if (!info.is_admin) {
-                    adminWarning.style.display = 'block';
-                } else {
-                    adminWarning.style.display = 'none';
-                }
 
                 const ramStat = document.getElementById('stat-ram');
                 if (ramStat && info.mem_stats) {
@@ -4945,29 +4939,20 @@ function updateDriverUI(data) {
             badge.textContent = "KAPALI";
             chkEnable.checked = false;
         }
-        
         installBtn.style.display = 'none';
-        if (data.admin) {
-            toggleContainer.style.display = 'flex';
-        } else {
-            toggleContainer.style.display = 'none';
-        }
+        toggleContainer.style.display = 'flex';
     } else {
         icon.className = "driver-status-icon error";
         title.textContent = "Sanal Ekran Sürücüsü Eksik";
-        desc.textContent = "İkinci ekran için sürücüyü kurun.";
+        desc.textContent = "İkinci ekran özelliğini kullanmak için sürücüyü yükleyin.";
         badge.className = "status-pill status-red";
         badge.textContent = "EKSİK";
         
         toggleContainer.style.display = 'none';
-        if (data.admin) {
-            installBtn.style.display = 'inline-block';
-            installBtn.textContent = "Sürücüyü Yükle";
-            installBtn.disabled = false;
-            installBtn.style.opacity = "1";
-        } else {
-            installBtn.style.display = 'none';
-        }
+        installBtn.style.display = 'inline-block';
+        installBtn.textContent = "Sürücüyü Yükle";
+        installBtn.disabled = false;
+        installBtn.style.opacity = "1";
     }
 }
 
