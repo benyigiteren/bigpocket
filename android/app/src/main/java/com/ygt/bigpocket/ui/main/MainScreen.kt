@@ -6361,120 +6361,13 @@ fun MonitorTab(
 
 @Composable
 fun BigPocketLogo(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        
-        // 1. Background rounded squircle
-        drawRoundRect(
-            color = MinimalistBackground,
-            size = size,
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.22f, h * 0.22f)
-        )
-        drawRoundRect(
-            color = MinimalistBorder,
-            size = size,
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.22f, h * 0.22f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-        )
-        
-        // 2. Phone device sliding out of pocket
-        val phoneLeft = w * 0.34f
-        val phoneTop = h * 0.16f
-        val phoneWidth = w * 0.32f
-        val phoneHeight = h * 0.38f
-        val phoneRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
-        
-        drawRoundRect(
-            color = MinimalistSurfaceElevated,
-            topLeft = Offset(phoneLeft, phoneTop),
-            size = androidx.compose.ui.geometry.Size(phoneWidth, phoneHeight),
-            cornerRadius = phoneRadius
-        )
-        drawRoundRect(
-            color = MinimalistPrimary,
-            topLeft = Offset(phoneLeft, phoneTop),
-            size = androidx.compose.ui.geometry.Size(phoneWidth, phoneHeight),
-            cornerRadius = phoneRadius,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-        )
-        
-        // Phone speaker notch
-        drawRoundRect(
-            color = MinimalistSecondary,
-            topLeft = Offset(w * 0.44f, h * 0.20f),
-            size = androidx.compose.ui.geometry.Size(w * 0.12f, h * 0.024f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx(), 1.5.dp.toPx())
-        )
-
-        // 3. Pocket Body
-        val pocketPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.26f, h * 0.38f)
-            lineTo(w * 0.26f, h * 0.55f)
-            cubicTo(
-                w * 0.26f, h * 0.70f,
-                w * 0.38f, h * 0.78f,
-                w * 0.50f, h * 0.78f
-            )
-            cubicTo(
-                w * 0.62f, h * 0.78f,
-                w * 0.74f, h * 0.70f,
-                w * 0.74f, h * 0.55f
-            )
-            lineTo(w * 0.74f, h * 0.38f)
-            close()
-        }
-        // Fill pocket
-        drawPath(path = pocketPath, color = MinimalistSurfaceElevated)
-        // Pocket stroke
-        drawPath(
-            path = pocketPath,
-            color = MinimalistPrimary,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = 3.5.dp.toPx(),
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
-        )
-
-        // 4. Top Pocket Rim (White Bar)
-        drawLine(
-            color = MinimalistPrimary,
-            start = Offset(w * 0.22f, h * 0.38f),
-            end = Offset(w * 0.78f, h * 0.38f),
-            strokeWidth = 4.dp.toPx(),
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-
-        // 5. Pocket Accent Seam (Lavender)
-        val seamPath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.34f, h * 0.47f)
-            cubicTo(
-                w * 0.34f, h * 0.59f,
-                w * 0.41f, h * 0.67f,
-                w * 0.50f, h * 0.67f
-            )
-            cubicTo(
-                w * 0.59f, h * 0.67f,
-                w * 0.66f, h * 0.59f,
-                w * 0.66f, h * 0.47f
-            )
-        }
-        drawPath(
-            path = seamPath,
-            color = MinimalistSecondary,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = 2.5.dp.toPx(),
-                cap = androidx.compose.ui.graphics.StrokeCap.Round
-            )
-        )
-
-        // 6. Center Wireless Connection Dot
-        drawCircle(
-            color = MinimalistPrimary,
-            radius = 3.dp.toPx(),
-            center = Offset(w * 0.50f, h * 0.57f)
-        )
-    }
+    Image(
+        painter = androidx.compose.ui.res.painterResource(id = com.ygt.bigpocket.R.drawable.logo),
+        contentDescription = "BigPocket Logo",
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .border(1.dp, MinimalistBorder, RoundedCornerShape(18.dp))
+    )
 }
 
 /** Rounded live camera preview shown in the corner while streaming video to the PC. */
