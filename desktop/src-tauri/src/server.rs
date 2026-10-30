@@ -48,7 +48,7 @@ pub const AUDIO_TCP_PORT: u16 = 8084;
 pub const SCREEN_TCP_PORT: u16 = 8086;
 
 /// Version reported by the update checker (mirrors Go's `AppVersion`).
-pub const APP_VERSION: &str = "v1.4.2-beta";
+pub const APP_VERSION: &str = "v1.5.0-beta";
 /// Public repository that publishes releases.
 pub const GITHUB_REPO: &str = "benyigiteren/bigpocket";
 
@@ -184,7 +184,9 @@ fn is_loopback_host(host: &str) -> bool {
         return false;
     }
     let trimmed = host.trim_matches(|c| c == '[' || c == ']');
-    if trimmed.eq_ignore_ascii_case("localhost") {
+    // `localhost` plus the host Tauri v2 injects for its custom protocol
+    // (Windows: http://tauri.localhost, macOS/Linux: tauri://localhost).
+    if trimmed.eq_ignore_ascii_case("localhost") || trimmed.eq_ignore_ascii_case("tauri.localhost") {
         return true;
     }
     trimmed
@@ -205,6 +207,12 @@ pub fn is_allowed_origin(headers: &HeaderMap) -> bool {
         .map(str::trim)
         .unwrap_or("");
     if origin.is_empty() || origin == "null" {
+        return true;
+    }
+    // Tauri custom-protocol origin (macOS/Linux webviews). Windows serves the
+    // panel from http(s)://tauri.localhost, which `is_loopback_host` covers.
+    let lowered = origin.to_ascii_lowercase();
+    if lowered == "tauri://localhost" || lowered == "tauri://localhost/" {
         return true;
     }
     let Some(rest) = origin
@@ -579,6 +587,17 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/download/:name", get(download_file))
         .route("/upload", post(upload_file))
         .route("/config", get(get_config).post(post_config))
+        .route("/driver/status", get(driver_status))
+        .route("/driver/install", post(driver_install))
+        .route("/driver/enable", post(driver_enable))
+        .route("/driver/mic/status", get(driver_mic_status))
+        .route("/driver/mic/install", post(driver_mic_install))
+        .route("/open_sound_settings", post(open_sound_settings_handler))
+        .route("/installed_apps", get(installed_apps_handler))
+        .route(
+            "/api/autostart",
+            get(api_autostart_get).post(api_autostart_post),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     let public = Router::new()
@@ -2723,6 +2742,123 @@ fn spawn_stats_ticker(state: Arc<AppState>) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Windows autostart (HKCU Run key, written through reg.exe)
+// ---------------------------------------------------------------------------
+
+const AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const AUTOSTART_VALUE: &str = "BigPocket";
+
+/// Command the Run key launches: the current executable, started minimized.
+fn autostart_launch_command() -> String {
+    let exe = std::env::current_exe()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    format!("\"{exe}\" --minimized")
+}
+
+/// Whether BigPocket currently has a Run-key entry.
+#[cfg(windows)]
+fn autostart_status() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("reg")
+        .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn autostart_status() -> bool {
+    false
+}
+
+/// Adds or removes the Run-key entry, so the panel survives a reboot.
+#[cfg(windows)]
+fn set_autostart(enable: bool) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let output = if enable {
+        let command = autostart_launch_command();
+        std::process::Command::new("reg")
+            .args([
+                "add",
+                AUTOSTART_REG_KEY,
+                "/v",
+                AUTOSTART_VALUE,
+                "/t",
+                "REG_SZ",
+                "/d",
+                command.as_str(),
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+    } else {
+        std::process::Command::new("reg")
+            .args(["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE, "/f"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+    };
+    match output {
+        Ok(out) if out.status.success() => Ok(()),
+        // Deleting an entry that is already gone is a success, not an error.
+        Ok(_) if !enable && !autostart_status() => Ok(()),
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(if stderr.is_empty() {
+                "Kayıt defteri güncellenemedi.".to_string()
+            } else {
+                stderr
+            })
+        }
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+#[cfg(not(windows))]
+fn set_autostart(_enable: bool) -> Result<(), String> {
+    Err("Otomatik başlatma yalnızca Windows'ta desteklenir.".to_string())
+}
+
+/// `GET /api/autostart` — current Run-key state.
+async fn api_autostart_get() -> Response {
+    Json(json!({"success": true, "enabled": autostart_status()})).into_response()
+}
+
+/// `POST /api/autostart` — toggles the Run key and optionally stores the
+/// security password the user set on the same screen.
+async fn api_autostart_post(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let enable = body.get("enable").and_then(Value::as_bool).unwrap_or(true);
+
+    if let Some(password) = body.get("password").and_then(Value::as_str) {
+        if !password.is_empty() {
+            let mut cfg = config::load_config();
+            cfg.password = password.to_string();
+            if let Err(err) = config::save_config(&cfg) {
+                return json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({"success": false, "error": err}),
+                );
+            }
+            state.broadcast(json!({"type": "config_update", "source": "autostart"}));
+        }
+    }
+
+    match set_autostart(enable) {
+        Ok(()) => Json(json!({"success": true, "enabled": enable})).into_response(),
+        Err(err) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"success": false, "error": err}),
+        ),
+    }
+}
+
 async fn api_qr(Query(params): Query<HashMap<String, String>>) -> Response {
     let data = params.get("data").map(|s| s.as_str()).unwrap_or("BigPocket");
     let code = match qrcode::QrCode::new(data.as_bytes()) {
@@ -2739,4 +2875,260 @@ async fn api_qr(Query(params): Query<HashMap<String, String>>) -> Response {
         HeaderValue::from_static("image/svg+xml"),
     );
     resp
+}
+
+#[derive(serde::Serialize, Clone)]
+struct InstalledAppItem {
+    name: String,
+    path: String,
+}
+
+fn get_installed_apps() -> Vec<InstalledAppItem> {
+    let mut apps = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    #[cfg(windows)]
+    {
+        let mut scan_dirs = Vec::new();
+        if let Ok(prog_data) = std::env::var("ProgramData") {
+            scan_dirs.push(PathBuf::from(prog_data).join(r"Microsoft\Windows\Start Menu\Programs"));
+        }
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            scan_dirs.push(PathBuf::from(app_data).join(r"Microsoft\Windows\Start Menu\Programs"));
+        }
+        for dir in scan_dirs {
+            if !dir.exists() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() && path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("lnk")).unwrap_or(false) {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            let lower = stem.to_ascii_lowercase();
+                            if !lower.contains("uninstall") && !seen.contains(&lower) {
+                                seen.insert(lower);
+                                apps.push(InstalledAppItem {
+                                    name: stem.to_string(),
+                                    path: path.to_string_lossy().to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        for dir in ["/Applications", "/System/Applications"] {
+            let p = std::path::Path::new(dir);
+            if let Ok(entries) = std::fs::read_dir(p) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() && path.extension().map(|s| s == "app").unwrap_or(false) {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            let lower = stem.to_ascii_lowercase();
+                            if !seen.contains(&lower) {
+                                seen.insert(lower);
+                                apps.push(InstalledAppItem {
+                                    name: stem.to_string(),
+                                    path: path.to_string_lossy().to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let p = std::path::Path::new("/usr/share/applications");
+        if let Ok(entries) = std::fs::read_dir(p) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|s| s == "desktop").unwrap_or(false) {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        let lower = stem.to_ascii_lowercase();
+                        if !seen.contains(&lower) {
+                            seen.insert(lower);
+                            apps.push(InstalledAppItem {
+                                name: stem.to_string(),
+                                path: path.to_string_lossy().to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    apps
+}
+
+fn get_driver_dir() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join("usbmmidd");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from("usbmmidd")
+}
+
+async fn driver_status() -> Response {
+    let monitors = xcap::Monitor::all().map(|m| m.len()).unwrap_or(1);
+    let admin = is_admin();
+    let driver_dir = get_driver_dir();
+    let driver_exists = driver_dir.join("deviceinstaller64.exe").exists();
+    json_response(StatusCode::OK, json!({
+        "success": true,
+        "admin": admin,
+        "monitors": monitors,
+        "driver_exists": driver_exists,
+        "platform": std::env::consts::OS
+    }))
+}
+
+async fn driver_install() -> Response {
+    if !is_admin() {
+        return json_response(StatusCode::OK, json!({
+            "success": false,
+            "message": "Yönetici yetkisi gerekmektedir."
+        }));
+    }
+    let driver_dir = get_driver_dir();
+    let installer = driver_dir.join("deviceinstaller64.exe");
+    #[cfg(windows)]
+    {
+        if !installer.exists() {
+            return json_response(StatusCode::OK, json!({
+                "success": false,
+                "message": format!("Sürücü kurulum dosyası (deviceinstaller64.exe) bulunamadı: {}", installer.display())
+            }));
+        }
+        use std::os::windows::process::CommandExt;
+        let output = std::process::Command::new(&installer)
+            .args(["install", "usbmmidd.inf", "usbmmidd"])
+            .current_dir(&driver_dir)
+            .creation_flags(0x08000000)
+            .output();
+        match output {
+            Ok(o) if o.status.success() => json_response(StatusCode::OK, json!({
+                "success": true,
+                "message": "Sürücü başarıyla yüklendi."
+            })),
+            Ok(o) => json_response(StatusCode::OK, json!({
+                "success": false,
+                "message": format!("Kurulum hatası: {}", String::from_utf8_lossy(&o.stderr))
+            })),
+            Err(e) => json_response(StatusCode::OK, json!({
+                "success": false,
+                "message": format!("Çalıştırma hatası: {e}")
+            })),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn();
+        json_response(StatusCode::OK, json!({
+            "success": true,
+            "message": "macOS Ekran Kaydı izin penceresi açıldı. Lütfen BigPocket için izin verin."
+        }))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        json_response(StatusCode::OK, json!({
+            "success": true,
+            "message": "Linux üzerinde Wayland/PipeWire ekran yakalama protokolü aktiftir."
+        }))
+    }
+}
+
+async fn driver_enable(Json(payload): Json<serde_json::Value>) -> Response {
+    let enable = payload.get("enable").and_then(|v| v.as_bool()).unwrap_or(true);
+    set_virtual_monitor(enable);
+    json_response(StatusCode::OK, json!({
+        "success": true,
+        "message": "Monitör durumu güncellendi."
+    }))
+}
+
+async fn driver_mic_status() -> Response {
+    #[cfg(windows)]
+    let installed = std::path::Path::new(r"C:\Windows\System32\drivers\vbcable_x64.sys").exists()
+        || std::path::Path::new(r"C:\Program Files\VB\CABLE").exists();
+    #[cfg(not(windows))]
+    let installed = true;
+
+    json_response(StatusCode::OK, json!({
+        "success": true,
+        "installed": installed,
+        "platform": std::env::consts::OS
+    }))
+}
+
+async fn driver_mic_install() -> Response {
+    if !is_admin() {
+        return json_response(StatusCode::OK, json!({
+            "success": false,
+            "message": "Yönetici yetkisi gerekmektedir."
+        }));
+    }
+    #[cfg(windows)]
+    {
+        let local_vbcable = PathBuf::from("VBCABLE").join("VBCABLE_Setup_x64.exe");
+        if local_vbcable.exists() {
+            let _ = std::process::Command::new(&local_vbcable)
+                .spawn();
+            json_response(StatusCode::OK, json!({
+                "success": true,
+                "message": "Sanal Mikrofon (VB-Cable) kurulum penceresi başlatıldı."
+            }))
+        } else {
+            let _ = spawn_detached("https://vb-audio.com/Cable/");
+            json_response(StatusCode::OK, json!({
+                "success": true,
+                "message": "VB-Cable indirme sayfası tarayıcıda açıldı."
+            }))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        json_response(StatusCode::OK, json!({
+            "success": true,
+            "message": "macOS/Linux üzerinde sanal ses yönlendirmesi için BlackHole veya PipeWire kullanabilirsiniz."
+        }))
+    }
+}
+
+async fn open_sound_settings_handler() -> Response {
+    #[cfg(windows)]
+    {
+        let _ = spawn_detached("control.exe mmsys.cpl sounds");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.sound").spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("pavucontrol").spawn();
+    }
+    json_response(StatusCode::OK, json!({"success": true}))
+}
+
+async fn installed_apps_handler() -> Response {
+    let apps = get_installed_apps();
+    json_response(StatusCode::OK, json!({
+        "success": true,
+        "apps": apps
+    }))
 }

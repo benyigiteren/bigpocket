@@ -25,6 +25,37 @@ const tabDetails = {
     settings: { title: "Ayarlar", subtitle: "Uygulama tercihleri, sistem bilgileri ve güncelleme yönetimi." }
 };
 
+// ---- Backend origin resolution ----
+// The desktop panel is normally served straight from the Rust server on 8085.
+// If Tauri ever loads it through its own protocol, relative URLs would miss the
+// API, so every request is resolved against this explicit origin instead.
+function getBackendOrigin() {
+    const loc = window.location;
+    if (loc.port === "8085" && loc.hostname) {
+        const proto = loc.protocol === "https:" ? "https" : "http";
+        return `${proto}://${loc.hostname}:8085`;
+    }
+    return "http://127.0.0.1:8085";
+}
+
+function getWebSocketUrl() {
+    const loc = window.location;
+    if (loc.port === "8085" && loc.hostname) {
+        const wsProto = loc.protocol === "https:" ? "wss:" : "ws:";
+        return `${wsProto}//${loc.hostname}:8085/ws`;
+    }
+    return "ws://127.0.0.1:8085/ws";
+}
+
+// Resolves a same-origin API path. When the page itself came from port 8085 the
+// relative path already reaches the server and is left untouched.
+function apiUrl(path) {
+    if (/^(https?:|ws:|wss:)/i.test(path) || window.location.port === "8085") {
+        return path;
+    }
+    return getBackendOrigin() + path;
+}
+
 // Auth helpers
 function getAuthPassword() {
     return localStorage.getItem("bigpocket_password") || "";
@@ -51,7 +82,7 @@ function authFetch(url, options = {}) {
         options.headers['X-Password'] = password;
     }
 
-    return fetch(url, options).then(res => {
+    return fetch(apiUrl(url), options).then(res => {
         if (res.status === 401 && !isLocal) {
             showPasswordPrompt();
             throw new Error("Unauthorized");
@@ -82,7 +113,7 @@ function setupPasswordPromptHandlers() {
     submitBtn.addEventListener('click', () => {
         const pw = input.value;
         // Try to validate by fetching config with this password
-        fetch('/config', {
+        fetch(apiUrl('/config'), {
             headers: { 'X-Password': pw }
         })
         .then(res => {
@@ -148,10 +179,8 @@ function setupDashboardPassword() {
 
 // ----------------- MCP / Integration Helpers -----------------
 function buildMcpBaseUrl() {
-    const host = window.location.hostname || '127.0.0.1';
-    const proto = window.location.protocol === 'https:' ? 'https' : 'http';
     // The desktop server always exposes its HTTP/MCP API on port 8085.
-    return `${proto}://${host}:8085`;
+    return getBackendOrigin();
 }
 
 function updateMcpCardUI() {
@@ -247,40 +276,108 @@ function setupMcpIntegration() {
         });
     });
 
-    // Windows autostart toggle (GET/POST /api/autostart)
-    const autostartChk = document.getElementById('chk-autostart');
-    if (autostartChk) {
-        authFetch('/api/autostart')
-            .then(res => res.json())
-            .then(data => {
-                const enabled = (data && (data.enabled === true || data.autostart === true));
-                autostartChk.checked = !!enabled;
-            })
-            .catch(err => console.warn("Autostart durumu okunamadı", err));
+    updateMcpCardUI();
+}
 
-        autostartChk.addEventListener('change', () => {
-            const enable = autostartChk.checked;
-            autostartChk.disabled = true;
-            authFetch('/api/autostart', {
-                method: 'POST',
-                body: JSON.stringify({ enable: enable })
-            })
+// ---- Windows autostart + security password flow ----
+// Enabling autostart starts the server on every boot, so an unprotected machine
+// is exposed to the whole Wi-Fi network. The user is offered a password first.
+function setupAutostart() {
+    const toggle = document.getElementById('settings-autostart-toggle');
+    if (!toggle) return;
+
+    const modal = document.getElementById('autostart-security-modal');
+    const passwordInput = document.getElementById('autostart-password-input');
+    const errorEl = document.getElementById('autostart-password-error');
+    const saveBtn = document.getElementById('btn-autostart-save-password');
+    const skipBtn = document.getElementById('btn-autostart-skip');
+    const closeBtn = document.getElementById('btn-close-autostart-modal');
+
+    const currentPassword = () => (apiConfig && apiConfig.password) || getAuthPassword() || '';
+
+    const closeModal = () => {
+        if (modal) modal.classList.remove('active');
+        if (passwordInput) passwordInput.value = '';
+        if (errorEl) errorEl.style.display = 'none';
+    };
+
+    const setEnabled = (enable, password) => {
+        const body = { enable: enable };
+        if (password) body.password = password;
+        toggle.disabled = true;
+        authFetch('/api/autostart', { method: 'POST', body: JSON.stringify(body) })
             .then(res => res.json())
             .then(data => {
-                if (data && data.success === false) {
-                    autostartChk.checked = !enable;
-                    alert(data.error || 'Otomatik başlatma ayarı değiştirilemedi.');
+                if (!data || data.success === false) {
+                    throw new Error((data && data.error) || 'Otomatik başlatma ayarı değiştirilemedi.');
+                }
+                toggle.checked = !!enable;
+                if (password) {
+                    setAuthPassword(password);
+                    if (apiConfig) apiConfig.password = password;
+                    fetchSystemInfo();
+                    updateMcpCardUI();
+                }
+                if (window.showToast) {
+                    window.showToast(enable ? 'Windows ile birlikte başlatma açıldı.' : 'Otomatik başlatma kapatıldı.');
                 }
             })
             .catch(err => {
-                autostartChk.checked = !enable;
-                alert('Otomatik başlatma ayarı değiştirilemedi: ' + err);
+                toggle.checked = !enable;
+                alert('Otomatik başlatma ayarı değiştirilemedi: ' + err.message);
             })
-            .finally(() => { autostartChk.disabled = false; });
+            .finally(() => { toggle.disabled = false; });
+    };
+
+    // Existing Run-key entry drives the initial switch state.
+    authFetch('/api/autostart')
+        .then(res => res.json())
+        .then(data => { if (data) toggle.checked = data.enabled === true; })
+        .catch(err => console.warn("Autostart durumu okunamadı", err));
+
+    toggle.addEventListener('change', () => {
+        const enable = toggle.checked;
+        if (!enable) {
+            setEnabled(false);
+            return;
+        }
+        // Never enable autostart on an unprotected machine without asking first.
+        if (currentPassword()) {
+            setEnabled(true);
+            return;
+        }
+        toggle.checked = false;
+        if (modal) {
+            if (passwordInput) passwordInput.value = '';
+            if (errorEl) errorEl.style.display = 'none';
+            modal.classList.add('active');
+            setTimeout(() => { if (passwordInput) passwordInput.focus(); }, 60);
+        } else {
+            setEnabled(true);
+        }
+    });
+
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            const password = ((passwordInput && passwordInput.value) || '').trim();
+            if (password.length < 4) {
+                if (errorEl) errorEl.style.display = 'block';
+                return;
+            }
+            closeModal();
+            setEnabled(true, password);
         });
     }
-
-    updateMcpCardUI();
+    if (skipBtn) skipBtn.addEventListener('click', () => { closeModal(); setEnabled(true); });
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (modal) {
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    }
+    if (passwordInput) {
+        passwordInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && saveBtn) saveBtn.click();
+        });
+    }
 }
 
 function fetchConfig() {
@@ -418,6 +515,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupPasswordPromptHandlers();
     setupDashboardPassword();
     setupMcpIntegration();
+    setupAutostart();
     setupIPSelectHandler();
     setupUsbBridge();
     
@@ -472,7 +570,7 @@ function setupShutdown() {
 
 // Fetch System Info
 function fetchSystemInfo() {
-    fetch('/system_info')
+    fetch(apiUrl('/system_info'))
         .then(res => res.json())
         .then(info => {
             if (info.success) {
@@ -557,7 +655,7 @@ function updatePairingQR(ip, ports) {
     });
     const qrCode = document.getElementById('qr-code');
     if (qrCode) {
-        qrCode.src = `/api/qr?data=${encodeURIComponent(payload)}`;
+        qrCode.src = apiUrl(`/api/qr?data=${encodeURIComponent(payload)}`);
     }
 }
 
@@ -597,11 +695,9 @@ function setupTabNavigation() {
 let wsReconnectAttempts = 0;
 
 function connectWebSocket() {
-    // Go backend serves the websocket on port 8085 under path /ws
-    const loc = window.location;
-    const wsProto = loc.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${wsProto}//${loc.host}/ws`;
-    
+    // The Rust backend serves the websocket on port 8085 under path /ws
+    const wsUrl = getWebSocketUrl();
+
     console.log("Connecting to WebSocket:", wsUrl);
     wsClient = new WebSocket(wsUrl);
 
@@ -1485,6 +1581,53 @@ setInterval(() => {
         el.textContent = dowLabel;
     });
 
+    // Split-flap clocks (Fliqlo) keep their weekday strip current
+    document.querySelectorAll('.deck-flip-label').forEach(el => {
+        el.textContent = dowLabel;
+    });
+
+    // Apple Minimal
+    document.querySelectorAll('.deck-am-clock').forEach(clock => {
+        const hEl = clock.querySelector('.deck-am-h');
+        const mEl = clock.querySelector('.deck-am-m');
+        const dEl = clock.querySelector('.deck-am-date');
+        if (hEl) hEl.textContent = hours;
+        if (mEl) mEl.textContent = minutes;
+        if (dEl) dEl.textContent = dowLabel;
+    });
+
+    // Neon Cyberpunk (with live seconds)
+    document.querySelectorAll('.deck-neon-clock').forEach(clock => {
+        const hEl = clock.querySelector('.deck-neon-h');
+        const mEl = clock.querySelector('.deck-neon-m');
+        const sEl = clock.querySelector('.deck-neon-s');
+        if (hEl) hEl.textContent = hours;
+        if (mEl) mEl.textContent = minutes;
+        if (sEl) sEl.textContent = secondsStr;
+    });
+
+    // Swiss Serif
+    document.querySelectorAll('.deck-swiss-clock').forEach(clock => {
+        const hEl = clock.querySelector('.deck-swiss-h');
+        const mEl = clock.querySelector('.deck-swiss-m');
+        const dEl = clock.querySelector('.deck-swiss-date');
+        if (hEl) hEl.textContent = hours;
+        if (mEl) mEl.textContent = minutes;
+        if (dEl) dEl.textContent = dowLabel;
+    });
+
+    // Retro CRT terminal ([09:41:22])
+    document.querySelectorAll('.deck-retro-clock').forEach(clock => {
+        const tEl = clock.querySelector('.deck-retro-time');
+        if (tEl) tEl.textContent = `${hours}:${minutes}:${secondsStr}`;
+    });
+
+    // Turkish word clock ("ON BİRİ KIRK BEŞ GEÇİYOR")
+    const wordLabel = turkishTimeWords(now);
+    document.querySelectorAll('.deck-word-clock .deck-word-text').forEach(el => {
+        el.textContent = wordLabel;
+    });
+
     // Legacy or mini clocks
     document.querySelectorAll('.deck-clock-widget:not(.analog-mode) .deck-clock-time').forEach(timeEl => {
         timeEl.textContent = `${hours}:${minutes}:${secondsStr}`;
@@ -2177,6 +2320,51 @@ function getWidgetPropsForPreset(presetKey) {
             p.value = '';
             p.icon = 'clock';
             p.clock_style = 'flip_clock';
+            p.col_span = 2;
+            p.row_span = 1;
+            break;
+        case 'clock_apple_minimal':
+            p.label = 'Minimal Saat';
+            p.type = 'clock_widget';
+            p.value = '';
+            p.icon = 'clock';
+            p.clock_style = 'apple_minimal';
+            p.col_span = 1;
+            p.row_span = 1;
+            break;
+        case 'clock_neon_cyberpunk':
+            p.label = 'Neon Cyber';
+            p.type = 'clock_widget';
+            p.value = '';
+            p.icon = 'clock';
+            p.clock_style = 'neon_cyberpunk';
+            p.col_span = 2;
+            p.row_span = 1;
+            break;
+        case 'clock_word':
+            p.label = 'Metin Saati';
+            p.type = 'clock_widget';
+            p.value = '';
+            p.icon = 'clock';
+            p.clock_style = 'word_clock';
+            p.col_span = 2;
+            p.row_span = 1;
+            break;
+        case 'clock_swiss_serif':
+            p.label = 'Swiss Saat';
+            p.type = 'clock_widget';
+            p.value = '';
+            p.icon = 'clock';
+            p.clock_style = 'swiss_serif';
+            p.col_span = 1;
+            p.row_span = 1;
+            break;
+        case 'clock_retro_terminal':
+            p.label = 'Terminal Saat';
+            p.type = 'clock_widget';
+            p.value = '';
+            p.icon = 'clock';
+            p.clock_style = 'retro_terminal';
             p.col_span = 2;
             p.row_span = 1;
             break;
@@ -3278,6 +3466,23 @@ function formatDeckDate(d) {
     return `${wd}, ${d.getDate()} ${mon}`;
 }
 
+// Turkish word clock, e.g. 11:45 -> "ON BİRİ KIRK BEŞ GEÇİYOR".
+const TR_HOURS = ['ON İKİ', 'BİR', 'İKİ', 'ÜÇ', 'DÖRT', 'BEŞ', 'ALTI', 'YEDİ', 'SEKİZ', 'DOKUZ', 'ON', 'ON BİR'];
+const TR_HOURS_ACCUSATIVE = ['ON İKİYİ', 'BİRİ', 'İKİYİ', 'ÜÇÜ', 'DÖRDÜ', 'BEŞİ', 'ALTIYI', 'YEDİYİ', 'SEKİZİ', 'DOKUZU', 'ONU', 'ON BİRİ'];
+const TR_MINUTES = {
+    0: 'TAM', 5: 'BEŞ', 10: 'ON', 15: 'ON BEŞ', 20: 'YİRMİ', 25: 'YİRMİ BEŞ',
+    30: 'OTUZ', 35: 'OTUZ BEŞ', 40: 'KIRK', 45: 'KIRK BEŞ', 50: 'ELLİ', 55: 'ELLİ BEŞ'
+};
+
+function turkishTimeWords(date) {
+    const hour12 = date.getHours() % 12;
+    const minute = Math.round(date.getMinutes() / 5) * 5 % 60;
+    if (minute === 0) {
+        return `${TR_HOURS[hour12]} TAM`;
+    }
+    return `${TR_HOURS_ACCUSATIVE[hour12]} ${TR_MINUTES[minute]} GEÇİYOR`;
+}
+
 // Packs spans into an explicit rows x cols occupancy map so a card can NEVER
 // create an implicit column/row outside the matrix (zero overflow guarantee).
 // PASS 1 honours an explicit (grid_row, grid_col); PASS 2 auto-packs the rest.
@@ -3400,7 +3605,7 @@ function renderStreamDeckButtons() {
         }
 
         // Custom font style
-        const fontFamily = btn.font_family || 'mono';
+        const fontFamily = btn.font_family || 'geist';
         item.classList.add(`font-${fontFamily}`);
 
         // Material You tonal accent: drives the icon badge, value and bar colours
@@ -3424,6 +3629,7 @@ function renderStreamDeckButtons() {
             const now = new Date();
             const hours = now.getHours().toString().padStart(2, '0');
             const minutes = now.getMinutes().toString().padStart(2, '0');
+            const secondsStr = now.getSeconds().toString().padStart(2, '0');
             const dow = formatDeckDate(now);
             if (clockStyle === 'flip_clock') {
                 bodyContent = `
@@ -3484,6 +3690,42 @@ function renderStreamDeckButtons() {
                             <span class="deck-apple-stacked-m">${minutes}</span>
                         </div>
                         <span class="md-clock__meta">İstanbul · yerel saat</span>
+                    </div>
+                `;
+            } else if (clockStyle === 'apple_minimal') {
+                bodyContent = `
+                    <div class="deck-clock-widget deck-am-clock md-clock ${sizeClass}">
+                        <span class="deck-am-date">${dow}</span>
+                        <div class="deck-am-time"><span class="deck-am-h">${hours}</span><span class="deck-am-colon">:</span><span class="deck-am-m">${minutes}</span></div>
+                        <span class="deck-am-meta">Apple Minimal</span>
+                    </div>
+                `;
+            } else if (clockStyle === 'neon_cyberpunk') {
+                bodyContent = `
+                    <div class="deck-clock-widget deck-neon-clock md-clock ${sizeClass}">
+                        <div class="deck-neon-time"><span class="deck-neon-h">${hours}</span><span class="deck-neon-colon">:</span><span class="deck-neon-m">${minutes}</span><span class="deck-neon-s">${secondsStr}</span></div>
+                        <span class="deck-neon-label">// SİSTEM SAATİ</span>
+                    </div>
+                `;
+            } else if (clockStyle === 'word_clock') {
+                bodyContent = `
+                    <div class="deck-clock-widget deck-word-clock ${sizeClass}">
+                        <span class="deck-word-text">${turkishTimeWords(now)}</span>
+                        <span class="deck-word-meta">Türkçe metin saati</span>
+                    </div>
+                `;
+            } else if (clockStyle === 'swiss_serif') {
+                bodyContent = `
+                    <div class="deck-clock-widget deck-swiss-clock md-clock ${sizeClass}">
+                        <span class="deck-swiss-date">${dow}</span>
+                        <div class="deck-swiss-time"><span class="deck-swiss-h">${hours}</span><span class="deck-swiss-sep">:</span><span class="deck-swiss-m">${minutes}</span></div>
+                    </div>
+                `;
+            } else if (clockStyle === 'retro_terminal') {
+                bodyContent = `
+                    <div class="deck-clock-widget deck-retro-clock ${sizeClass}">
+                        <div class="deck-retro-line">[<span class="deck-retro-time">${hours}:${minutes}:${secondsStr}</span>]</div>
+                        <div class="deck-retro-prompt">bigpocket@pc:~$ ok</div>
                     </div>
                 `;
             } else {
@@ -4283,7 +4525,7 @@ const EDIT_VALUE_HINTS = {
     app_volume_slider: { label: 'Hedef Uygulama (exe adı)', placeholder: 'spotify.exe, chrome.exe, discord.exe' },
     brightness_slider: { label: 'Parlaklık (0-100)', placeholder: 'display_brightness' },
     live_info: { label: 'Sensör', placeholder: 'cpu, cpu_temp, ram, disk, gpu, net_speed, combo' },
-    clock_widget: { label: 'Saat Gösterimi', placeholder: 'digital_clean, digital_seconds, analog, world_clock' },
+    clock_widget: { label: 'Saat Gösterimi', placeholder: 'apple_minimal, flip_clock, neon_cyberpunk, word_clock, swiss_serif, retro_terminal' },
     weather: { label: 'Şehir', placeholder: 'Istanbul, Ankara, London, New York' },
     now_playing: { label: 'Medya Kaynağı', placeholder: 'media_session' },
     media_widget: { label: 'Medya Eylemi', placeholder: 'playpause' },
@@ -4296,6 +4538,12 @@ function applyEditTypeHints(type) {
     document.getElementById('edit-value').placeholder = hint.placeholder;
     const appGroup = document.getElementById('installed-apps-group');
     appGroup.style.display = type === 'command' ? 'block' : 'none';
+    // Clock typography controls only apply to the clock widget.
+    const isClock = type === 'clock_widget';
+    ['clock-options-group', 'clock-font-group', 'clock-size-group'].forEach(id => {
+        const group = document.getElementById(id);
+        if (group) group.style.display = isClock ? 'block' : 'none';
+    });
     if (type === 'command') loadInstalledApps();
 }
 
@@ -4315,6 +4563,12 @@ function openEditButtonModal(id) {
     document.getElementById('edit-label').value = btn.label || '';
     document.getElementById('edit-type').value = btn.type || 'hotkey';
     document.getElementById('edit-value').value = btn.value || '';
+    const clockStyleSel = document.getElementById('edit-clock-style');
+    if (clockStyleSel) clockStyleSel.value = btn.clock_style || 'apple_lockscreen';
+    const fontSel = document.getElementById('edit-font-family');
+    if (fontSel) fontSel.value = btn.font_family || 'geist';
+    const sizeSel = document.getElementById('edit-clock-size');
+    if (sizeSel) sizeSel.value = btn.clock_font_size || 'auto';
     applyEditTypeHints(btn.type || 'hotkey');
     setEditSizePills(btn.col_span || 1, btn.row_span || 1);
     renderIconPickerGallery(btn.icon);
@@ -4404,7 +4658,7 @@ function applyButtonEdit() {
         const idx = apiConfig.stream_deck_buttons.findIndex(b => b.id === editingButtonId);
         if (idx !== -1) {
             const existing = apiConfig.stream_deck_buttons[idx];
-            apiConfig.stream_deck_buttons[idx] = {
+            const updated = {
                 ...existing,
                 id: editingButtonId,
                 label: label || existing.label,
@@ -4415,6 +4669,21 @@ function applyButtonEdit() {
                 col_span: editSizeSpans.col,
                 row_span: editSizeSpans.row
             };
+            // Clock cards keep their typography; other widget types never carry it.
+            const clockStyleSel = document.getElementById('edit-clock-style');
+            const fontSel = document.getElementById('edit-font-family');
+            const sizeSel = document.getElementById('edit-clock-size');
+            if (type === 'clock_widget') {
+                updated.clock_style = clockStyleSel ? clockStyleSel.value : (existing.clock_style || '');
+                updated.font_family = fontSel ? fontSel.value : (existing.font_family || '');
+                const size = sizeSel ? sizeSel.value : 'auto';
+                updated.clock_font_size = size === 'auto' ? '' : size;
+            } else {
+                updated.clock_style = '';
+                updated.font_family = '';
+                updated.clock_font_size = '';
+            }
+            apiConfig.stream_deck_buttons[idx] = updated;
             targetEmptyCell = null;
             renderStreamDeckButtons();
             saveConfigOnServer();
@@ -5052,7 +5321,7 @@ function checkMobileMode() {
             bar.style.display = 'block';
             status.textContent = 'İndiriliyor...';
             try {
-                const r = await fetch('/api/update/install', { method: 'POST' }).then(r => r.json());
+                const r = await fetch(apiUrl('/api/update/install'), { method: 'POST' }).then(r => r.json());
                 if (!r.success) throw new Error(r.error || 'Başarısız');
             } catch (err) {
                 status.textContent = 'Hata: ' + err.message;
@@ -5061,7 +5330,7 @@ function checkMobileMode() {
             }
             const timer = setInterval(async () => {
                 try {
-                    const p = await fetch('/api/update/progress').then(r => r.json());
+                    const p = await fetch(apiUrl('/api/update/progress')).then(r => r.json());
                     fill.style.transform = 'scaleX(' + ((p.percent || 0) / 100) + ')';
                     if (p.state === 'downloading') status.textContent = `İndiriliyor... %${p.percent}`;
                     else if (p.state === 'installing') status.textContent = 'Kuruluyor...';
@@ -5072,7 +5341,7 @@ function checkMobileMode() {
                     clearInterval(timer);
                     status.textContent = 'Yeniden başlatılıyor...';
                     const wait = setInterval(() => {
-                        fetch('/api/version').then(() => { clearInterval(wait); location.reload(); }).catch(() => {});
+                        fetch(apiUrl('/api/version')).then(() => { clearInterval(wait); location.reload(); }).catch(() => {});
                     }, 1500);
                 }
             }, 500);
@@ -5083,7 +5352,7 @@ function checkMobileMode() {
         try {
             const isBeta = (apiConfig && !!apiConfig.beta_channel) || (document.getElementById('settings-beta-channel-toggle')?.checked);
             const betaParam = isBeta ? '&beta=1' : '&beta=0';
-            const info = await fetch('/api/update/check' + (manual ? '?force=1' : '?force=0') + betaParam).then(r => r.json());
+            const info = await fetch(apiUrl('/api/update/check' + (manual ? '?force=1' : '?force=0') + betaParam)).then(r => r.json());
             const curVerClean = (info.current_version || '1.4.1').replace(/^v+/, '');
             const currentVerEl = document.getElementById('settings-current-ver');
             if (currentVerEl) {

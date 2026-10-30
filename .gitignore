@@ -52,3 +52,6 @@ macos_artifact.zip
 *.dmg
 *.deb
 *.tar.gz
+BigPocket-Setup.exe
+desktop/BigPocket-Setup.exe
+bigpocket-linux

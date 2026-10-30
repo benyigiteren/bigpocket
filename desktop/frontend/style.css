@@ -4241,3 +4241,223 @@ body.mobile-mode .deck-quick-actions { display: none; }
     border-radius: 12px;
     font-weight: 600;
 }
+
+/* ========================================================
+   PER-CARD FONT FAMILIES (edit modal "Yazı Tipi" selector)
+   ======================================================== */
+.deck-btn.font-geist { font-family: 'Geist', var(--font-sans); }
+.deck-btn.font-jetbrains { font-family: 'JetBrains Mono', var(--font-mono); }
+.deck-btn.font-inter { font-family: 'Inter', var(--font-sans); }
+.deck-btn.font-serif { font-family: 'Playfair Display', Georgia, 'Times New Roman', serif; }
+.deck-btn.font-lcd { font-family: 'Orbitron', 'Courier New', monospace; letter-spacing: 0.06em; }
+
+/* ========================================================
+   RICH CLOCK STYLES
+   Every widget below reads --clock-scale, so the "Saat Boyutu"
+   selector in the edit modal rescales the numerals uniformly.
+   ======================================================== */
+.clock-size-compact { --clock-scale: 0.74; }
+.clock-size-regular { --clock-scale: 0.88; }
+.clock-size-large { --clock-scale: 1.12; }
+.clock-size-huge { --clock-scale: 1.3; }
+
+.deck-am-clock,
+.deck-neon-clock,
+.deck-swiss-clock,
+.deck-retro-clock,
+.deck-word-clock {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 4px;
+    overflow: hidden;
+    text-align: center;
+    user-select: none;
+    background: var(--bg-surface);
+}
+
+/* --- 1. Apple Minimal: giant lockscreen numerals --- */
+.deck-am-clock { font-family: inherit; }
+.deck-am-date {
+    font-size: calc(var(--cell, 112px) * 0.1);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.deck-am-time {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    font-size: calc(var(--cell, 112px) * 0.44 * var(--clock-scale, 1));
+    font-weight: 200;
+    line-height: 0.92;
+    letter-spacing: -0.05em;
+    color: var(--text-main);
+    font-variant-numeric: tabular-nums;
+}
+.deck-am-colon { margin: 0 1px; opacity: 0.7; animation: pulseColon 1s infinite alternate; }
+.deck-am-meta { font-size: calc(var(--cell, 112px) * 0.085); color: var(--text-muted); }
+
+/* --- 2. Flip Clock: two-tone split-flap cards (Fliqlo) --- */
+.deck-flip-card {
+    background: linear-gradient(180deg, #2c2c31 0%, #232327 49.6%, #1b1b1f 50.4%, #121215 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+.deck-flip-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0));
+    pointer-events: none;
+    z-index: 2;
+}
+.deck-flip-card::after {
+    content: "";
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: rgba(0, 0, 0, 0.62);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+    pointer-events: none;
+    z-index: 3;
+}
+.deck-flip-num { position: relative; z-index: 1; }
+
+/* --- 3. Neon Cyberpunk --- */
+.deck-neon-clock {
+    background: radial-gradient(circle at 50% 130%, rgba(0, 255, 255, 0.12), transparent 62%), #05080b;
+}
+.deck-neon-time {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    font-family: 'JetBrains Mono', var(--font-mono);
+    font-size: calc(var(--cell, 112px) * 0.36 * var(--clock-scale, 1));
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #22e0ff;
+    text-shadow: 0 0 6px rgba(34, 224, 255, 0.85), 0 0 18px rgba(34, 224, 255, 0.45);
+    font-variant-numeric: tabular-nums;
+}
+.deck-neon-s {
+    margin-left: 4px;
+    font-size: 0.5em;
+    color: #ff2fb9;
+    text-shadow: 0 0 6px rgba(255, 47, 185, 0.85), 0 0 16px rgba(255, 47, 185, 0.4);
+}
+.deck-neon-colon { animation: neonBlink 1s steps(1, end) infinite; }
+@keyframes neonBlink { 50% { opacity: 0.25; } }
+.deck-neon-label {
+    font-family: 'JetBrains Mono', var(--font-mono);
+    font-size: calc(var(--cell, 112px) * 0.075);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(34, 224, 255, 0.65);
+}
+
+/* --- 4. Turkish Word Clock --- */
+.deck-word-clock { font-family: inherit; gap: 6px; }
+.deck-word-text {
+    font-size: calc(var(--cell, 112px) * 0.14 * var(--clock-scale, 1));
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: 1.3;
+    text-transform: uppercase;
+    color: var(--text-main);
+}
+.deck-word-meta { font-size: calc(var(--cell, 112px) * 0.08); letter-spacing: 0.06em; color: var(--text-muted); }
+
+/* --- 5. Swiss Serif --- */
+.deck-swiss-clock { gap: 1px; }
+.deck-swiss-date {
+    font-family: 'Inter', var(--font-sans);
+    font-size: calc(var(--cell, 112px) * 0.09);
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.deck-swiss-time {
+    display: flex;
+    align-items: baseline;
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: calc(var(--cell, 112px) * 0.42 * var(--clock-scale, 1));
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--text-main);
+}
+.deck-swiss-sep { margin: 0 2px; opacity: 0.55; }
+
+/* --- 6. Retro CRT terminal --- */
+.deck-retro-clock {
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 8px;
+    background: #04120a;
+    border: 1px solid rgba(51, 255, 153, 0.18);
+}
+.deck-retro-line {
+    font-family: 'JetBrains Mono', var(--font-mono);
+    font-size: calc(var(--cell, 112px) * 0.24 * var(--clock-scale, 1));
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #4dff9b;
+    text-shadow: 0 0 8px rgba(77, 255, 155, 0.7);
+    font-variant-numeric: tabular-nums;
+}
+.deck-retro-prompt {
+    max-width: 100%;
+    font-family: 'JetBrains Mono', var(--font-mono);
+    font-size: calc(var(--cell, 112px) * 0.085);
+    color: rgba(77, 255, 155, 0.7);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ========================================================
+   AUTOSTART SECURITY MODAL
+   ======================================================== */
+.autostart-modal-card {
+    width: 100%;
+    max-width: 480px;
+    padding: 0 !important;
+    overflow: hidden;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+}
+.autostart-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px 22px 24px 22px;
+}
+.autostart-warning-text {
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.22);
+    border-radius: 10px;
+}
+.autostart-error { margin-top: 6px; font-size: 11.5px; color: var(--status-red-txt); }
+.autostart-actions { display: flex; flex-direction: column; gap: 8px; }
+.autostart-actions .btn { height: 40px; }

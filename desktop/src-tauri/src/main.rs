@@ -8,6 +8,8 @@ mod flow;
 mod server;
 mod system;
 
+use tauri::Manager;
+
 fn main() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -15,8 +17,12 @@ fn main() {
         .expect("failed to create Tokio runtime");
     let _guard = rt.enter();
 
+    // The Windows autostart entry launches us with `--minimized`: the server
+    // keeps running but the panel stays out of the way at boot.
+    let start_minimized = std::env::args().any(|arg| arg == "--minimized");
+
     tauri::Builder::default()
-        .setup(|_app| {
+        .setup(move |app| {
             let state = server::AppState::new();
 
             // Start UDP Auto-discovery on Port 47800
@@ -24,6 +30,12 @@ fn main() {
 
             // Start Axum HTTP & WebSocket Server on Port 8085
             server::start_server(state, 8085);
+
+            if start_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
 
             Ok(())
         })

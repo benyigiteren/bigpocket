@@ -8,7 +8,7 @@
     <link rel="icon" type="image/svg+xml" href="logo.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -71,9 +71,11 @@
                     <h1 id="tab-title">Gösterge Paneli</h1>
                     <p id="tab-subtitle" class="serif-subtitle">Bağlantı durumunu izleyin ve telefonunuzu eşleştirin.</p>
                 </div>
-                <div class="status-indicator" data-tooltip="PC ↔ Telefon bağlantı durumu">
-                    <div class="status-dot" id="status-pulse"></div>
-                    <span id="status-text" class="mono-text">BAĞLANTI BEKLENİYOR</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div class="status-indicator" data-tooltip="PC ↔ Telefon bağlantı durumu">
+                        <div class="status-dot" id="status-pulse"></div>
+                        <span id="status-text" class="mono-text">BAĞLANTI BEKLENİYOR</span>
+                    </div>
                 </div>
             </header>
 
@@ -392,6 +394,46 @@
                                 </select>
                                 <div class="icon-picker-gallery" id="icon-picker-gallery"></div>
                             </div>
+
+                            <div class="form-group" id="clock-options-group" style="display: none;">
+                                <label for="edit-clock-style">Saat Stili</label>
+                                <select id="edit-clock-style">
+                                    <option value="apple_minimal">Apple Minimal — dev minimalist rakamlar</option>
+                                    <option value="flip_clock">Flip Clock — Fliqlo split-flap kart</option>
+                                    <option value="neon_cyberpunk">Neon Cyberpunk — cyan parıltılı dijital</option>
+                                    <option value="word_clock">Word Clock — Türkçe metin saati</option>
+                                    <option value="swiss_serif">Swiss Serif — Playfair/Bodoni tipografi</option>
+                                    <option value="retro_terminal">Retro Terminal — yeşil CRT fosfor</option>
+                                    <option value="apple_lockscreen">Apple Lockscreen — geniş saat</option>
+                                    <option value="apple_stacked">Apple Stacked — üst üste rakamlar</option>
+                                    <option value="digital_clean">Digital Clean — sade dijital</option>
+                                    <option value="digital_seconds">Digital Seconds — saniyeli</option>
+                                    <option value="analog">Analog — kadran</option>
+                                    <option value="world_clock">World Clock — İstanbul / New York</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="clock-font-group" style="display: none;">
+                                <label for="edit-font-family">Yazı Tipi</label>
+                                <select id="edit-font-family">
+                                    <option value="geist">Geist (Modern Sans)</option>
+                                    <option value="jetbrains">JetBrains Mono</option>
+                                    <option value="serif">Serif (Playfair / Georgia)</option>
+                                    <option value="lcd">LCD / Digital</option>
+                                    <option value="inter">Inter</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="clock-size-group" style="display: none;">
+                                <label for="edit-clock-size">Saat Boyutu</label>
+                                <select id="edit-clock-size">
+                                    <option value="auto">Otomatik</option>
+                                    <option value="compact">Kompakt</option>
+                                    <option value="regular">Normal</option>
+                                    <option value="large">Büyük</option>
+                                    <option value="huge">Dev</option>
+                                </select>
+                            </div>
                         </div>
 
                         <div class="modal-footer-sticky">
@@ -428,6 +470,66 @@
                             <div class="widget-picker-group" data-group="clock">
                                 <h3 class="widget-picker-group-title">Zaman & Odak</h3>
                                 <div class="widget-presets-grid">
+                                <div class="widget-preset-card" data-preset="clock_apple_minimal" data-cat="clock" data-search="apple minimal saat dev rakam minimal clock">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Apple Minimal</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>Dev minimalist rakamlı kilit ekranı saati</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="clock_neon_cyberpunk" data-cat="clock" data-search="neon cyberpunk saati cyan glow dijital saniye">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Neon Cyberpunk</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Cyan parıltılı monospace dijital saat + saniye</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="clock_word" data-cat="clock" data-search="word clock metin saati turkce yazi">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Word Clock</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Türkçe metin saati (ON BİRİ KIRK BEŞ GEÇİYOR)</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="clock_swiss_serif" data-cat="clock" data-search="swiss serif playfair bodoni tipografi saat">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Swiss Serif</h4>
+                                            <span class="widget-preset-badge">1×1</span>
+                                        </div>
+                                        <p>Playfair/Bodoni zarif serif tipografi</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="clock_retro_terminal" data-cat="clock" data-search="retro terminal crt fosfor yesil saat matrix">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Retro Terminal</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Yeşil CRT fosfor terminal saati [09:41:22]</p>
+                                    </div>
+                                </div>
+                                <div class="widget-preset-card" data-preset="flip_clock" data-cat="clock" data-search="flip clock fliqlo split flap kart saat standby">
+                                    <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+                                    <div class="widget-preset-info">
+                                        <div class="preset-title-row">
+                                            <h4>Flip Clock</h4>
+                                            <span class="widget-preset-badge">2×1</span>
+                                        </div>
+                                        <p>Fliqlo stili çift tonlu split-flap kart</p>
+                                    </div>
+                                </div>
                                 <div class="widget-preset-card" data-preset="clock" data-cat="clock" data-search="saat tarih takvim zaman clock">
                                     <div class="widget-preset-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
                                     <div class="widget-preset-info">
@@ -919,13 +1021,24 @@
                             </div>
                         </div>
 
-                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;">
                             <div>
                                 <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Beta Güncellemelerini Al</div>
-                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Önizleme ve test sürümlerini denetle (v1.4.2-beta vb.)</div>
+                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Önizleme ve test sürümlerini denetle (v1.5.0-beta vb.)</div>
                             </div>
                             <label class="switch">
                                 <input type="checkbox" id="settings-beta-channel-toggle">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;">
+                            <div>
+                                <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Windows ile Birlikte Başlat</div>
+                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Bilgisayarınız açıldığında BigPocket arka planda otomatik çalışır.</div>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="settings-autostart-toggle" aria-label="Windows ile otomatik başlat">
                                 <span class="slider round"></span>
                             </label>
                         </div>
@@ -1105,16 +1218,6 @@
                         <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 10px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
                                 <div>
-                                    <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">Windows ile Otomatik Başlat (Startup)</div>
-                                    <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Bilgisayar açıldığında BigPocket sessizce arka planda başlar.</div>
-                                </div>
-                                <label class="switch">
-                                    <input type="checkbox" id="chk-autostart" aria-label="Windows ile otomatik başlat">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px;">
-                                <div>
                                     <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">Pencere Kapatıldığında Sistem Tepsisine (Tray) Küçült</div>
                                     <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Uygulama tamamen kapanmaz; sunucu, kamera/ses akışı ve bildirimler tepsi simgesinden arka planda çalışmaya devam eder.</div>
                                 </div>
@@ -1133,6 +1236,36 @@
             </section>
 
         </main>
+    </div>
+
+    <!-- Autostart & Security Warning Modal -->
+    <div class="modal" id="autostart-security-modal">
+        <div class="modal-content card autostart-modal-card">
+            <div class="modal-header-sticky">
+                <div>
+                    <span class="meta-tag">GÜVENLİK &amp; BAŞLANGIÇ</span>
+                    <h2 class="edit-modal-title">🛡️ Otomatik Başlatma &amp; Güvenlik Uyarısı</h2>
+                </div>
+                <button type="button" class="btn-modal-close" id="btn-close-autostart-modal" data-tooltip="Kapat" aria-label="Kapat"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+
+            <div class="autostart-modal-body">
+                <p class="autostart-warning-text">
+                    BigPocket bilgisayarınız her açıldığında arka planda çalışacaktır. Aynı Wi-Fi ağındaki yetkisiz kişilerin bilgisayarınızı kontrol etmesini engellemek için bir bağlantı şifresi belirlemenizi şiddetle öneririz.
+                </p>
+
+                <div class="form-group">
+                    <label for="autostart-password-input">Yeni Güvenlik Şifresi</label>
+                    <input type="password" id="autostart-password-input" placeholder="En az 4 karakter" autocomplete="new-password">
+                    <p id="autostart-password-error" class="autostart-error" style="display: none;">Lütfen en az 4 karakterlik bir şifre girin.</p>
+                </div>
+
+                <div class="autostart-actions">
+                    <button type="button" class="btn btn-primary" id="btn-autostart-save-password">Şifreyi Kaydet ve Etkinleştir</button>
+                    <button type="button" class="btn btn-secondary" id="btn-autostart-skip">Şifresiz Devam Et (Atla)</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Password Prompt Modal (Unauthorized overlay) -->

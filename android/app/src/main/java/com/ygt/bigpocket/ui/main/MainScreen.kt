@@ -696,7 +696,6 @@ fun MainScreen(
     // Camera FPS & Quality preferences
     var cameraFps by rememberSaveable { mutableStateOf(prefs.getInt("camera_fps", 30)) }
     var cameraQuality by rememberSaveable { mutableStateOf(prefs.getString("camera_quality", "720p") ?: "720p") }
-    var isDeckFullscreen by rememberSaveable { mutableStateOf(prefs.getBoolean("deck_fullscreen", false)) }
     var isMonitorLandscape by rememberSaveable { mutableStateOf(prefs.getBoolean("monitor_landscape", false)) }
     var isMonitorFullscreen by rememberSaveable { mutableStateOf(prefs.getBoolean("monitor_fullscreen", false)) }
     var installedApps by remember { mutableStateOf<List<InstalledAppInfo>>(emptyList()) }
@@ -733,9 +732,10 @@ fun MainScreen(
 
     // Screen rotation and fullscreen controller based on tab selection. The Deck follows the
     // physical device orientation; only the second monitor can be forced to landscape.
-    LaunchedEffect(selectedTab, isMonitorLandscape, isDeckFullscreen, isMonitorFullscreen) {
+    LaunchedEffect(selectedTab, isMonitorLandscape, isMonitorFullscreen) {
         val activity = context as? Activity
-        val shouldBeFullscreen = (selectedTab == 1 && isDeckFullscreen) || (selectedTab == 3 && isMonitorFullscreen)
+        // The Stream Deck is always edge-to-edge full screen; only the second monitor is toggled.
+        val shouldBeFullscreen = selectedTab == 1 || (selectedTab == 3 && isMonitorFullscreen)
 
         activity?.requestedOrientation = when (selectedTab) {
             1 -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -1193,7 +1193,8 @@ fun MainScreen(
             var editIcon by remember(currentBtn) { mutableStateOf(currentBtn.icon) }
             var editColSpan by remember(currentBtn) { mutableIntStateOf(currentBtn.colSpan) }
             var editRowSpan by remember(currentBtn) { mutableIntStateOf(currentBtn.rowSpan) }
-            var editClockStyle by remember(currentBtn) { mutableStateOf(currentBtn.clockStyle) }
+            var editClockStyle by remember(currentBtn) { mutableStateOf(normalizeClockStyle(currentBtn.clockStyle)) }
+            var editFontFamily by remember(currentBtn) { mutableStateOf(currentBtn.fontFamily) }
             var appSearchQuery by remember(currentBtn) { mutableStateOf("") }
 
             LaunchedEffect(streamDeckButtons) {
@@ -1381,6 +1382,31 @@ fun MainScreen(
                                 selected = editValue,
                                 onSelect = { editValue = it }
                             )
+                            "clock_widget" -> {
+                                EditorChoiceRow(
+                                    title = "Saat Stili",
+                                    options = listOf(
+                                        "apple_minimal" to "Apple Minimal",
+                                        "flip_clock" to "Flip",
+                                        "neon_cyberpunk" to "Neon",
+                                        "word_clock" to "Kelime",
+                                        "swiss_serif" to "İsviçre",
+                                        "retro_terminal" to "Terminal"
+                                    ),
+                                    selected = editClockStyle,
+                                    onSelect = { editClockStyle = it }
+                                )
+                                EditorChoiceRow(
+                                    title = "Yazı Tipi",
+                                    options = listOf(
+                                        "mono" to "Mono",
+                                        "serif" to "Serif",
+                                        "sans" to "Sans"
+                                    ),
+                                    selected = editFontFamily,
+                                    onSelect = { editFontFamily = it }
+                                )
+                            }
                         }
 
                         if (editType == "command") {
@@ -1619,7 +1645,8 @@ fun MainScreen(
                                         icon = editIcon,
                                         colSpan = editColSpan,
                                         rowSpan = editRowSpan,
-                                        clockStyle = if (editType == "clock_widget") editClockStyle else currentBtn.clockStyle
+                                        clockStyle = if (editType == "clock_widget") editClockStyle else currentBtn.clockStyle,
+                                        fontFamily = if (editType == "clock_widget") editFontFamily else currentBtn.fontFamily
                                     )
                                 } else {
                                     it
@@ -1737,9 +1764,9 @@ fun MainScreen(
                 }
             )
         }
-        // The navigation bar stays put on all six tabs; only an explicit fullscreen toggle
-        // (Deck or second monitor) is allowed to hide it.
-        val hideBars = (selectedTab == 1 && isDeckFullscreen) || (selectedTab == 3 && isMonitorFullscreen)
+        // The Stream Deck owns the full screen, so its tab always hides the navigation bar; the
+        // second monitor keeps its explicit fullscreen toggle.
+        val hideBars = selectedTab == 1 || (selectedTab == 3 && isMonitorFullscreen)
 
         Scaffold(
             bottomBar = {
@@ -1892,7 +1919,6 @@ fun MainScreen(
                     )
                     1 -> StreamDeckTab(
                         isConnected = isConnected,
-                        isDeckFullscreen = isDeckFullscreen,
                         buttons = streamDeckButtons,
                         rows = streamDeckRows,
                         cols = streamDeckCols,
@@ -1929,10 +1955,23 @@ fun MainScreen(
                             editingButton = btn
                             showEditDialog = true
                         },
-                        onToggleFullscreen = {
-                            val newVal = !isDeckFullscreen
-                            isDeckFullscreen = newVal
-                            prefs.edit().putBoolean("deck_fullscreen", newVal).apply()
+                        onApplyGridLayout = { newRows, newCols ->
+                            streamDeckRows = newRows
+                            streamDeckCols = newCols
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "set_grid_layout")
+                                put("rows", newRows)
+                                put("cols", newCols)
+                            })
+                            saveStreamDeckConfig(
+                                ipAddress,
+                                password,
+                                streamDeckButtons,
+                                newRows,
+                                newCols,
+                                activeDeckPage,
+                                streamDeckPages
+                            ) {}
                         },
                         onOpenGridSettings = { showGridSettingsDialog = true },
                         onAddWidgetClick = { slotIndex ->
@@ -2131,49 +2170,6 @@ private fun ConnectionBadge(isConnected: Boolean) {
             fontWeight = FontWeight.Bold,
             color = tint
         )
-    }
-}
-
-/** Thin edit-mode info strip: what each card control does, plus a plain `Bitti` exit. */
-@Composable
-private fun DeckEditHintBar(onDone: () -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(DeckCorner))
-            .background(MinimalistSurfaceElevated)
-            .border(1.dp, MinimalistBorder, RoundedCornerShape(DeckCorner))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = "Yer değiştirmek için iki karta dokunun · Boyut için 1×1'e dokunun",
-            fontSize = 11.sp,
-            color = MinimalistSecondary,
-            maxLines = 2,
-            modifier = Modifier.weight(1f)
-        )
-        Spacer(modifier = Modifier.width(10.dp))
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(MinimalistPrimary)
-                .clickable {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onDone()
-                }
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Bitti",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = MinimalistBackground
-            )
-        }
     }
 }
 
@@ -2697,8 +2693,36 @@ fun AppleCapsuleSlider(
 }
 
 /**
- * Template 2 — Pixel Hub clock card: accent date on top, thin huge tabular digits in the middle
- * and the secondary locality / time zone line underneath.
+ * Canonicalises a stored `clock_style` to one of the six known faces; legacy values such as
+ * `digital`, `digital_clean` or `apple_lockscreen` fall back to the Apple minimal face.
+ */
+private fun normalizeClockStyle(style: String): String = when (style) {
+    "flip_clock", "neon_cyberpunk", "word_clock", "swiss_serif", "retro_terminal", "apple_minimal" -> style
+    else -> "apple_minimal"
+}
+
+/**
+ * Everything a clock face renderer needs, threaded as one record so each `clock_style` face is a
+ * pure, previewable composable that never re-reads the wall clock or the palette itself.
+ */
+private data class ClockFaceSpec(
+    val timeText: String,
+    val dateText: String,
+    val wordText: String,
+    val secondary: String,
+    val accent: Color,
+    val compact: Boolean,
+    val digitSize: TextUnit,
+    val digitsFont: FontFamily,
+    val maxWidth: Dp,
+    val maxHeight: Dp,
+    val seconds: Int
+)
+
+/**
+ * Clock card with six pickable faces: the Pixel Hub / Apple minimal default plus the flip, neon
+ * cyberpunk, Turkish word clock, Swiss serif and retro CRT terminal styles selected by
+ * `clock_style`. Every face fits the card bounds and is redrawn once a second.
  */
 @Composable
 fun StreamDeckClockTile(
@@ -2722,8 +2746,11 @@ fun StreamDeckClockTile(
             now = java.util.Date()
         }
     }
+    val calendar = remember(now) { Calendar.getInstance().apply { time = now } }
+    val seconds = calendar.get(Calendar.SECOND)
     val dateText = dateFormat.format(now).replaceFirstChar { it.uppercase() }
     val timeText = timeFormat.format(now)
+    val wordText = turkishClockWords(calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE))
     val secondary = if (label.isNotBlank()) label else "İstanbul · yerel saat"
     val digitsFont = when (fontFamilyStr) {
         "serif" -> FontFamily.Serif
@@ -2734,42 +2761,340 @@ fun StreamDeckClockTile(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val compact = maxHeight < 92.dp
         val digitSize = if (clockFontSize > 0) clockFontSize.sp else (maxHeight.value * 0.38f).coerceIn(20f, 54f).sp
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
+        val spec = ClockFaceSpec(
+            timeText = timeText,
+            dateText = dateText,
+            wordText = wordText,
+            secondary = secondary,
+            accent = accent,
+            compact = compact,
+            digitSize = digitSize,
+            digitsFont = digitsFont,
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+            seconds = seconds
+        )
+        when (clockStyle) {
+            "flip_clock" -> ClockFaceFlip(spec)
+            "neon_cyberpunk" -> ClockFaceNeon(spec)
+            "word_clock" -> ClockFaceWord(spec)
+            "swiss_serif" -> ClockFaceSwissSerif(spec)
+            "retro_terminal" -> ClockFaceRetro(spec)
+            else -> ClockFaceAppleMinimal(spec)
+        }
+    }
+}
+
+/** `apple_minimal` (and every unknown style): accent date, thin tabular digits, locality line. */
+@Composable
+private fun ClockFaceAppleMinimal(spec: ClockFaceSpec) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = spec.dateText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = spec.accent,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = spec.timeText,
+            fontSize = spec.digitSize,
+            fontWeight = FontWeight.Light,
+            color = MinimalistPrimary,
+            fontFamily = spec.digitsFont,
+            letterSpacing = (-0.5).sp,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+            maxLines = 1
+        )
+        if (!spec.compact) {
             Text(
-                text = dateText,
-                fontSize = 12.sp,
+                text = spec.secondary,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
-                color = accent,
+                color = MinimalistSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = timeText,
-                fontSize = digitSize,
-                fontWeight = FontWeight.Light,
-                color = MinimalistPrimary,
-                fontFamily = digitsFont,
-                letterSpacing = (-0.5).sp,
-                style = TextStyle(fontFeatureSettings = "tnum"),
-                maxLines = 1
-            )
-            if (!compact) {
-                Text(
-                    text = secondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MinimalistSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
         }
     }
+}
+
+/** `flip_clock`: two split-flap cards with a hinge seam, plus the date line underneath. */
+@Composable
+private fun ClockFaceFlip(spec: ClockFaceSpec) {
+    val parts = spec.timeText.split(":")
+    val hours = parts.getOrElse(0) { "--" }
+    val minutes = parts.getOrElse(1) { "--" }
+    val cardFont = (spec.maxHeight.value * 0.30f).coerceIn(18f, 46f).sp
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            FlipClockCard(digits = hours, fontSize = cardFont)
+            Text(
+                text = ":",
+                fontSize = cardFont,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = spec.accent
+            )
+            FlipClockCard(digits = minutes, fontSize = cardFont)
+        }
+        if (!spec.compact) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = spec.dateText,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = MinimalistSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/** One flap: matte dark plate with a hairline hinge and a soft top-lit gradient. */
+@Composable
+private fun FlipClockCard(digits: String, fontSize: TextUnit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF17171B), Color(0xFF0A0A0C))))
+            .border(1.dp, MinimalistBorder, RoundedCornerShape(7.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = digits,
+            fontSize = fontSize,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = MinimalistPrimary,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+        // Split-flap hinge: a dark seam with a hairline highlight just under it.
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val hingeY = size.height / 2f
+            val hairline = 1.dp.toPx()
+            drawLine(
+                color = Color.Black.copy(alpha = 0.70f),
+                start = Offset(0f, hingeY),
+                end = Offset(size.width, hingeY),
+                strokeWidth = hairline
+            )
+            drawLine(
+                color = Color.White.copy(alpha = 0.06f),
+                start = Offset(0f, hingeY + hairline),
+                end = Offset(size.width, hingeY + hairline),
+                strokeWidth = hairline
+            )
+        }
+    }
+}
+
+/** `neon_cyberpunk`: cyan glowing monospace digits with an amber seconds / date readout. */
+@Composable
+private fun ClockFaceNeon(spec: ClockFaceSpec) {
+    val cyan = Color(0xFF22E1FF)
+    val amber = Color(0xFFFFB020)
+    val neonSize = (spec.maxHeight.value * 0.40f).coerceIn(22f, 56f).sp
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.Start
+    ) {
+        Text(
+            text = spec.timeText,
+            fontSize = neonSize,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = cyan,
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            style = TextStyle(shadow = Shadow(color = cyan.copy(alpha = 0.9f), blurRadius = 22f))
+        )
+        if (!spec.compact) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "%02d".format(spec.seconds) + "  " + spec.dateText.uppercase(),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = amber,
+                letterSpacing = 2.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(shadow = Shadow(color = amber.copy(alpha = 0.7f), blurRadius = 12f))
+            )
+        }
+    }
+}
+
+/** `word_clock`: the time spelled out in Turkish, rounded to the nearest five minutes. */
+@Composable
+private fun ClockFaceWord(spec: ClockFaceSpec) {
+    val wordSize = (spec.maxWidth.value / 10f).coerceIn(13f, 30f).sp
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = spec.wordText,
+            fontSize = wordSize,
+            fontWeight = FontWeight.SemiBold,
+            color = MinimalistPrimary,
+            fontFamily = FontFamily.SansSerif,
+            letterSpacing = 1.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 3,
+            overflow = TextOverflow.Clip
+        )
+        if (!spec.compact) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "· " + spec.dateText + " ·",
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = spec.accent,
+                letterSpacing = 2.sp,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** `swiss_serif`: light serif numerals inside a thin seconds ring. */
+@Composable
+private fun ClockFaceSwissSerif(spec: ClockFaceSpec) {
+    val ringSize = (minOf(spec.maxWidth.value, spec.maxHeight.value) * 0.66f).coerceIn(56f, 150f).dp
+    val serifSize = (spec.maxHeight.value * 0.30f).coerceIn(20f, 44f).sp
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(modifier = Modifier.size(ringSize), contentAlignment = Alignment.Center) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 1.5.dp.toPx()
+                drawArc(
+                    color = MinimalistBorder,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth)
+                )
+                drawArc(
+                    color = spec.accent,
+                    startAngle = -90f,
+                    sweepAngle = (spec.seconds / 60f) * 360f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                )
+            }
+            Text(
+                text = spec.timeText,
+                fontSize = serifSize,
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Light,
+                color = MinimalistPrimary,
+                letterSpacing = 0.5.sp,
+                maxLines = 1
+            )
+        }
+        if (!spec.compact) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = spec.dateText,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Serif,
+                color = MinimalistSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/** `retro_terminal`: green CRT monochrome `[HH:MM:SS]` readout with a console prompt line. */
+@Composable
+private fun ClockFaceRetro(spec: ClockFaceSpec) {
+    val green = Color(0xFF33FF66)
+    val termSize = (spec.maxHeight.value * 0.30f).coerceIn(18f, 46f).sp
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.Start
+    ) {
+        Text(
+            text = "[" + spec.timeText + ":" + "%02d".format(spec.seconds) + "]",
+            fontSize = termSize,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = green,
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            style = TextStyle(shadow = Shadow(color = green.copy(alpha = 0.8f), blurRadius = 14f))
+        )
+        if (!spec.compact) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "> " + spec.dateText.lowercase(),
+                fontSize = 9.5.sp,
+                fontFamily = FontFamily.Monospace,
+                color = green.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/** Turkish hour names indexed by the 12-hour clock (`0` and `12` both read `ON İKİ`). */
+private val TurkishHourWords = arrayOf(
+    "ON İKİ", "BİR", "İKİ", "ÜÇ", "DÖRT", "BEŞ",
+    "ALTI", "YEDİ", "SEKİZ", "DOKUZ", "ON", "ON BİR"
+)
+
+/** Rounds to the nearest five minutes and spells the time out, e.g. `11:45` → `ON BİR KIRK BEŞ`. */
+private fun turkishClockWords(hour24: Int, minute: Int): String {
+    val hourWord = TurkishHourWords[((hour24 % 12) + 12) % 12]
+    val minuteWord = when ((minute / 5) * 5) {
+        0 -> "TAM"
+        5 -> "BEŞ"
+        10 -> "ON"
+        15 -> "ON BEŞ"
+        20 -> "YİRMİ"
+        25 -> "YİRMİ BEŞ"
+        30 -> "OTUZ"
+        35 -> "OTUZ BEŞ"
+        40 -> "KIRK"
+        45 -> "KIRK BEŞ"
+        50 -> "ELLİ"
+        else -> "ELLİ BEŞ"
+    }
+    return "$hourWord $minuteWord"
 }
 
 /**
@@ -3620,153 +3945,6 @@ fun StreamDeckPomodoroTile(
     }
 }
 
-/**
- * Stream Deck control bar — deliberately minimal: page pills on the left, and on the right only
- * a plain-language `Düzenle` action, the current matrix size and the fullscreen toggle.
- * In fullscreen it collapses to a single translucent pill and expands on tap.
- */
-@Composable
-fun StreamDeckConsoleBar(
-    pages: List<StreamDeckPageInfo>,
-    activePage: Int,
-    onPageChange: (Int) -> Unit,
-    onAddPage: () -> Unit,
-    isDeckFullscreen: Boolean,
-    onToggleFullscreen: () -> Unit,
-    rows: Int,
-    cols: Int,
-    isEditMode: Boolean,
-    onToggleEditMode: () -> Unit,
-    onOpenGridSettings: () -> Unit = {},
-    modifier: Modifier = Modifier
-) {
-    val haptic = LocalHapticFeedback.current
-    var consoleExpanded by remember { mutableStateOf(false) }
-    val collapsed = isDeckFullscreen && !consoleExpanded
-
-    if (collapsed) {
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .height(40.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(DeckCorner))
-                    .background(MinimalistSurfaceElevated.copy(alpha = 0.92f))
-                    .border(1.dp, MinimalistBorder, RoundedCornerShape(DeckCorner))
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        consoleExpanded = true
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = "Konsolu Aç",
-                    tint = MinimalistPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-        return
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .clip(RoundedCornerShape(DeckCorner))
-            .background(MinimalistSurface)
-            .border(1.dp, MinimalistBorder, RoundedCornerShape(DeckCorner))
-            .padding(horizontal = 6.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                pages.forEach { page ->
-                    DeckPagePill(
-                        title = page.title.ifEmpty { "Sayfa " + (page.id + 1) },
-                        selected = page.id == activePage,
-                        onClick = { onPageChange(page.id) }
-                    )
-                }
-                DeckBarIcon(
-                    icon = Icons.Default.Add,
-                    contentDescription = "Sayfa Ekle",
-                    tint = MinimalistSecondary,
-                    onClick = onAddPage
-                )
-            }
-
-            if (isDeckFullscreen) {
-                DeckBarIcon(
-                    icon = Icons.Default.KeyboardArrowUp,
-                    contentDescription = "Konsolu Gizle",
-                    tint = MinimalistSecondary,
-                    onClick = { consoleExpanded = false }
-                )
-            }
-
-            DeckEditToggle(isEditMode = isEditMode, onClick = onToggleEditMode)
-            DeckGridPill(cols = cols, rows = rows, onClick = onOpenGridSettings)
-            DeckBarIcon(
-                icon = if (isDeckFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                contentDescription = "Tam Ekran",
-                tint = MinimalistSecondary,
-                onClick = onToggleFullscreen
-            )
-        }
-    }
-}
-
-/** Plain-language edit affordance: pencil glyph + `Düzenle`, highlighted while the mode is on. */
-@Composable
-private fun DeckEditToggle(
-    isEditMode: Boolean,
-    onClick: () -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isEditMode) MinimalistPrimary else MinimalistSurfaceElevated)
-            .border(1.dp, if (isEditMode) MinimalistPrimary else MinimalistBorder, RoundedCornerShape(12.dp))
-            .clickable(onClickLabel = "Düzenle") {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
-    ) {
-        Icon(
-            imageVector = Icons.Default.Edit,
-            contentDescription = null,
-            tint = if (isEditMode) MinimalistBackground else MinimalistPrimary,
-            modifier = Modifier.size(14.dp)
-        )
-        Text(
-            text = "Düzenle",
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (isEditMode) MinimalistBackground else MinimalistPrimary,
-            maxLines = 1
-        )
-    }
-}
-
 /** Flat 28.dp console action with a vector icon. */
 @Composable
 private fun DeckBarIcon(
@@ -3795,7 +3973,7 @@ private fun DeckBarIcon(
     }
 }
 
-/** Page pill used by the console bar: active page inverts to the primary chip, others stay muted. */
+/** Page pill used by the edit-mode floating bar: the active page inverts, the others stay muted. */
 @Composable
 private fun DeckPagePill(
     title: String,
@@ -3820,36 +3998,6 @@ private fun DeckPagePill(
             fontSize = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             color = if (selected) MinimalistBackground else MinimalistSecondary,
-            maxLines = 1
-        )
-    }
-}
-
-/** Grid size readout ("4×2"); tapping it opens the matrix settings dialog. */
-@Composable
-private fun DeckGridPill(
-    cols: Int,
-    rows: Int,
-    onClick: () -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MinimalistSurfaceElevated)
-            .border(1.dp, MinimalistBorder, RoundedCornerShape(12.dp))
-            .clickable(onClickLabel = "Izgara Boyutu") {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            }
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = cols.toString() + "×" + rows.toString(),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MinimalistPrimary,
             maxLines = 1
         )
     }
@@ -4293,6 +4441,7 @@ fun BentoDeckGrid(
     onPress: (StreamDeckButtonInfo) -> Unit,
     onLongPress: (StreamDeckButtonInfo) -> Unit,
     onEmptySlotClick: (Int) -> Unit,
+    onEmptySlotLongPress: () -> Unit = {},
     isEditMode: Boolean = false,
     selectedForSwapId: Int? = null,
     onSelectForSwap: (StreamDeckButtonInfo) -> Unit = {},
@@ -4331,6 +4480,7 @@ fun BentoDeckGrid(
                             onEmptySlotClick(placements.size + index)
                         }
                     },
+                    onLongPress = onEmptySlotLongPress,
                     modifier = Modifier
                         .offset(x = (cellWidth + gap) * c, y = (cellHeight + gap) * r)
                         .size(cellWidth, cellHeight)
@@ -4468,9 +4618,12 @@ fun EmptySlotTile(
     modifier: Modifier = Modifier,
     isEditMode: Boolean = false,
     isDropTarget: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPress: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(DeckCorner))
@@ -4480,9 +4633,14 @@ fun EmptySlotTile(
                 color = if (isDropTarget) MinimalistPrimary else MinimalistBorder,
                 shape = RoundedCornerShape(DeckCorner)
             )
-            .clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        currentOnClick()
+                    },
+                    onLongPress = { currentOnLongPress() }
+                )
             },
         contentAlignment = Alignment.Center
     ) {
@@ -4849,7 +5007,7 @@ private data class PresetItem(
     val rowSpan: Int,
     val color: String,
     val desc: String,
-    val clockStyle: String = "digital_clean"
+    val clockStyle: String = "apple_minimal"
 )
 
 /**
@@ -4870,8 +5028,13 @@ fun AddWidgetDialog(
         PresetItem("Disk Doluluk", "live_info", "disk", "disk", 1, 1, "#F4F4F5", "C: doluluk yüzdesi ve boş alan"),
         PresetItem("Ekran Kartı", "live_info", "gpu", "gpu", 1, 1, "#F4F4F5", "GPU yükü ve sıcaklık"),
         PresetItem("Şimdi Çalıyor", "now_playing", "media_session", "now_playing", 2, 1, "#F4F4F5", "Çalan şarkı, sanatçı ve medya kontrolleri"),
-        PresetItem("Pixel Saat", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Tarih, ince dev saat ve saat dilimi", clockStyle = "digital"),
-        PresetItem("Saat & Takvim", "clock_widget", "", "clock", 1, 1, "#F4F4F5", "Tarih ve ince dev saat"),
+        PresetItem("Pixel Saat", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Tarih, ince dev saat ve saat dilimi", clockStyle = "apple_minimal"),
+        PresetItem("Saat & Takvim", "clock_widget", "", "clock", 1, 1, "#F4F4F5", "Tarih ve ince dev saat", clockStyle = "apple_minimal"),
+        PresetItem("Flip Saat", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Split-flap koyu kartlı saat", clockStyle = "flip_clock"),
+        PresetItem("Neon Saat", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Cyan neon monospace dijital saat", clockStyle = "neon_cyberpunk"),
+        PresetItem("Kelime Saati", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Türkçe metin saati (ON BİR KIRK BEŞ)", clockStyle = "word_clock"),
+        PresetItem("İsviçre Serif", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Serif tipografi ve ince saniye dairesi", clockStyle = "swiss_serif"),
+        PresetItem("Terminal Saat", "clock_widget", "", "clock", 2, 1, "#F4F4F5", "Yeşil CRT [HH:MM:SS] terminal saati", clockStyle = "retro_terminal"),
         PresetItem("Ana Ses Barı", "volume_slider", "master_volume", "volume", 2, 1, "#F4F4F5", "Dokunmatik ses seviyesi"),
         PresetItem("Donanım Telemetrisi", "live_info", "combo", "cpu", 2, 1, "#F4F4F5", "İşlemci, bellek ve sıcaklık halkaları"),
         PresetItem("Medya Masası", "media_widget", "playpause", "play", 2, 1, "#F4F4F5", "Oynat/Durdur ve parça geçişi"),
@@ -5073,15 +5236,15 @@ fun AddWidgetDialog(
 }
 
 /**
- * StreamDeckTab — Bento console: shared page header, a minimal control bar (page pills on the
- * left; `Düzenle`, matrix size and fullscreen on the right) and a zero-scroll 2D Bento grid.
- * In edit mode two taps swap two cards; the `1×1` chip cycles the size, `✎` opens the card
- * editor, `×` deletes it and every free cell offers `Bileşen Ekle`.
+ * StreamDeckTab — pure edge-to-edge Bento canvas. There is no header and no console bar: the
+ * zero-scroll 2D matrix owns every pixel. Long-pressing a card or any free cell opens edit mode,
+ * which floats a translucent pill (page selectors, `4×2` / `2×4` layout presets and a `✓ Bitti`
+ * exit) on top of the deck; the cards then grow `1×1` (size), `✎` (edit) and `×` (delete)
+ * controls. In normal mode a horizontal swipe switches page.
  */
 @Composable
 fun StreamDeckTab(
     isConnected: Boolean,
-    isDeckFullscreen: Boolean,
     buttons: List<StreamDeckButtonInfo>,
     rows: Int,
     cols: Int,
@@ -5096,7 +5259,7 @@ fun StreamDeckTab(
     ipAddress: String,
     password: String,
     onButtonLongClick: (StreamDeckButtonInfo) -> Unit,
-    onToggleFullscreen: () -> Unit,
+    onApplyGridLayout: (rows: Int, cols: Int) -> Unit = { _, _ -> },
     onOpenGridSettings: () -> Unit = {},
     onAddWidgetClick: (slotIndex: Int) -> Unit = {},
     onAddPage: () -> Unit = {},
@@ -5112,6 +5275,20 @@ fun StreamDeckTab(
     val colCount = cols.coerceAtLeast(1)
     val rowCount = rows.coerceAtLeast(1)
     val pageButtons = buttons.filter { it.page == activePage }
+
+    // Long press anywhere on a card or a free cell flips the deck into edit mode.
+    val enterEditMode: () -> Unit = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        isEditMode = true
+        selectedForSwapId = null
+    }
+    val exitEditMode: () -> Unit = {
+        isEditMode = false
+        selectedForSwapId = null
+    }
+
+    // Hardware/system back leaves edit mode first, and only then leaves the tab.
+    BackHandler(enabled = isEditMode) { exitEditMode() }
 
     // Tap-to-move / swap: the first tap arms a card, the second swaps it or drops it on a cell.
     val handleCardTap: (StreamDeckButtonInfo) -> Unit = { btn ->
@@ -5143,15 +5320,9 @@ fun StreamDeckTab(
         }
     }
 
-    val handleCardLongPress: (StreamDeckButtonInfo) -> Unit = { btn ->
-        if (isEditMode) {
-            onButtonLongClick(btn)
-        } else {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            isEditMode = true
-            selectedForSwapId = null
-        }
-    }
+    // A long press on a card never opens a dialog silently — it reveals edit mode, where the
+    // `✎` chip is the only path into the card editor.
+    val handleCardLongPress: (StreamDeckButtonInfo) -> Unit = { enterEditMode() }
 
     val handleMoveToCell: (Int, Int) -> Unit = { r, c ->
         val armed = selectedForSwapId
@@ -5208,100 +5379,203 @@ fun StreamDeckTab(
                 )
             }
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (isEditMode) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    DeckEditHintBar(
-                        onDone = {
-                            isEditMode = false
-                            selectedForSwapId = null
-                        }
-                    )
-                }
-            } else if (!isDeckFullscreen) {
-                TopHeader(
-                    title = "Stream Deck",
-                    subtitle = "Bileşenleri düzenleyin, PC'nizi tek dokunuşla yönetin",
-                    isConnected = isConnected
-                )
-            }
-
-            Column(
+        if (!isConnected) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
             ) {
-                StreamDeckConsoleBar(
-                    pages = pages,
-                    activePage = activePage,
-                    onPageChange = onPageChange,
-                    onAddPage = onAddPage,
-                    isDeckFullscreen = isDeckFullscreen,
-                    onToggleFullscreen = onToggleFullscreen,
-                    rows = rowCount,
-                    cols = colCount,
-                    isEditMode = isEditMode,
-                    onToggleEditMode = {
-                        isEditMode = !isEditMode
-                        if (!isEditMode) selectedForSwapId = null
-                    },
-                    onOpenGridSettings = onOpenGridSettings
+                Text(
+                    text = "Stream Deck kontrollerini kullanmak için PC bağlantısını kurun.",
+                    color = MinimalistSecondary,
+                    textAlign = TextAlign.Center
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                if (!isConnected) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Stream Deck kontrollerini kullanmak için PC bağlantısını kurun.",
-                            color = MinimalistSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                } else {
-                    // Zero-scroll real 2D bento grid: every remaining pixel goes to the matrix.
-                    BentoDeckGrid(
-                        buttons = pageButtons,
-                        rows = rowCount,
-                        cols = colCount,
-                        gap = if (effectiveLandscape) 6.dp else 8.dp,
-                        live = live,
-                        masterVolume = masterVolume,
-                        onVolumeChange = onVolumeChange,
-                        brightness = brightness,
-                        onBrightnessChange = onBrightnessChange,
-                        ipAddress = ipAddress,
-                        password = password,
-                        onPress = { btn ->
-                            SocketManager.sendControl(JSONObject().apply {
-                                put("type", "stream_deck_press")
-                                put("button_id", btn.id)
-                            })
-                        },
-                        onLongPress = { btn -> handleCardLongPress(btn) },
-                        onEmptySlotClick = { onAddWidgetClick(it) },
-                        isEditMode = isEditMode,
-                        selectedForSwapId = selectedForSwapId,
-                        onSelectForSwap = { btn -> handleCardTap(btn) },
-                        onResizeButton = { btn -> handleResize(btn) },
-                        onDeleteButton = { btn -> handleDelete(btn) },
-                        onCustomizeButton = { btn -> onButtonLongClick(btn) },
-                        onMoveToCell = { r, c -> handleMoveToCell(r, c) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                    )
-                }
             }
+        } else {
+            // Zero-scroll real 2D bento grid: the matrix owns every pixel, edge to edge.
+            BentoDeckGrid(
+                buttons = pageButtons,
+                rows = rowCount,
+                cols = colCount,
+                gap = if (effectiveLandscape) 6.dp else 8.dp,
+                live = live,
+                masterVolume = masterVolume,
+                onVolumeChange = onVolumeChange,
+                brightness = brightness,
+                onBrightnessChange = onBrightnessChange,
+                ipAddress = ipAddress,
+                password = password,
+                onPress = { btn ->
+                    SocketManager.sendControl(JSONObject().apply {
+                        put("type", "stream_deck_press")
+                        put("button_id", btn.id)
+                    })
+                },
+                onLongPress = { btn -> handleCardLongPress(btn) },
+                onEmptySlotClick = { onAddWidgetClick(it) },
+                onEmptySlotLongPress = { if (!isEditMode) enterEditMode() },
+                isEditMode = isEditMode,
+                selectedForSwapId = selectedForSwapId,
+                onSelectForSwap = { btn -> handleCardTap(btn) },
+                onResizeButton = { btn -> handleResize(btn) },
+                onDeleteButton = { btn -> handleDelete(btn) },
+                onCustomizeButton = { btn -> onButtonLongClick(btn) },
+                onMoveToCell = { r, c -> handleMoveToCell(r, c) },
+                modifier = Modifier.fillMaxSize()
+            )
         }
+
+        // Edit mode is a transient overlay: the deck stays visible and scroll-free underneath.
+        if (isEditMode) {
+            DeckEditFloatingBar(
+                pages = pages,
+                activePage = activePage,
+                onPageChange = onPageChange,
+                onAddPage = onAddPage,
+                rows = rowCount,
+                cols = colCount,
+                onApplyGridLayout = onApplyGridLayout,
+                onOpenGridSettings = onOpenGridSettings,
+                onDone = exitEditMode,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Translucent pill shown only while editing: page selectors (`Ana Sayfa`, `Medya & Ses`, `+`),
+ * the two matrix presets (`4×2` / `2×4`), the full matrix dialog and a prominent `✓ Bitti` exit.
+ */
+@Composable
+private fun DeckEditFloatingBar(
+    pages: List<StreamDeckPageInfo>,
+    activePage: Int,
+    onPageChange: (Int) -> Unit,
+    onAddPage: () -> Unit,
+    rows: Int,
+    cols: Int,
+    onApplyGridLayout: (Int, Int) -> Unit,
+    onOpenGridSettings: () -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(DeckCorner)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MinimalistSurfaceElevated.copy(alpha = 0.90f))
+            .border(1.dp, MinimalistBorder, shape)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            pages.forEachIndexed { index, page ->
+                DeckPagePill(
+                    title = page.title.ifBlank { if (index == 0) "Ana Sayfa" else "Sayfa " + (index + 1) },
+                    selected = page.id == activePage,
+                    onClick = { onPageChange(page.id) }
+                )
+            }
+            DeckBarIcon(
+                icon = Icons.Default.Add,
+                contentDescription = "Sayfa Ekle",
+                tint = MinimalistSecondary,
+                onClick = onAddPage
+            )
+        }
+
+        // `4×2` = 4 columns × 2 rows, `2×4` = 2 columns × 4 rows.
+        DeckLayoutChip(
+            label = "4×2",
+            selected = cols == 4 && rows == 2,
+            onClick = { onApplyGridLayout(2, 4) }
+        )
+        DeckLayoutChip(
+            label = "2×4",
+            selected = cols == 2 && rows == 4,
+            onClick = { onApplyGridLayout(4, 2) }
+        )
+        DeckBarIcon(
+            icon = Icons.Default.Tune,
+            contentDescription = "Matris Ayarları",
+            tint = MinimalistSecondary,
+            onClick = onOpenGridSettings
+        )
+        DeckDoneButton(onClick = onDone)
+    }
+}
+
+/** Monospace layout preset chip; inverts to the primary fill while it matches the live matrix. */
+@Composable
+private fun DeckLayoutChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MinimalistPrimary else MinimalistSurface)
+            .border(1.dp, if (selected) MinimalistPrimary else MinimalistBorder, RoundedCornerShape(12.dp))
+            .clickable(onClickLabel = label) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+            color = if (selected) MinimalistBackground else MinimalistPrimary,
+            maxLines = 1
+        )
+    }
+}
+
+/** Prominent `✓ Bitti` exit that closes edit mode and restores the clean full-screen deck. */
+@Composable
+private fun DeckDoneButton(onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MinimalistPrimary)
+            .clickable(onClickLabel = "Düzenlemeyi Bitir") {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Check,
+            contentDescription = null,
+            tint = MinimalistBackground,
+            modifier = Modifier.size(15.dp)
+        )
+        Text(
+            text = "Bitti",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = MinimalistBackground
+        )
     }
 }
 
