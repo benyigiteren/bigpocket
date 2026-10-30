@@ -1,4 +1,5 @@
-<img src="bigpocket.png" alt="Bigpocket" width="100%" />
+<img src="dashboard.png" alt="BigPocket Dashboard" width="100%" />
+
 # BigPocket 📱💻
 
 <div align="center">
@@ -7,17 +8,16 @@
 [![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri&logoColor=black)](https://tauri.app/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Android-4285F4?logo=android&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Cross-Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/benyigiteren/bigpocket)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android-blue)](https://github.com/benyigiteren/bigpocket)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
-
 **BigPocket**, bilgisayarınızı akıllı telefonunuz üzerinden sıfır gecikmeyle kontrol etmenizi, yönetmenizi ve telefonunuzu çok işlevli bir **Sanal 2. Monitör, Sanal Mikrofon, Stream Deck** veya **Webcam** aygıtına dönüştürmenizi sağlayan modern, yüksek performanslı ve açık kaynaklı bir uzaktan yönetim sistemidir.
 
-Rust (Tauri v2 + Tokio + Axum Masaüstü Sunucusu) ve Kotlin / Jetpack Compose (Android İstemcisi) mimarisi ile maksimum performansı, sıfır bellek sızıntısını ve minimum gecikmeyi hedefler.
----
+Rust (Tauri v2 + Tokio + Axum Masaüstü Sunucusu) ve Kotlin / Jetpack Compose (Android İstemcisi) mimarisi ile yüksek performansı ve düşük gecikmeyi hedefler.
 
+---
 ## 🚀 Temel Özellikler
 
 ### 1. Sanal İkinci Ekran (Virtual Second Screen) 🖥️
@@ -79,10 +79,9 @@ Gecikmesiz bir deneyim için kablolu bağlantı kullanılması tavsiye edilir:
 ## 📦 Kurulum ve Çalıştırma
 
 ### Windows Sunucusu (Bilgisayar)
-1.  Ana dizindeki **[Setup.exe](Setup.exe)** dosyasını çalıştırın.
-2.  Yönetici yetkisini onaylayın. Uygulama otomatik olarak `C:\Program Files\BigPocket` dizinine kurulacak, masaüstü kısayolu oluşturulacak ve **arka planda tamamen gizli/terminal penceresiz** olarak çalışmaya başlayacaktır.
-3.  *Kaldırmak için:* Windows Başlat menüsünden veya Denetim Masası "Program Ekle/Kaldır" arayüzünü kullanarak kolayca kaldırabilirsiniz.
-
+1.  Releases sayfasından **BigPocket-Setup.exe** dosyasını indirip çalıştırın.
+2.  Kurulum tamamlandığında masaüstü kısayolu oluşturulur ve uygulama sistem tepsisinde (tray) arka planda çalışmaya başlar.
+3.  *Kaldırmak için:* Ayarlar sekmesindeki "Uygulamayı Kaldır" butonundan veya Windows Denetim Masası üzerinden tek tıkla kaldırabilirsiniz.
 ### Android İstemcisi (Telefon)
 1.  Ana dizindeki **[BigPocket.apk](BigPocket.apk)** dosyasını telefonunuza yükleyin.
 2.  Kamera ve mikrofon izinlerini onaylayın.

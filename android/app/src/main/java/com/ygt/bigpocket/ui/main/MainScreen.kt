@@ -3375,28 +3375,16 @@ private fun DeckComboRings(
     val tempColor = MinimalistSecondary.copy(alpha = 0.65f)
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val ringSize = (minOf(maxWidth, maxHeight) * 0.62f).coerceIn(34.dp, 72.dp)
-        Box(modifier = Modifier.fillMaxSize()) {
-            // CPU/RAM history behind the rings, anchored to the card foot so the three readouts
-            // stay on top and perfectly legible.
-            DeckSparkline(
-                values = cpuHistory,
-                ghostValues = ramHistory,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.34f)
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                DeckMetricRing("İşlemci", "%" + cpu, (cpu / 100f).coerceIn(0f, 1f), cpuColor, ringSize)
-                DeckMetricRing("Bellek", "%" + ram, (ram / 100f).coerceIn(0f, 1f), ramColor, ringSize)
-                DeckMetricRing("Sıcaklık", cpuTemp.toString() + "°", (cpuTemp / 100f).coerceIn(0f, 1f), tempColor, ringSize)
-            }
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            DeckMetricRing("İşlemci", "%" + cpu, (cpu / 100f).coerceIn(0f, 1f), cpuColor, ringSize)
+            DeckMetricRing("Bellek", "%" + ram, (ram / 100f).coerceIn(0f, 1f), ramColor, ringSize)
+            DeckMetricRing("Sıcaklık", cpuTemp.toString() + "°", (cpuTemp / 100f).coerceIn(0f, 1f), tempColor, ringSize)
         }
     }
 }
@@ -5981,6 +5969,9 @@ fun MonitorTab(
             ScreenReceiver.start(ipAddress)
             onDispose {
                 ScreenReceiver.stop()
+                SocketManager.sendControl(JSONObject().apply {
+                    put("type", "virtual_monitor_disable")
+                })
             }
         }
 

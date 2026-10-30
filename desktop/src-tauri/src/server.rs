@@ -827,7 +827,10 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
     }
     drop(out_tx);
     let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
-    state.clients.fetch_sub(1, Ordering::Relaxed);
+    let prev = state.clients.fetch_sub(1, Ordering::Relaxed);
+    if prev <= 1 {
+        set_virtual_monitor(false);
+    }
 }
 
 /// Run a controller action against the lazily created [`InputController`].
@@ -876,6 +879,9 @@ async fn handle_control(
     payload: &Value,
 ) {
     match msg_type {
+        "virtual_monitor_disable" => {
+            set_virtual_monitor(false);
+        }
         "mouse_move" => {
             let dx = as_f64(payload, "dx").unwrap_or(0.0) as i32;
             let dy = as_f64(payload, "dy").unwrap_or(0.0) as i32;
@@ -2230,11 +2236,7 @@ fn is_admin() -> bool {
 }
 
 /// Toggle the virtual (usbmmidd) monitor, mirroring `setVirtualMonitor`.
-fn set_virtual_monitor(enable: bool) {
-    if !is_admin() {
-        tracing::warn!("virtual monitor requires administrator rights");
-        return;
-    }
+pub fn set_virtual_monitor(enable: bool) {
     let driver_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.join("usbmmidd")))
