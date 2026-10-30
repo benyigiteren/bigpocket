@@ -1128,7 +1128,7 @@ function syncMatrixControlsUI() {
 // The phone/deck frame is an exact box computed from the stage box: the cell
 // size is derived from whichever axis is limiting, so the frame can never be
 // clipped, never scroll and always sits centred — at 1100x750, 900x600 or 4K.
-const DECK_METRICS = { gap: 14, framePad: 18, cellMin: 70, cellMax: 260 };
+const DECK_METRICS = { gap: 14, framePad: 18, cellMin: 70, cellMax: 260, cell: 0 };
 
 function deckFrameSize(rows, cols, availW, availH) {
     const { gap, framePad, cellMin, cellMax } = DECK_METRICS;
@@ -1155,6 +1155,9 @@ function fitDeckFrame() {
     const availW = Math.max(160, Math.floor(stage.clientWidth) - 4);
     const availH = Math.max(160, Math.floor(mockup.clientHeight) - 4);
     const size = deckFrameSize(rows, cols, availW, availH);
+
+    // Record the live cell size so drag-resize can map pixels to grid steps.
+    DECK_METRICS.cell = size.cell;
 
     const key = `${rows}x${cols}@${size.cell}`;
     if (key === lastDeckFitKey) return;   // idempotent: no layout thrash; also apply it once more on tab entry
@@ -2902,6 +2905,8 @@ function setupEdgeResize(item, btn) {
             if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
                 hasMoved = true;
             }
+            // Tıklama (henüz eşiği aşmayan hareket) boyutu değiştirmemeli.
+            if (!hasMoved) return;
 
             const isEast = handle.classList.contains('deck-resize-e') || handle.classList.contains('deck-resize-se');
             const isSouth = handle.classList.contains('deck-resize-s') || handle.classList.contains('deck-resize-se');
@@ -2909,12 +2914,17 @@ function setupEdgeResize(item, btn) {
             let targetCol = startCol;
             let targetRow = startRow;
 
+            // Bir sütun/satır adımı canlı hücre boyutu + boşluk kadardır; hücre
+            // boyutu henüz ölçülmediyse eski sabit değerlere düşeriz.
+            const colPitch = DECK_METRICS.cell ? DECK_METRICS.cell + DECK_METRICS.gap : 110;
+            const rowPitch = DECK_METRICS.cell ? DECK_METRICS.cell + DECK_METRICS.gap : 80;
+
             if (isEast) {
-                const colDelta = Math.round(dx / 110);
+                const colDelta = Math.round(dx / colPitch);
                 targetCol = Math.min(6, Math.max(1, startCol + colDelta));
             }
             if (isSouth) {
-                const rowDelta = Math.round(dy / 80);
+                const rowDelta = Math.round(dy / rowPitch);
                 targetRow = Math.min(4, Math.max(1, startRow + rowDelta));
             }
 

@@ -85,6 +85,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import coil.compose.AsyncImage
 import com.ygt.bigpocket.media.ScreenReceiver
 import com.ygt.bigpocket.services.SocketManager
+import com.ygt.bigpocket.services.SystemExtraStats
 import com.ygt.bigpocket.theme.BigPocketTheme
 import com.ygt.bigpocket.ui.settings.SettingsDialog
 import com.ygt.bigpocket.update.UpdatePrompt
@@ -95,6 +96,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -231,7 +233,12 @@ data class InstalledAppInfo(
     val path: String
 )
 
-private fun fetchInstalledApps(ip: String, password: String, onSuccess: (List<InstalledAppInfo>) -> Unit) {
+private fun fetchInstalledApps(
+    ip: String,
+    password: String,
+    onSuccess: (List<InstalledAppInfo>) -> Unit,
+    onError: (String) -> Unit = {}
+) {
     val client = OkHttpClient()
     val request = Request.Builder()
         .url("http://$ip:8085/installed_apps")
@@ -240,12 +247,26 @@ private fun fetchInstalledApps(ip: String, password: String, onSuccess: (List<In
     client.newCall(request).enqueue(object : Callback {
         override fun onFailure(call: Call, e: java.io.IOException) {
             Log.e("MainScreen", "Failed to fetch installed apps", e)
+            onError("Yüklü uygulama listesi alınamadı: bilgisayara ulaşılamadı.")
         }
         override fun onResponse(call: Call, response: Response) {
             response.use {
-                if (!response.isSuccessful) return
+                if (!response.isSuccessful) {
+                    val message = if (response.code == 401 || response.code == 403) {
+                        "Yüklü uygulama listesi alınamadı: şifre reddedildi."
+                    } else {
+                        "Yüklü uygulama listesi alınamadı (HTTP ${response.code})."
+                    }
+                    Log.e("MainScreen", message)
+                    onError(message)
+                    return
+                }
                 try {
-                    val body = response.body?.string() ?: return
+                    val body = response.body?.string()
+                    if (body == null) {
+                        onError("Yüklü uygulama listesi alınamadı: boş yanıt.")
+                        return
+                    }
                     val json = JSONObject(body)
                     val appsArray = json.getJSONArray("apps")
                     val list = mutableListOf<InstalledAppInfo>()
@@ -259,6 +280,7 @@ private fun fetchInstalledApps(ip: String, password: String, onSuccess: (List<In
                     onSuccess(list)
                 } catch (e: Exception) {
                     Log.e("MainScreen", "Error parsing installed apps JSON", e)
+                    onError("Yüklü uygulama listesi çözümlenemedi.")
                 }
             }
         }
@@ -480,6 +502,35 @@ private fun fetchFlowHistory(
     })
 }
 
+/**
+ * REST fallback for deleting a flow message: used whenever the WebSocket is down (e.g. the app
+ * is showing the cached flow while reconnecting), so a delete still reaches the PC.
+ */
+private fun deleteFlowMessage(
+    ip: String,
+    password: String,
+    id: String,
+    onFinished: (Boolean) -> Unit = {}
+) {
+    val client = OkHttpClient()
+    val request = Request.Builder()
+        .url("http://$ip:8085/api/flow/${Uri.encode(id)}")
+        .addHeader("X-Password", password)
+        .delete()
+        .build()
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: java.io.IOException) {
+            Log.e("MainScreen", "Failed to delete flow message over HTTP", e)
+            onFinished(false)
+        }
+        override fun onResponse(call: Call, response: Response) {
+            response.use {
+                onFinished(response.isSuccessful)
+            }
+        }
+    })
+}
+
 private fun fetchSharedFiles(
     ip: String,
     password: String,
@@ -632,6 +683,119 @@ private fun formatFileSize(size: Long): String {
     return String.format(java.util.Locale.US, "%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
 }
 
+/**
+ * Telemetry is published at most once every [TELEMETRY_FLUSH_INTERVAL_MS]; the PC pushes the
+ * four streams of a `system_stats` frame back to back, and committing each one separately
+ * produced four `liveStats` writes (and four recomposition passes) per frame.
+ */
+private const val TELEMETRY_FLUSH_INTERVAL_MS = 250L
+
+/**
+ * Non-observable staging area for the `cpu` / `ram` / `temp` / `net` telemetry streams. Values
+ * land here as frames arrive and a single throttled tick in `MainScreen` merges them into the
+ * one [StreamDeckLiveStats] state, so N incoming frames collapse into one recomposition.
+ *
+ * History windows are accumulated sample-by-sample (not just the latest value) so the sparklines
+ * keep one point per received frame regardless of how many frames a flush interval swallowed.
+ */
+private class TelemetryAccumulator {
+    var cpu: Int? = null
+    var ram: Int? = null
+    var cpuTemp: Int? = null
+    var ramUsedGb: Double? = null
+    var ramTotalGb: Double? = null
+    var netDownKbps: Int? = null
+    var netUpKbps: Int? = null
+    var extras: SystemExtraStats? = null
+    private val cpuHistory = mutableListOf<Float>()
+    private val ramHistory = mutableListOf<Float>()
+    private val netDownHistory = mutableListOf<Float>()
+    private val netUpHistory = mutableListOf<Float>()
+
+    fun onSystemStats(cpu: Int, ram: Int) {
+        this.cpu = cpu
+        this.ram = ram
+    }
+
+    fun onDetailedStats(cpu: Int, ram: Int, temp: Int, ramUsed: Double, ramTotal: Double) {
+        this.cpu = cpu
+        this.ram = ram
+        cpuTemp = temp
+        ramUsedGb = ramUsed
+        ramTotalGb = ramTotal
+        cpuHistory.add(cpu.toFloat())
+        ramHistory.add(ram.toFloat())
+    }
+
+    fun onNetworkStats(downKbps: Int, upKbps: Int) {
+        netDownKbps = downKbps
+        netUpKbps = upKbps
+        netDownHistory.add(downKbps.toFloat())
+        netUpHistory.add(upKbps.toFloat())
+    }
+
+    fun onExtraStats(stats: SystemExtraStats) {
+        extras = stats
+    }
+
+    private fun isIdle(): Boolean = cpu == null && ram == null && cpuTemp == null && ramUsedGb == null &&
+        ramTotalGb == null && netDownKbps == null && netUpKbps == null && extras == null &&
+        cpuHistory.isEmpty() && ramHistory.isEmpty() && netDownHistory.isEmpty() && netUpHistory.isEmpty()
+
+    /** Merges every staged value into [current] and resets the accumulator. */
+    fun flushInto(current: StreamDeckLiveStats): StreamDeckLiveStats {
+        if (isIdle()) return current
+        var cpuHistory = current.cpuHistory
+        for (sample in this.cpuHistory) cpuHistory = cpuHistory.withSparkSample(sample)
+        var ramHistory = current.ramHistory
+        for (sample in this.ramHistory) ramHistory = ramHistory.withSparkSample(sample)
+        var netDownHistory = current.netDownHistory
+        for (sample in this.netDownHistory) netDownHistory = netDownHistory.withSparkSample(sample)
+        var netUpHistory = current.netUpHistory
+        for (sample in this.netUpHistory) netUpHistory = netUpHistory.withSparkSample(sample)
+        val extra = extras
+        val merged = current.copy(
+            cpu = cpu ?: current.cpu,
+            ram = ram ?: current.ram,
+            cpuTemp = cpuTemp ?: current.cpuTemp,
+            ramUsedGb = ramUsedGb ?: current.ramUsedGb,
+            ramTotalGb = ramTotalGb ?: current.ramTotalGb,
+            netDownKbps = netDownKbps ?: current.netDownKbps,
+            netUpKbps = netUpKbps ?: current.netUpKbps,
+            cpuHistory = cpuHistory,
+            ramHistory = ramHistory,
+            netDownHistory = netDownHistory,
+            netUpHistory = netUpHistory,
+            diskPercent = extra?.diskPercent ?: current.diskPercent,
+            diskFreeGb = extra?.diskFreeGb ?: current.diskFreeGb,
+            diskTotalGb = extra?.diskTotalGb ?: current.diskTotalGb,
+            gpu = extra?.gpu ?: current.gpu,
+            gpuTemp = extra?.gpuTemp ?: current.gpuTemp,
+            mediaTitle = extra?.mediaTitle ?: current.mediaTitle,
+            mediaArtist = extra?.mediaArtist ?: current.mediaArtist,
+            mediaPlaying = extra?.mediaPlaying ?: current.mediaPlaying,
+            weatherCity = extra?.weatherCity ?: current.weatherCity,
+            weatherTemp = extra?.weatherTemp ?: current.weatherTemp,
+            weatherCode = extra?.weatherCode ?: current.weatherCode,
+            weatherDesc = extra?.weatherDesc ?: current.weatherDesc,
+            weatherWind = extra?.weatherWind ?: current.weatherWind
+        )
+        cpu = null
+        ram = null
+        cpuTemp = null
+        ramUsedGb = null
+        ramTotalGb = null
+        netDownKbps = null
+        netUpKbps = null
+        extras = null
+        this.cpuHistory.clear()
+        this.ramHistory.clear()
+        this.netDownHistory.clear()
+        this.netUpHistory.clear()
+        return merged
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -695,7 +859,17 @@ fun MainScreen(
 
     // Camera FPS & Quality preferences
     var cameraFps by rememberSaveable { mutableStateOf(prefs.getInt("camera_fps", 30)) }
-    var cameraQuality by rememberSaveable { mutableStateOf(prefs.getString("camera_quality", "720p") ?: "720p") }
+    var cameraQuality by rememberSaveable {
+        // Canonical preset names are "480p SD" / "720p HD" / "1080p Full HD"; legacy values
+        // persisted by older builds ("720p", "1080p FHD") are normalised on read.
+        mutableStateOf(
+            when (prefs.getString("camera_quality", "720p HD")) {
+                "480p SD" -> "480p SD"
+                "1080p FHD", "1080p Full HD" -> "1080p Full HD"
+                else -> "720p HD"
+            }
+        )
+    }
     var isMonitorLandscape by rememberSaveable { mutableStateOf(prefs.getBoolean("monitor_landscape", false)) }
     var isMonitorFullscreen by rememberSaveable { mutableStateOf(prefs.getBoolean("monitor_fullscreen", false)) }
     var installedApps by remember { mutableStateOf<List<InstalledAppInfo>>(emptyList()) }
@@ -771,6 +945,17 @@ fun MainScreen(
         }
     }
     
+    // The four PC telemetry streams are staged in a plain, non-observable holder and committed
+    // by exactly one throttled state write (TELEMETRY_FLUSH_INTERVAL_MS) instead of the four
+    // `liveStats` writes the individual listeners used to perform per frame.
+    val statsAccumulator = remember { TelemetryAccumulator() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(TELEMETRY_FLUSH_INTERVAL_MS)
+            liveStats = statsAccumulator.flushInto(liveStats)
+        }
+    }
+
     // Listen for WebSocket connection changes
     DisposableEffect(Unit) {
         SocketManager.connectionStateListener = { connected ->
@@ -851,54 +1036,27 @@ fun MainScreen(
 
         SocketManager.systemStatsListener = { cpu, ram ->
             coroutineScope.launch(Dispatchers.Main) {
-                liveStats = liveStats.copy(cpu = cpu, ram = ram)
+                statsAccumulator.onSystemStats(cpu, ram)
             }
         }
 
         SocketManager.detailedStatsListener = { cpu, ram, temp, ramUsed, ramTotal ->
             coroutineScope.launch(Dispatchers.Main) {
-                liveStats = liveStats.copy(
-                    cpu = cpu,
-                    ram = ram,
-                    cpuTemp = temp,
-                    ramUsedGb = ramUsed,
-                    ramTotalGb = ramTotal,
-                    // History is appended exactly once per `system_stats` frame — the sibling
-                    // simple-stats listener above only refreshes the plain values.
-                    cpuHistory = liveStats.cpuHistory.withSparkSample(cpu.toFloat()),
-                    ramHistory = liveStats.ramHistory.withSparkSample(ram.toFloat())
-                )
+                // History is appended exactly once per `system_stats` frame — the sibling
+                // simple-stats listener above only refreshes the plain values.
+                statsAccumulator.onDetailedStats(cpu, ram, temp, ramUsed, ramTotal)
             }
         }
 
         SocketManager.networkStatsListener = { downKbps, upKbps ->
             coroutineScope.launch(Dispatchers.Main) {
-                liveStats = liveStats.copy(
-                    netDownKbps = downKbps,
-                    netUpKbps = upKbps,
-                    netDownHistory = liveStats.netDownHistory.withSparkSample(downKbps.toFloat()),
-                    netUpHistory = liveStats.netUpHistory.withSparkSample(upKbps.toFloat())
-                )
+                statsAccumulator.onNetworkStats(downKbps, upKbps)
             }
         }
 
         SocketManager.extraStatsListener = { extras ->
             coroutineScope.launch(Dispatchers.Main) {
-                liveStats = liveStats.copy(
-                    diskPercent = extras.diskPercent,
-                    diskFreeGb = extras.diskFreeGb,
-                    diskTotalGb = extras.diskTotalGb,
-                    gpu = extras.gpu,
-                    gpuTemp = extras.gpuTemp,
-                    mediaTitle = extras.mediaTitle,
-                    mediaArtist = extras.mediaArtist,
-                    mediaPlaying = extras.mediaPlaying,
-                    weatherCity = extras.weatherCity,
-                    weatherTemp = extras.weatherTemp,
-                    weatherCode = extras.weatherCode,
-                    weatherDesc = extras.weatherDesc,
-                    weatherWind = extras.weatherWind
-                )
+                statsAccumulator.onExtraStats(extras)
             }
         }
 
@@ -935,11 +1093,22 @@ fun MainScreen(
     // Fetch installed apps when button editing dialog is opened
     LaunchedEffect(showEditDialog) {
         if (showEditDialog && isConnected) {
-            fetchInstalledApps(ipAddress, password) { apps ->
-                coroutineScope.launch(Dispatchers.Main) {
-                    installedApps = apps
+            fetchInstalledApps(
+                ipAddress,
+                password,
+                onSuccess = { apps ->
+                    coroutineScope.launch(Dispatchers.Main) {
+                        installedApps = apps
+                    }
+                },
+                onError = { message ->
+                    // Never leave the picker silently empty on a network/auth failure.
+                    coroutineScope.launch(Dispatchers.Main) {
+                        installedApps = emptyList()
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
                 }
-            }
+            )
         }
     }
 
@@ -1717,6 +1886,13 @@ fun MainScreen(
         }
 
         if (showAddWidgetDialog) {
+            // Empty-slot indices are flattened matrix positions, so the new card can claim the
+            // exact cell the user tapped instead of falling back to auto-placement (-1, -1).
+            val addCols = streamDeckCols.coerceAtLeast(1)
+            val addRows = streamDeckRows.coerceAtLeast(1)
+            val addSlot = targetAddSlotIndex.coerceIn(0, addRows * addCols - 1)
+            val addGridRow = addSlot / addCols
+            val addGridCol = addSlot % addCols
             AddWidgetDialog(
                 slotIndex = targetAddSlotIndex,
                 onDismiss = { showAddWidgetDialog = false },
@@ -1732,7 +1908,9 @@ fun MainScreen(
                         colSpan = pColSpan,
                         rowSpan = pRowSpan,
                         color = pColor,
-                        clockStyle = pClockStyle
+                        clockStyle = pClockStyle,
+                        gridRow = addGridRow,
+                        gridCol = addGridCol
                     )
                     val updated = streamDeckButtons + newBtn
                     saveStreamDeckConfig(ipAddress, password, updated, streamDeckRows, streamDeckCols, activeDeckPage, streamDeckPages) {
@@ -1754,7 +1932,9 @@ fun MainScreen(
                         page = activeDeckPage,
                         colSpan = 1,
                         rowSpan = 1,
-                        color = "#818CF8"
+                        color = "#818CF8",
+                        gridRow = addGridRow,
+                        gridCol = addGridCol
                     )
                     val updated = streamDeckButtons + newBtn
                     streamDeckButtons = updated
@@ -4379,6 +4559,8 @@ private fun packBentoLayout(
 
     // Phase 2 — everything else fills the first free cell.
     val pinnedIds = placed.map { it.button.id }.toSet()
+    // Distributes cards that no longer fit once the matrix shrank (see the fallback below).
+    var overflowIndex = 0
     for (button in buttons) {
         if (button.id in pinnedIds) continue
         var chosen: BentoPlacement? = null
@@ -4396,7 +4578,18 @@ private fun packBentoLayout(
                 }
             }
         }
-        chosen?.let { placed.add(it) }
+        val placement = chosen
+        if (placement != null) {
+            placed.add(placement)
+        } else {
+            // The matrix shrank (e.g. 4×4 → 2×4) to fewer cells than the deck holds cards, so
+            // no free cell remains. Clamp the card to 1×1 and keep it in `placed`, wrapped
+            // across the matrix, so it never disappears silently from the deck.
+            val cells = (rowCount * colCount).coerceAtLeast(1)
+            val slot = overflowIndex % cells
+            overflowIndex++
+            placed.add(BentoPlacement(button, slot / colCount, slot % colCount, 1, 1))
+        }
     }
 
     val emptyCells = mutableListOf<Pair<Int, Int>>()
@@ -5381,55 +5574,61 @@ fun StreamDeckTab(
                 )
             }
         } else {
-            // Zero-scroll real 2D bento grid: the matrix owns every pixel, edge to edge.
-            BentoDeckGrid(
-                buttons = pageButtons,
-                rows = rowCount,
-                cols = colCount,
-                gap = if (effectiveLandscape) 6.dp else 8.dp,
-                live = live,
-                masterVolume = masterVolume,
-                onVolumeChange = onVolumeChange,
-                brightness = brightness,
-                onBrightnessChange = onBrightnessChange,
-                ipAddress = ipAddress,
-                password = password,
-                onPress = { btn ->
-                    SocketManager.sendControl(JSONObject().apply {
-                        put("type", "stream_deck_press")
-                        put("button_id", btn.id)
-                    })
-                },
-                onLongPress = { btn -> handleCardLongPress(btn) },
-                onEmptySlotClick = { onAddWidgetClick(it) },
-                onEmptySlotLongPress = { if (!isEditMode) enterEditMode() },
-                isEditMode = isEditMode,
-                selectedForSwapId = selectedForSwapId,
-                onSelectForSwap = { btn -> handleCardTap(btn) },
-                onResizeButton = { btn -> handleResize(btn) },
-                onDeleteButton = { btn -> handleDelete(btn) },
-                onCustomizeButton = { btn -> onButtonLongClick(btn) },
-                onMoveToCell = { r, c -> handleMoveToCell(r, c) },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+            Column(modifier = Modifier.fillMaxSize()) {
+                // The edit bar is laid out above the grid instead of overlaying it, so the top
+                // row's `1×1` (size) and `×` (delete) chips are never covered and keep
+                // receiving every touch event.
+                if (isEditMode) {
+                    DeckEditFloatingBar(
+                        pages = pages,
+                        activePage = activePage,
+                        onPageChange = onPageChange,
+                        onAddPage = onAddPage,
+                        rows = rowCount,
+                        cols = colCount,
+                        onApplyGridLayout = onApplyGridLayout,
+                        onOpenGridSettings = onOpenGridSettings,
+                        onDone = exitEditMode,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
 
-        // Edit mode is a transient overlay: the deck stays visible and scroll-free underneath.
-        if (isEditMode) {
-            DeckEditFloatingBar(
-                pages = pages,
-                activePage = activePage,
-                onPageChange = onPageChange,
-                onAddPage = onAddPage,
-                rows = rowCount,
-                cols = colCount,
-                onApplyGridLayout = onApplyGridLayout,
-                onOpenGridSettings = onOpenGridSettings,
-                onDone = exitEditMode,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            )
+                // Zero-scroll real 2D bento grid: the matrix owns every pixel left over.
+                BentoDeckGrid(
+                    buttons = pageButtons,
+                    rows = rowCount,
+                    cols = colCount,
+                    gap = if (effectiveLandscape) 6.dp else 8.dp,
+                    live = live,
+                    masterVolume = masterVolume,
+                    onVolumeChange = onVolumeChange,
+                    brightness = brightness,
+                    onBrightnessChange = onBrightnessChange,
+                    ipAddress = ipAddress,
+                    password = password,
+                    onPress = { btn ->
+                        SocketManager.sendControl(JSONObject().apply {
+                            put("type", "stream_deck_press")
+                            put("button_id", btn.id)
+                        })
+                    },
+                    onLongPress = { btn -> handleCardLongPress(btn) },
+                    onEmptySlotClick = { onAddWidgetClick(it) },
+                    onEmptySlotLongPress = { if (!isEditMode) enterEditMode() },
+                    isEditMode = isEditMode,
+                    selectedForSwapId = selectedForSwapId,
+                    onSelectForSwap = { btn -> handleCardTap(btn) },
+                    onResizeButton = { btn -> handleResize(btn) },
+                    onDeleteButton = { btn -> handleDelete(btn) },
+                    onCustomizeButton = { btn -> onButtonLongClick(btn) },
+                    onMoveToCell = { r, c -> handleMoveToCell(r, c) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
+            }
         }
     }
 }
@@ -5921,6 +6120,36 @@ fun TrackpadTab(isConnected: Boolean) {
     }
 }
 
+/**
+ * Maps a touch [offset] (px) inside a preview viewport of [viewWidth]×[viewHeight] to the
+ * normalised 0..1 coordinates of a [frameWidth]×[frameHeight] frame, compensating for the
+ * letterbox/pillarbox bars the fitted aspect ratio introduces. Without this correction the
+ * tap coordinates drift by the size of the bars and clicks land off target.
+ */
+private fun mapTouchToFrame(
+    offset: Offset,
+    viewWidth: Float,
+    viewHeight: Float,
+    frameWidth: Int,
+    frameHeight: Int,
+    fitInside: Boolean
+): Pair<Double, Double> {
+    if (viewWidth <= 0f || viewHeight <= 0f) return 0.0 to 0.0
+    if (!fitInside || frameWidth <= 0 || frameHeight <= 0) {
+        // Stretched to fill: the frame occupies the whole viewport, no bars to subtract.
+        return (offset.x / viewWidth).toDouble().coerceIn(0.0, 1.0) to
+            (offset.y / viewHeight).toDouble().coerceIn(0.0, 1.0)
+    }
+    val scale = minOf(viewWidth / frameWidth, viewHeight / frameHeight)
+    val displayedWidth = frameWidth * scale
+    val displayedHeight = frameHeight * scale
+    val barX = (viewWidth - displayedWidth) / 2f
+    val barY = (viewHeight - displayedHeight) / 2f
+    val rx = ((offset.x - barX) / displayedWidth).toDouble().coerceIn(0.0, 1.0)
+    val ry = ((offset.y - barY) / displayedHeight).toDouble().coerceIn(0.0, 1.0)
+    return rx to ry
+}
+
 @Composable
 fun MonitorTab(
     isConnected: Boolean,
@@ -5936,6 +6165,28 @@ fun MonitorTab(
     var rightClickMode by remember { mutableStateOf(false) }
     var fitInsideMode by remember { mutableStateOf(true) }
     var showKeyboardDialog by remember { mutableStateOf(false) }
+
+    // The gesture `pointerInput` blocks are not restarted per frame, so the live frame size and
+    // scaling mode are read through `rememberUpdatedState` instead of being captured stale.
+    val currentFrame by rememberUpdatedState(latestFrame)
+    val currentFitInside by rememberUpdatedState(fitInsideMode)
+    val sendMonitorTouch: (Offset, Float, Float, String) -> Unit = { offset, viewWidth, viewHeight, action ->
+        val frame = currentFrame
+        val (rx, ry) = mapTouchToFrame(
+            offset = offset,
+            viewWidth = viewWidth,
+            viewHeight = viewHeight,
+            frameWidth = frame?.width ?: 0,
+            frameHeight = frame?.height ?: 0,
+            fitInside = currentFitInside
+        )
+        SocketManager.sendControl(JSONObject().apply {
+            put("type", "monitor_touch")
+            put("action", action)
+            put("x", rx)
+            put("y", ry)
+        })
+    }
     
     Box(
         modifier = Modifier
@@ -5982,35 +6233,18 @@ fun MonitorTab(
                     if (!isControlSuspended) {
                         detectTapGestures(
                             onTap = { offset ->
-                                val rx = (offset.x / size.width).toDouble()
-                                val ry = (offset.y / size.height).toDouble()
-                                val action = if (rightClickMode) "right_click" else "click"
-                                SocketManager.sendControl(JSONObject().apply {
-                                    put("type", "monitor_touch")
-                                    put("action", action)
-                                    put("x", rx)
-                                    put("y", ry)
-                                })
+                                sendMonitorTouch(
+                                    offset,
+                                    size.width.toFloat(),
+                                    size.height.toFloat(),
+                                    if (rightClickMode) "right_click" else "click"
+                                )
                             },
                             onDoubleTap = { offset ->
-                                val rx = (offset.x / size.width).toDouble()
-                                val ry = (offset.y / size.height).toDouble()
-                                SocketManager.sendControl(JSONObject().apply {
-                                    put("type", "monitor_touch")
-                                    put("action", "double_click")
-                                    put("x", rx)
-                                    put("y", ry)
-                                })
+                                sendMonitorTouch(offset, size.width.toFloat(), size.height.toFloat(), "double_click")
                             },
                             onLongPress = { offset ->
-                                val rx = (offset.x / size.width).toDouble()
-                                val ry = (offset.y / size.height).toDouble()
-                                SocketManager.sendControl(JSONObject().apply {
-                                    put("type", "monitor_touch")
-                                    put("action", "right_click")
-                                    put("x", rx)
-                                    put("y", ry)
-                                })
+                                sendMonitorTouch(offset, size.width.toFloat(), size.height.toFloat(), "right_click")
                             }
                         )
                     }
@@ -6019,14 +6253,7 @@ fun MonitorTab(
                     if (!isControlSuspended) {
                         detectDragGestures(
                             onDragStart = { offset ->
-                                val rx = (offset.x / size.width).toDouble()
-                                val ry = (offset.y / size.height).toDouble()
-                                SocketManager.sendControl(JSONObject().apply {
-                                    put("type", "monitor_touch")
-                                    put("action", "down")
-                                    put("x", rx)
-                                    put("y", ry)
-                                })
+                                sendMonitorTouch(offset, size.width.toFloat(), size.height.toFloat(), "down")
                             },
                             onDragEnd = {
                                 SocketManager.sendControl(JSONObject().apply {
@@ -6038,14 +6265,7 @@ fun MonitorTab(
                             }
                         ) { change, _ ->
                             change.consume()
-                            val rx = (change.position.x / size.width).toDouble()
-                            val ry = (change.position.y / size.height).toDouble()
-                            SocketManager.sendControl(JSONObject().apply {
-                                put("type", "monitor_touch")
-                                put("action", "move")
-                                put("x", rx)
-                                put("y", ry)
-                            })
+                            sendMonitorTouch(change.position, size.width.toFloat(), size.height.toFloat(), "move")
                         }
                     }
                 },
@@ -6616,7 +6836,7 @@ fun MediaTab(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            listOf("480p SD", "720p HD", "1080p FHD").forEach { qVal ->
+                            listOf("480p SD", "720p HD", "1080p Full HD").forEach { qVal ->
                                 val isSelected = cameraQuality == qVal
                                 FilterChip(
                                     selected = isSelected,
@@ -6702,6 +6922,17 @@ fun ToolsTab(
     var flowMessagesList by remember { mutableStateOf<List<FlowMessageItem>>(emptyList()) }
     var flowInputText by remember { mutableStateOf("") }
     val flowListState = rememberLazyListState()
+
+    // Pin the viewport to the newest bubble whenever the flow grows. The running count guard
+    // keeps a deletion from yanking the list back down.
+    var previousFlowCount by remember { mutableIntStateOf(0) }
+    LaunchedEffect(flowMessagesList.size) {
+        val newCount = flowMessagesList.size
+        if (newCount > previousFlowCount) {
+            flowListState.animateScrollToItem(newCount - 1)
+        }
+        previousFlowCount = newCount
+    }
 
     var localTextToSend by remember { mutableStateOf("") }
     var sharedFilesList by remember { mutableStateOf<List<SharedFileInfo>>(emptyList()) }
@@ -6934,7 +7165,14 @@ fun ToolsTab(
                                                     modifier = Modifier
                                                         .size(14.dp)
                                                         .clickable {
-                                                            SocketManager.deleteFlowMessage(msg.id)
+                                                            if (SocketManager.isConnected) {
+                                                                SocketManager.deleteFlowMessage(msg.id)
+                                                            } else {
+                                                                // No live socket: delete over REST and drop
+                                                                // the bubble optimistically.
+                                                                deleteFlowMessage(ipAddress, password, msg.id)
+                                                                flowMessagesList = flowMessagesList.filter { it.id != msg.id }
+                                                            }
                                                         }
                                                 )
                                             }
@@ -7420,7 +7658,7 @@ private fun startCameraAnalysis(
         val cameraProvider = cameraProviderFuture.get()
         val targetResolution = when (quality) {
             "480p SD" -> android.util.Size(640, 480)
-            "1080p FHD" -> android.util.Size(1920, 1080)
+            "1080p Full HD" -> android.util.Size(1920, 1080)
             else -> android.util.Size(1280, 720)
         }
         val imageAnalysis = ImageAnalysis.Builder()
@@ -7487,7 +7725,7 @@ private fun ImageProxy.toJpegBytes(isFrontCamera: Boolean, qualityPreset: String
 
         val compressQuality = when (qualityPreset) {
             "480p SD" -> 50
-            "1080p FHD" -> 85
+            "1080p Full HD" -> 85
             else -> 70
         }
 

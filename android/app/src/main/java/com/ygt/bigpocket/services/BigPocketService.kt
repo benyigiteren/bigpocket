@@ -1,7 +1,6 @@
 package com.ygt.bigpocket.services
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -36,6 +35,13 @@ class BigPocketService : Service() {
         private const val TAG = "BigPocketService"
         private const val CHANNEL_ID = "bigpocket_connection"
         private const val NOTIFICATION_ID = 4711
+
+        /**
+         * Safety cap for the partial wake lock. A held lock with no timeout keeps draining the
+         * battery indefinitely if the service is ever left running; four hours comfortably
+         * covers a long session while still guaranteeing the lock is released.
+         */
+        private const val WAKE_LOCK_TIMEOUT_MS = 4 * 60 * 60 * 1000L
 
         const val ACTION_START = "com.ygt.bigpocket.action.START_FOREGROUND"
         const val ACTION_STOP = "com.ygt.bigpocket.action.STOP_FOREGROUND"
@@ -202,7 +208,6 @@ class BigPocketService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    @SuppressLint("WakelockTimeout")
     @Suppress("DEPRECATION")
     private fun acquireLocks() {
         if (wakeLock == null) {
@@ -213,7 +218,9 @@ class BigPocketService : Service() {
             )?.apply {
                 setReferenceCounted(false)
                 try {
-                    acquire()
+                    // A 4-hour cap stops the partial wake lock from pinning the CPU forever
+                    // (and draining the battery) if the link is never torn down.
+                    acquire(WAKE_LOCK_TIMEOUT_MS)
                 } catch (e: Exception) {
                     Log.w(TAG, "WakeLock acquire failed", e)
                 }

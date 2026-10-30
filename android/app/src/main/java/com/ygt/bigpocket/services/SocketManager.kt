@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -412,7 +413,39 @@ object SocketManager {
             put("type", "flow_delete")
             put("id", id)
         }
-        sendControl(json)
+        // The live socket is the fast path; when it is not connected (e.g. the app is showing a
+        // cached flow mid-reconnect) fall back to the REST endpoint so the delete still lands.
+        if (isConnected) {
+            sendControl(json)
+        } else {
+            deleteFlowMessageOverHttp(id)
+        }
+    }
+
+    /** `DELETE /api/flow/<id>` fallback used while the WebSocket is down. */
+    private fun deleteFlowMessageOverHttp(id: String) {
+        if (currentIp.isEmpty()) {
+            Log.w(TAG, "Cannot delete flow message: no host known")
+            return
+        }
+        val request = Request.Builder()
+            .url("http://$currentIp:8085/api/flow/${Uri.encode(id)}")
+            .addHeader("X-Password", currentPassword)
+            .delete()
+            .build()
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                Log.e(TAG, "HTTP flow delete failed", e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "HTTP flow delete returned ${response.code}")
+                    }
+                }
+            }
+        })
     }
 }
 

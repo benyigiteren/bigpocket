@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Component, Path as FsPath, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
@@ -924,17 +924,24 @@ async fn handle_control(
         "set_volume" => {
             let action = as_str(payload, "action").unwrap_or("").to_string();
             let level = as_f64(payload, "level").unwrap_or(50.0);
-            apply_volume(state, &action, level);
+            let applied = apply_volume(state, &action, level);
+            // Report the level the device actually reached, not the one that was
+            // requested: clamping, an absent mixer or a failed `waveOutSetVolume`
+            // would otherwise leave every client slider out of sync.
+            let actual = volume_get().unwrap_or(applied);
             state.broadcast(json!({
                 "type": "volume_changed",
                 "action": action,
-                "level": level,
+                "level": actual,
             }));
         }
         "set_brightness" => {
             let level = as_f64(payload, "level").unwrap_or(80.0).clamp(0.0, 100.0) as u8;
-            set_display_brightness(level);
-            state.broadcast(json!({"type": "brightness_changed", "level": level}));
+            if set_display_brightness(level) {
+                state.broadcast(json!({"type": "brightness_changed", "level": level}));
+            } else {
+                tracing::warn!("Failed to apply brightness level {level}");
+            }
         }
         "set_app_volume" => {
             // Per-application WASAPI sessions are not available in this build; the
@@ -1100,7 +1107,17 @@ async fn press_button(state: &Arc<AppState>, button_id: i32, toggle: bool, paylo
                 .unwrap_or(false);
             match value.as_str() {
                 "mic_mute" => with_input(state, |c| c.simulate_hotkey("ctrl+shift+m")).await,
-                "speaker_mute" | "sound_mute" => apply_volume(state, "mute", 0.0),
+                "speaker_mute" | "sound_mute" => {
+                    // `apply_volume` reports 0 when it muted and the restored
+                    // level when it unmuted; the read-back above confirms it.
+                    let applied = apply_volume(state, "mute", 0.0);
+                    let level = volume_get().unwrap_or(applied);
+                    state.broadcast(json!({
+                        "type": "volume_changed",
+                        "action": "mute",
+                        "level": level,
+                    }));
+                }
                 "screen_toggle" | "virtual_monitor" => set_virtual_monitor(new_state),
                 _ => run_deck_value(state, &value).await,
             }
@@ -1258,8 +1275,9 @@ fn spawn_pomodoro_cycle(state: Arc<AppState>) {
 }
 
 async fn monitor_touch(state: &Arc<AppState>, payload: &Value) {
-    let index = if crate::system::monitor_bounds(1).is_some() { 1 } else { 0 };
-    let Some((mx, my, mw, mh)) = crate::system::monitor_bounds(index) else {
+    // Resolve the display exactly the way the screen stream does, so the
+    // coordinates a phone reports over the streamed frame land on that panel.
+    let Some((mx, my, mw, mh)) = get_stream_monitor_bounds() else {
         return;
     };
     let action = as_str(payload, "action").unwrap_or("");
@@ -1293,37 +1311,44 @@ async fn monitor_touch(state: &Arc<AppState>, payload: &Value) {
     }
 }
 
-/// Master-volume control (waveOut on Windows, no-op elsewhere).
-fn apply_volume(state: &Arc<AppState>, action: &str, level: f64) {
+/// Master-volume control (waveOut on Windows, no-op elsewhere). Returns the
+/// level the action produced, so callers can report it to clients even when the
+/// mixer cannot be read back.
+fn apply_volume(state: &Arc<AppState>, action: &str, level: f64) -> u8 {
     match action {
         "up" => {
-            let current = volume_get().unwrap_or(50);
+            let current = volume_get().unwrap_or_else(|| last_known_volume(state));
             let target = (current as i32 + 5).clamp(0, 100) as u8;
             volume_set(target);
             remember_volume(state, target);
+            target
         }
         "down" => {
-            let current = volume_get().unwrap_or(50);
+            let current = volume_get().unwrap_or_else(|| last_known_volume(state));
             let target = (current as i32 - 5).clamp(0, 100) as u8;
             volume_set(target);
             remember_volume(state, target);
+            target
         }
         "mute" => {
-            let current = volume_get().unwrap_or(0);
+            let current = volume_get().unwrap_or_else(|| last_known_volume(state));
             if current == 0 {
-                let restore = *state.last_volume.lock().unwrap_or_else(|e| e.into_inner());
-                volume_set(restore.max(1));
+                let restore = last_known_volume(state).max(1);
+                volume_set(restore);
+                restore
             } else {
                 remember_volume(state, current);
                 volume_set(0);
+                0
             }
         }
         "set" => {
             let target = level.clamp(0.0, 100.0) as u8;
             volume_set(target);
             remember_volume(state, target);
+            target
         }
-        _ => {}
+        _ => last_known_volume(state),
     }
 }
 
@@ -1333,6 +1358,12 @@ fn remember_volume(state: &Arc<AppState>, level: u8) {
             *last = level;
         }
     }
+}
+
+/// Fallback used whenever the mixer cannot be read: the last level we know the
+/// device accepted. Never a hard-coded 50, which would jump the volume.
+fn last_known_volume(state: &Arc<AppState>) -> u8 {
+    *state.last_volume.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 // ---------------------------------------------------------------------------
@@ -1520,17 +1551,22 @@ async fn download_file(Path(name): Path<String>) -> Response {
         .into_response()
 }
 
-async fn delete_file(Path(name): Path<String>) -> Response {
+async fn delete_file(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
     let Ok(path) = safe_shared_file_path(&name) else {
         return json_response(StatusCode::BAD_REQUEST, json!({"success": false, "error": "Invalid file name"}));
     };
-    match tokio::fs::remove_file(&path).await {
-        Ok(()) => Json(json!({"success": true})).into_response(),
-        Err(err) => json_response(
+    if let Err(err) = tokio::fs::remove_file(&path).await {
+        return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({"success": false, "error": err.to_string()}),
-        ),
+        );
     }
+    // A file leaving the shared folder must not stay on the Flow board: drop any
+    // message that referenced it and tell every client it is gone.
+    for message in state.flow.delete_by_file_name(&name).await {
+        state.broadcast(json!({"type": "flow_deleted", "id": message.id}));
+    }
+    Json(json!({"success": true})).into_response()
 }
 
 async fn upload_file(
@@ -1587,7 +1623,10 @@ async fn save_upload(
             continue;
         }
 
-        let file_name = field.file_name().unwrap_or("upload.bin").to_string();
+        let original_name = field.file_name().unwrap_or("upload.bin").to_string();
+        // Prefix with a timestamp so two uploads of the same basename never
+        // overwrite each other in the shared folder.
+        let file_name = format!("{}_{}", now_millis(), original_name);
         let path = safe_join_path(dir, &file_name).map_err(UploadError::InvalidName)?;
         let mut file = tokio::fs::File::create(&path)
             .await
@@ -2113,15 +2152,15 @@ fn spawn_detached(command: &str) -> std::io::Result<()> {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let lower = command.trim().to_ascii_lowercase();
-        let is_url = lower.starts_with("http://") || lower.starts_with("https://");
-        let mut process = std::process::Command::new("cmd");
-        if is_url {
-            // `start "" <url>` hands the URL to the default browser.
-            process.args(["/C", "start", "", command]);
-        } else {
-            process.args(["/C", command]);
+        let trimmed = command.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            // Hand the URL straight to the shell's default handler. `cmd /c
+            // start "" <url>` would re-parse it and split on `&`, `^` or `%`.
+            return open_url(trimmed);
         }
+        let mut process = std::process::Command::new("cmd");
+        process.args(["/C", command]);
         process.creation_flags(CREATE_NO_WINDOW).spawn().map(|_| ())
     }
     #[cfg(not(windows))]
@@ -2134,6 +2173,54 @@ fn spawn_detached(command: &str) -> std::io::Result<()> {
             std::process::Command::new("sh").arg("-c").arg(command).spawn().map(|_| ())
         }
     }
+}
+
+/// Opens `url` with the Windows shell's default handler (`ShellExecuteW`).
+///
+/// No command line is involved, so the URL reaches the browser verbatim.
+#[cfg(windows)]
+fn open_url(url: &str) -> std::io::Result<()> {
+    use std::ffi::{c_void, OsStr};
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show_command: i32,
+        ) -> *mut c_void;
+    }
+    // `SW_SHOWNORMAL`.
+    const SW_SHOWNORMAL: i32 = 1;
+
+    let wide = |value: &str| -> Vec<u16> {
+        OsStr::new(value).encode_wide().chain(once(0)).collect()
+    };
+    let operation = wide("open");
+    let file = wide(url);
+    // ShellExecuteW returns a value greater than 32 on success.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    if result <= 32 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("ShellExecuteW failed with code {result}"),
+        ));
+    }
+    Ok(())
 }
 
 /// Capture display 0 to `SharedFiles/ekran_<stamp>.png`, returning (name, size).
@@ -2327,10 +2414,11 @@ fn volume_set(_percent: u8) {}
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-fn set_display_brightness(level: u8) {
-    if !set_brightness_ddc(level) {
-        set_brightness_gamma(level);
-    }
+fn set_display_brightness(level: u8) -> bool {
+    // DDC/CI first (external monitors); the gamma ramp is the internal-panel
+    // fallback. The caller only tells clients the new level when one of the two
+    // actually took effect.
+    set_brightness_ddc(level) || set_brightness_gamma(level)
 }
 
 #[cfg(windows)]
@@ -2351,6 +2439,16 @@ fn set_brightness_ddc(level: u8) -> bool {
     struct PhysicalMonitor {
         handle: Handle,
         description: [u16; 128],
+    }
+
+    /// Per-call state handed to the `EnumDisplayMonitors` callback through its
+    /// `LPARAM`. Keeping it local (instead of process-wide statics) means two
+    /// concurrent `set_brightness` calls cannot clobber each other's target or
+    /// success counter while the enumeration runs.
+    #[repr(C)]
+    struct BrightnessContext {
+        target: u32,
+        applied: u32,
     }
 
     #[link(name = "user32")]
@@ -2380,17 +2478,18 @@ fn set_brightness_ddc(level: u8) -> bool {
         fn DestroyPhysicalMonitors(count: u32, monitors: *mut PhysicalMonitor) -> i32;
     }
 
-    static TARGET: AtomicU32 = AtomicU32::new(50);
-    static APPLIED: AtomicU32 = AtomicU32::new(0);
-    TARGET.store(level as u32, Ordering::Relaxed);
-    APPLIED.store(0, Ordering::Relaxed);
+    let mut context = BrightnessContext {
+        target: level as u32,
+        applied: 0,
+    };
 
     unsafe extern "system" fn callback(
         monitor: Handle,
         _hdc: Handle,
         _rect: *mut Rect,
-        _data: isize,
+        data: isize,
     ) -> i32 {
+        let context = &mut *(data as *mut BrightnessContext);
         let mut count: u32 = 0;
         if GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, &mut count) != 0 && count > 0 {
             let mut monitors = vec![
@@ -2401,7 +2500,6 @@ fn set_brightness_ddc(level: u8) -> bool {
                 count as usize
             ];
             if GetPhysicalMonitorsFromHMONITOR(monitor, count, monitors.as_mut_ptr()) != 0 {
-                let target = TARGET.load(Ordering::Relaxed);
                 for entry in monitors.iter() {
                     let (mut minimum, mut current, mut maximum) = (0u32, 0u32, 100u32);
                     if GetMonitorBrightness(
@@ -2411,12 +2509,12 @@ fn set_brightness_ddc(level: u8) -> bool {
                         &mut maximum,
                     ) != 0
                     {
-                        let mut value = target;
+                        let mut value = context.target;
                         if minimum < maximum {
                             value = value.clamp(minimum, maximum);
                         }
                         if SetMonitorBrightness(entry.handle, value) != 0 {
-                            APPLIED.fetch_add(1, Ordering::Relaxed);
+                            context.applied += 1;
                         }
                     }
                 }
@@ -2427,14 +2525,19 @@ fn set_brightness_ddc(level: u8) -> bool {
     }
 
     unsafe {
-        EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null_mut(), callback, 0);
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            callback,
+            &mut context as *mut BrightnessContext as isize,
+        );
     }
-    APPLIED.load(Ordering::Relaxed) > 0
+    context.applied > 0
 }
 
 /// Software fallback for internal panels: scale the display gamma ramp.
 #[cfg(windows)]
-fn set_brightness_gamma(level: u8) {
+fn set_brightness_gamma(level: u8) -> bool {
     use std::ffi::c_void;
     type Handle = *mut c_void;
 
@@ -2458,16 +2561,18 @@ fn set_brightness_gamma(level: u8) {
     }
     unsafe {
         let hdc = GetDC(std::ptr::null_mut());
-        if !hdc.is_null() {
-            SetDeviceGammaRamp(hdc, ramp.as_ptr());
-            ReleaseDC(std::ptr::null_mut(), hdc);
+        if hdc.is_null() {
+            return false;
         }
+        let applied = SetDeviceGammaRamp(hdc, ramp.as_ptr()) != 0;
+        ReleaseDC(std::ptr::null_mut(), hdc);
+        applied
     }
 }
 
 #[cfg(not(windows))]
-fn set_display_brightness(level: u8) {
-    let _ = level;
+fn set_display_brightness(_level: u8) -> bool {
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -2841,9 +2946,12 @@ pub fn start_screen_stream_server(state: Arc<AppState>) -> tokio::task::JoinHand
                 Err(_) => continue,
             };
 
+            // Every peer — loopback included — goes through the same authorized-IP
+            // registry (`is_authorized_stream_ip` itself allows loopback and the
+            // no-password case), so there is no second, bypassable copy of the
+            // rule here.
             let host = peer.ip().to_string();
-            let cfg = config::load_config();
-            if !peer.ip().is_loopback() && !cfg.password.is_empty() && !state.auth.is_authorized_stream_ip(&host) {
+            if !state.auth.is_authorized_stream_ip(&host) {
                 tracing::warn!("Rejected unauthorized screen stream from {host}");
                 continue;
             }
@@ -2864,8 +2972,21 @@ async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, _state: 
     let mut interval = tokio::time::interval(Duration::from_millis(33)); // ~30 FPS
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    // The stream is one-way (server -> client), so a byte read here means either
+    // an orderly shutdown (0 bytes) or noise. A peer that closes cleanly leaves
+    // its FIN behind and writes would still succeed, so without this probe the
+    // capture loop would keep encoding frames into a socket nobody reads.
+    let mut probe = [0u8; 1];
+
     loop {
         interval.tick().await;
+
+        match socket.try_read(&mut probe) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => break,
+        }
 
         let capture_res = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
             let monitor = get_stream_monitor()?;
@@ -2886,6 +3007,8 @@ async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, _state: 
         let length = jpeg_bytes.len() as u32;
         let len_bytes = length.to_be_bytes();
 
+        // Break out on the very first failed write: the client is gone, and
+        // staying in the loop would only burn a full-frame capture per tick.
         if socket.write_all(&len_bytes).await.is_err() {
             break;
         }
@@ -2898,13 +3021,16 @@ async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, _state: 
 
 fn get_stream_monitor() -> Option<xcap::Monitor> {
     let monitors = xcap::Monitor::all().ok()?;
-    if monitors.len() > 1 {
-        if let Some(second) = monitors.iter().find(|m| !m.is_primary().unwrap_or(false)) {
-            return Some(second.clone());
-        }
-        return Some(monitors[1].clone());
-    }
-    monitors.first().cloned()
+    let index = crate::system::stream_monitor_index(&monitors)?;
+    monitors.get(index).cloned()
+}
+
+/// Bounds `(x, y, width, height)` of the display [`get_stream_monitor`]
+/// captures, in virtual-desktop coordinates. Used to translate touch input.
+fn get_stream_monitor_bounds() -> Option<(i32, i32, u32, u32)> {
+    let monitors = xcap::Monitor::all().ok()?;
+    let index = crate::system::stream_monitor_index(&monitors)?;
+    crate::system::monitor_bounds(index)
 }
 
 /// TCP camera stream server on port 8083.
@@ -3538,7 +3664,7 @@ fn runas_elevated(installer: &std::path::Path, args: &str, dir: &std::path::Path
             lpParameters: *const u16,
             lpDirectory: *const u16,
             nShowCmd: i32,
-        ) -> isize;
+        ) -> *mut std::ffi::c_void;
     }
 
     let to_wide = |s: &OsStr| -> Vec<u16> { s.encode_wide().chain(Some(0)).collect() };
@@ -3556,7 +3682,7 @@ fn runas_elevated(installer: &std::path::Path, args: &str, dir: &std::path::Path
             params.as_ptr(),
             dir_w.as_ptr(),
             0, // SW_HIDE
-        )
+        ) as isize
     };
     res > 32
 }

@@ -363,9 +363,19 @@ impl InputController {
 
     /// Presses a `+`-separated shortcut such as `"ctrl+shift+m"` or
     /// `"prevtrack"`, releasing the keys in reverse order. Unknown tokens are
-    /// skipped, matching the Go implementation.
+    /// skipped, but never silently: each one is logged so a mis-configured
+    /// button is visible in the log instead of appearing to do nothing.
     pub fn simulate_hotkey(&mut self, hotkey: &str) -> Result<(), String> {
-        let keys: Vec<Key> = hotkey.split('+').filter_map(key_from_name).collect();
+        let mut keys: Vec<Key> = Vec::with_capacity(4);
+        for token in hotkey.split('+') {
+            match key_from_name(token) {
+                Some(key) => keys.push(key),
+                None if token.trim().is_empty() => {}
+                None => {
+                    tracing::warn!("simulate_hotkey: unknown key token '{token}' in '{hotkey}'");
+                }
+            }
+        }
         if keys.is_empty() {
             return Ok(());
         }
@@ -486,6 +496,29 @@ pub fn capture_monitor_jpeg(index: usize, quality: u8) -> Result<Vec<u8>, String
         .ok_or_else(|| format!("no monitor at index {index}"))?;
 
     encode_monitor_jpeg(monitor, quality)
+}
+
+/// Index (into [`Monitor::all`]) of the display the screen stream captures: the
+/// first non-primary monitor when more than one display is present, otherwise
+/// the primary/first display.
+///
+/// The TCP screen stream and the touch handler both resolve the target display
+/// through this function, so the coordinates a phone reports map to exactly the
+/// panel it is looking at.
+pub fn stream_monitor_index(monitors: &[Monitor]) -> Option<usize> {
+    if monitors.is_empty() {
+        return None;
+    }
+    if monitors.len() > 1 {
+        if let Some(index) = monitors
+            .iter()
+            .position(|monitor| !monitor.is_primary().unwrap_or(false))
+        {
+            return Some(index);
+        }
+        return Some(1);
+    }
+    Some(0)
 }
 
 /// Bounds `(x, y, width, height)` of a monitor in virtual-desktop coordinates,

@@ -74,6 +74,31 @@ fn is_zero(v: &i64) -> bool {
     *v == 0
 }
 
+/// Final path component of a stored file name (Windows and POSIX separators
+/// both handled), or `None` when there is no usable basename. Nothing containing
+/// a separator or a `.`/`..` segment survives, so a crafted `file_name` can never
+/// escape the shared folder.
+fn file_basename(name: &str) -> Option<&str> {
+    let last = name.rsplit(|c| c == '/' || c == '\\').next().unwrap_or("");
+    if last.is_empty() || last == "." || last == ".." {
+        None
+    } else {
+        Some(last)
+    }
+}
+
+/// Best-effort deletion of the file backing a message inside `dir`.
+fn remove_message_file(dir: &Path, msg: &FlowMessage) {
+    if let Some(base) = file_basename(&msg.file_name) {
+        let _ = std::fs::remove_file(dir.join(base));
+    }
+}
+
+/// Whether a message references an uploaded file by basename.
+fn message_references_file(msg: &FlowMessage, base: &str) -> bool {
+    file_basename(&msg.file_name) == Some(base)
+}
+
 /// Current wall-clock time in Unix milliseconds.
 pub fn now_millis() -> i64 {
     SystemTime::now()
@@ -116,6 +141,15 @@ impl FlowManager {
     /// Absolute path of the backing JSON file.
     pub fn history_path(&self) -> &Path {
         &self.path
+    }
+
+    /// Folder holding the uploaded files referenced by the history — the parent
+    /// of the history file (normally `SharedFiles/`).
+    fn files_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 
     /// Append a message, persisting the history and returning the stored copy
@@ -161,9 +195,37 @@ impl FlowManager {
         }
     }
 
-    /// Drop the whole history and persist the empty list.
+    /// Remove every message that references `file_name` (matched by basename)
+    /// and persist the updated history. Returns the removed messages so the
+    /// caller can broadcast their deletion.
+    pub async fn delete_by_file_name(&self, file_name: &str) -> Vec<FlowMessage> {
+        let Some(base) = file_basename(file_name) else {
+            return Vec::new();
+        };
+        let base = base.to_string();
+        let mut guard = self.messages.write().await;
+        let mut removed = Vec::new();
+        guard.retain(|msg| {
+            let matches = message_references_file(msg, &base);
+            if matches {
+                removed.push(msg.clone());
+            }
+            !matches
+        });
+        if !removed.is_empty() {
+            save_history_locked(&self.path, &mut guard);
+        }
+        removed
+    }
+
+    /// Drop the whole history and persist the empty list, deleting every file
+    /// the cleared messages referenced so uploads are not orphaned.
     pub async fn clear_messages(&self) {
         let mut guard = self.messages.write().await;
+        let dir = self.files_dir();
+        for msg in guard.iter() {
+            remove_message_file(&dir, msg);
+        }
         guard.clear();
         save_history_locked(&self.path, &mut guard);
     }
@@ -195,15 +257,31 @@ fn load_history(path: &Path) -> Vec<FlowMessage> {
 }
 
 /// Persist the history, trimming it to [`MAX_MESSAGES`] entries in place.
+///
+/// Trimmed entries also have their uploaded file removed so a long-running Flow
+/// session never leaves orphaned blobs behind. The JSON is written to a sibling
+/// `.tmp` file and atomically renamed into place, so a crash or power loss can
+/// never leave `flow_history.json` half-written.
 fn save_history_locked(path: &Path, messages: &mut Vec<FlowMessage>) {
     if messages.len() > MAX_MESSAGES {
         let drain_to = messages.len() - MAX_MESSAGES;
-        messages.drain(0..drain_to);
+        let dir = path.parent().map(Path::to_path_buf);
+        for removed in messages.drain(0..drain_to) {
+            if let Some(dir) = &dir {
+                remove_message_file(dir, &removed);
+            }
+        }
     }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(data) = serde_json::to_vec_pretty(messages) {
-        let _ = std::fs::write(path, data);
+    let Ok(data) = serde_json::to_vec_pretty(messages) else {
+        return;
+    };
+    let mut tmp = path.as_os_str().to_os_string();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    if std::fs::write(&tmp, &data).is_ok() && std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
 }

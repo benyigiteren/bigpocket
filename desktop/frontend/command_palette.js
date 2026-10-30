@@ -419,6 +419,8 @@
     document.addEventListener('keydown', event => {
         // Ctrl+K / Cmd+K — paleti aç / kapat (metin alanlarında da çalışır)
         if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.key === 'k' || event.key === 'K' || event.code === 'KeyK')) {
+            // Otomatik tekrar (tuşu basılı tutma) paleti açıp kapatıp titretmesin.
+            if (event.repeat) return;
             if (!isOpen && insideActiveModal(event.target)) return;
             event.preventDefault();
             toggle();
@@ -426,6 +428,10 @@
         }
 
         if (!isOpen) return;
+
+        // Arama alanına odaklanmışken Home/End/PageUp/PageDown imleci ve
+        // listeyi normal kaydırır; bu tuşları yutmamalıyız.
+        const inSearchInput = event.target === input;
 
         switch (event.key) {
             case 'Escape':
@@ -441,18 +447,22 @@
                 move(-1);
                 break;
             case 'PageDown':
+                if (inSearchInput) break;
                 event.preventDefault();
                 move(5);
                 break;
             case 'PageUp':
+                if (inSearchInput) break;
                 event.preventDefault();
                 move(-5);
                 break;
             case 'Home':
+                if (inSearchInput) break;
                 event.preventDefault();
                 setActive(0);
                 break;
             case 'End':
+                if (inSearchInput) break;
                 event.preventDefault();
                 setActive(itemNodes().length - 1);
                 break;

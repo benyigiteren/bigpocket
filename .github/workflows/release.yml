@@ -19,6 +19,9 @@ jobs:
       - name: Build Windows Tauri App
         working-directory: desktop/src-tauri
         run: cargo build --release
+      - name: Stage app binary for installer embed
+        shell: pwsh
+        run: Copy-Item desktop/src-tauri/target/release/bigpocket.exe desktop/BigPocket.exe -Force
       - name: Build Windows Setup Wizard
         working-directory: desktop
         shell: pwsh
