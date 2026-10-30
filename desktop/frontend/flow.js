@@ -148,7 +148,12 @@
                     <div class="flow-msg-bubble">
                         <div class="flow-msg-header">
                             <span class="flow-sender-badge">${senderIcon} ${senderLabel}</span>
-                            <span class="flow-msg-time">${timeStr}</span>
+                            <div class="flow-header-actions">
+                                <span class="flow-msg-time">${timeStr}</span>
+                                <button type="button" class="flow-delete-btn" data-msg-id="${escapeHtml(msg.id || msg.ID)}" title="Mesajı Sil" aria-label="Mesajı Sil">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="flow-msg-content">${bodyHtml}</div>
                     </div>
@@ -244,6 +249,21 @@
             if (window.sendWebSocketMessage) {
                 window.sendWebSocketMessage({ type: 'get_clipboard' });
             }
+        }
+    }
+
+    async function deleteMessage(id) {
+        if (!id) return;
+        try {
+            const url = (window.apiUrl ? window.apiUrl(`/api/flow/${encodeURIComponent(id)}`) : `/api/flow/${encodeURIComponent(id)}`);
+            await (window.authFetch ? window.authFetch(url, { method: 'DELETE' }) : fetch(url, { method: 'DELETE' }));
+            if (window.sendWebSocketMessage) {
+                window.sendWebSocketMessage({ type: 'flow_delete', id: id });
+            }
+            flowMessages = flowMessages.filter(m => (m.id || m.ID) !== id);
+            renderFlow();
+        } catch (e) {
+            console.error('Delete flow msg error:', e);
         }
     }
 
@@ -385,11 +405,18 @@
         const feed = document.getElementById('flow-chat-feed');
         if (feed) {
             feed.addEventListener('click', (e) => {
-                const btn = e.target.closest('.flow-copy-btn');
-                if (btn) {
-                    const id = btn.dataset.msgId;
+                const copyBtn = e.target.closest('.flow-copy-btn');
+                if (copyBtn) {
+                    const id = copyBtn.dataset.msgId;
                     const found = flowMessages.find(m => (m.id || m.ID) === id);
                     if (found) copyText(found.text || found.Text || '');
+                    return;
+                }
+                const delBtn = e.target.closest('.flow-delete-btn');
+                if (delBtn) {
+                    const id = delBtn.dataset.msgId;
+                    deleteMessage(id);
+                    return;
                 }
             });
         }
@@ -409,6 +436,10 @@
         },
         handleClear: function () {
             flowMessages = [];
+            renderFlow();
+        },
+        handleMessageDeleted: function (id) {
+            flowMessages = flowMessages.filter(m => (m.id || m.ID) !== id);
             renderFlow();
         }
     };

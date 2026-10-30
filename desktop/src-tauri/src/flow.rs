@@ -149,6 +149,18 @@ impl FlowManager {
         self.messages.read().await.clone()
     }
 
+    /// Delete an individual message by ID and persist the updated list.
+    pub async fn delete_message(&self, id: &str) -> Option<FlowMessage> {
+        let mut guard = self.messages.write().await;
+        if let Some(pos) = guard.iter().position(|m| m.id == id) {
+            let removed = guard.remove(pos);
+            save_history_locked(&self.path, &mut guard);
+            Some(removed)
+        } else {
+            None
+        }
+    }
+
     /// Drop the whole history and persist the empty list.
     pub async fn clear_messages(&self) {
         let mut guard = self.messages.write().await;

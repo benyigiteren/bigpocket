@@ -744,6 +744,10 @@ function connectWebSocket() {
             if (window.bigpocketFlow) {
                 window.bigpocketFlow.handleClear();
             }
+        } else if (msg.type === 'flow_deleted') {
+            if (window.bigpocketFlow && msg.id) {
+                window.bigpocketFlow.handleMessageDeleted(msg.id);
+            }
         } else if (msg.type === 'config_update') {
             if (msg.source === localClientId) {
                 console.log("Ignoring local config_update echo from self");

@@ -17,20 +17,24 @@ fn main() {
         .expect("failed to create Tokio runtime");
     let _guard = rt.enter();
 
+    let state = server::AppState::new();
+
+    // Start UDP Auto-discovery on Port 47800
+    discovery::start_discovery(8085);
+
+    // Bind and start the server synchronously before creating the Tauri window!
+    let _ = rt.block_on(async {
+        let res = server::bind_and_start_server(state.clone(), 8085).await;
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        res
+    });
+
     // The Windows autostart entry launches us with `--minimized`: the server
     // keeps running but the panel stays out of the way at boot.
     let start_minimized = std::env::args().any(|arg| arg == "--minimized");
 
     tauri::Builder::default()
         .setup(move |app| {
-            let state = server::AppState::new();
-
-            // Start UDP Auto-discovery on Port 47800
-            discovery::start_discovery(8085);
-
-            // Start Axum HTTP & WebSocket Server on Port 8085
-            server::start_server(state, 8085);
-
             if start_minimized {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();

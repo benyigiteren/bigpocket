@@ -580,6 +580,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/flow",
             get(flow_list).post(flow_create).delete(flow_clear),
         )
+        .route("/api/flow/:id", delete(flow_delete_one))
         .route("/api/flow/upload", post(flow_upload))
         .route("/api/flow/screenshot", post(flow_screenshot))
         .route("/files", get(list_files))
@@ -959,6 +960,18 @@ async fn handle_control(
             let message = state.flow.add_message(message).await;
             state.broadcast(json!({"type": "flow_new", "message": message}));
         }
+        "flow_delete" => {
+            if let Some(id) = as_str(payload, "id") {
+                if let Some(deleted) = state.flow.delete_message(id).await {
+                    if !deleted.file_name.is_empty() {
+                        if let Ok(file_path) = safe_shared_file_path(&deleted.file_name) {
+                            let _ = std::fs::remove_file(file_path);
+                        }
+                    }
+                    state.broadcast(json!({"type": "flow_deleted", "id": id}));
+                }
+            }
+        }
         "switch_page" => {
             let target = as_i64(payload, "page").unwrap_or(0) as i32;
             let mut cfg = config::load_config();
@@ -1327,6 +1340,22 @@ async fn flow_clear(State(state): State<Arc<AppState>>) -> Response {
     Json(json!({"success": true})).into_response()
 }
 
+async fn flow_delete_one(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    if let Some(deleted) = state.flow.delete_message(&id).await {
+        if !deleted.file_name.is_empty() {
+            if let Ok(file_path) = safe_shared_file_path(&deleted.file_name) {
+                let _ = std::fs::remove_file(file_path);
+            }
+        }
+        state.broadcast(json!({"type": "flow_deleted", "id": id}));
+        Json(json!({"success": true})).into_response()
+    } else {
+        json_response(StatusCode::NOT_FOUND, json!({"success": false, "error": "Message not found"}))
+    }
+}
 async fn flow_upload(
     State(state): State<Arc<AppState>>,
     Query(query): Query<HashMap<String, String>>,
@@ -1900,18 +1929,22 @@ async fn check_for_update(force: bool, is_beta: bool) -> Value {
 /// Windows 10 1803+ and every mainstream Linux/macOS, keeping the crate free of a
 /// TLS stack it would otherwise only use for one request.
 async fn http_get(url: &str) -> Result<String, String> {
-    let output = tokio::process::Command::new("curl")
-        .args([
-            "-sS",
-            "-L",
-            "--max-time",
-            "10",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "User-Agent: BigPocket-Updater",
-            url,
-        ])
+    let mut cmd = tokio::process::Command::new("curl");
+    cmd.args([
+        "-sS",
+        "-L",
+        "--max-time",
+        "10",
+        "-H",
+        "Accept: application/vnd.github+json",
+        "-H",
+        "User-Agent: BigPocket-Updater",
+        url,
+    ]);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+
+    let output = cmd
         .output()
         .await
         .map_err(|err| format!("curl unavailable: {err}"))?;
@@ -2127,14 +2160,16 @@ fn setup_adb_reverse() -> (bool, String) {
     let candidates = ["adb", "adb.exe"];
     let mut adb = None;
     for candidate in candidates {
-        if std::process::Command::new(candidate)
-            .arg("version")
+        let mut cmd = std::process::Command::new(candidate);
+        cmd.arg("version")
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        if cmd.status().map(|s| s.success()).unwrap_or(false) {
             adb = Some(candidate.to_string());
             break;
         }
@@ -2149,12 +2184,14 @@ fn setup_adb_reverse() -> (bool, String) {
     let mut bridged = 0;
     for port in [CONTROL_PORT, SCREEN_TCP_PORT, AUDIO_TCP_PORT, CAMERA_TCP_PORT] {
         let target = format!("tcp:{port}");
-        if std::process::Command::new(&adb)
-            .args(["reverse", &target, &target])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        let mut cmd = std::process::Command::new(&adb);
+        cmd.args(["reverse", &target, &target]);
+        #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        if cmd.status().map(|s| s.success()).unwrap_or(false) {
             bridged += 1;
         }
     }
@@ -2203,11 +2240,14 @@ fn set_virtual_monitor(enable: bool) {
         return;
     }
     let value = if enable { "1" } else { "0" };
-    match std::process::Command::new(&installer)
-        .args(["enableidd", value])
-        .current_dir(&driver_dir)
-        .spawn()
+    let mut cmd = std::process::Command::new(&installer);
+    cmd.args(["enableidd", value]).current_dir(&driver_dir);
+    #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    match cmd.spawn() {
         Ok(mut child) => {
             let _ = child.wait();
         }
@@ -2707,26 +2747,34 @@ fn show_notification(title: &str, message: &str) {
 
 /// Bind `0.0.0.0:port` and serve the API + web UI until the task is aborted or
 /// [`AppState::shutdown`] is notified.
-pub fn start_server(state: Arc<AppState>, port: u16) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let address = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = match tokio::net::TcpListener::bind(address).await {
-            Ok(listener) => listener,
-            Err(err) => {
-                tracing::error!("failed to bind {address}: {err}");
-                return;
-            }
-        };
-        tracing::info!("BigPocket control server listening on http://0.0.0.0:{port}");
+pub async fn bind_and_start_server(
+    state: Arc<AppState>,
+    port: u16,
+) -> Result<tokio::task::JoinHandle<()>, std::io::Error> {
+    let address = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    tracing::info!("BigPocket control server listening on http://0.0.0.0:{port}");
 
-        spawn_stats_ticker(state.clone());
+    spawn_stats_ticker(state.clone());
 
-        let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    let state_clone = state.clone();
+    let handle = tokio::spawn(async move {
+        let app = router(state_clone.clone()).into_make_service_with_connect_info::<SocketAddr>();
         if let Err(err) = axum::serve(listener, app)
-            .with_graceful_shutdown(async move { state.shutdown.notified().await })
+            .with_graceful_shutdown(async move { state_clone.shutdown.notified().await })
             .await
         {
             tracing::error!("server error: {err}");
+        }
+    });
+
+    Ok(handle)
+}
+
+pub fn start_server(state: Arc<AppState>, port: u16) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if let Err(err) = bind_and_start_server(state, port).await {
+            tracing::error!("failed to bind server: {err}");
         }
     })
 }

@@ -6761,6 +6761,11 @@ fun ToolsTab(
                 flowMessagesList = flowMessagesList + newItem
             }
         }
+        SocketManager.flowDeletedListener = { id ->
+            coroutineScope.launch(Dispatchers.Main) {
+                flowMessagesList = flowMessagesList.filter { it.id != id }
+            }
+        }
         SocketManager.flowClearedListener = {
             coroutineScope.launch(Dispatchers.Main) {
                 flowMessagesList = emptyList()
@@ -6768,6 +6773,7 @@ fun ToolsTab(
         }
         onDispose {
             SocketManager.flowMessageListener = null
+            SocketManager.flowDeletedListener = null
             SocketManager.flowClearedListener = null
         }
     }
@@ -6925,11 +6931,24 @@ fun ToolsTab(
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MinimalistSecondary
                                             )
-                                            Text(
-                                                timeStr,
-                                                fontSize = 10.sp,
-                                                color = MinimalistSecondary.copy(alpha = 0.8f)
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    timeStr,
+                                                    fontSize = 10.sp,
+                                                    color = MinimalistSecondary.copy(alpha = 0.8f)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Sil",
+                                                    tint = MinimalistSecondary.copy(alpha = 0.5f),
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clickable {
+                                                            SocketManager.deleteFlowMessage(msg.id)
+                                                        }
+                                                )
+                                            }
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
 

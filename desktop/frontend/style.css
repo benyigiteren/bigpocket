@@ -94,22 +94,29 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 8px 0 22px 0;
+    padding: 6px 0 16px 0;
     border-bottom: 1px solid var(--border-color);
+    width: 100%;
+    overflow: hidden;
 }
 
 .brand-logo-img {
-    width: 140px;
-    height: 140px;
-    border-radius: 26px;
+    width: 70px !important;
+    height: 70px !important;
+    max-width: 70px !important;
+    max-height: 70px !important;
+    border-radius: 16px;
     object-fit: cover;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    display: block;
+    margin: 0 auto;
 }
 
 .brand-logo-img:hover {
-    transform: scale(1.03);
+    transform: scale(1.05);
 }
+
 
 .sidebar-nav {
     display: flex;
@@ -4026,6 +4033,12 @@ body.mobile-mode .deck-quick-actions { display: none; }
     color: var(--text-muted);
 }
 
+.flow-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .flow-msg-time {
     font-family: var(--font-mono);
     font-size: 10.5px;
@@ -4033,6 +4046,30 @@ body.mobile-mode .deck-quick-actions { display: none; }
     opacity: 0.75;
 }
 
+.flow-delete-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0.45;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+
+.flow-msg-bubble:hover .flow-delete-btn {
+    opacity: 0.8;
+}
+
+.flow-delete-btn:hover {
+    opacity: 1 !important;
+    color: #F87171;
+    background: rgba(248, 113, 113, 0.15);
+}
 .flow-msg-content {
     position: relative;
 }

@@ -40,6 +40,7 @@ object SocketManager {
     var networkStatsListener: ((Int, Int) -> Unit)? = null
     var extraStatsListener: ((SystemExtraStats) -> Unit)? = null
     var flowMessageListener: ((JSONObject) -> Unit)? = null
+    var flowDeletedListener: ((String) -> Unit)? = null
     var flowClearedListener: (() -> Unit)? = null
     var isConnected = false
         private set
@@ -146,6 +147,11 @@ object SocketManager {
                         val msgObj = json.optJSONObject("message")
                         if (msgObj != null) {
                             flowMessageListener?.invoke(msgObj)
+                        }
+                    } else if (type == "flow_deleted") {
+                        val id = json.optString("id")
+                        if (id.isNotEmpty()) {
+                            flowDeletedListener?.invoke(id)
                         }
                     } else if (type == "flow_cleared") {
                         flowClearedListener?.invoke()
@@ -396,6 +402,14 @@ object SocketManager {
             put("file_name", fileName)
             put("file_url", fileUrl)
             put("file_size", fileSize)
+        }
+        sendControl(json)
+    }
+
+    fun deleteFlowMessage(id: String) {
+        val json = JSONObject().apply {
+            put("type", "flow_delete")
+            put("id", id)
         }
         sendControl(json)
     }

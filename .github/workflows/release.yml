@@ -13,9 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
       - name: Build Windows Tauri App
         working-directory: desktop/src-tauri
         run: cargo build --release
+      - name: Build Windows Setup Wizard
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          go build -ldflags "-H windowsgui -s -w" -o ../BigPocket-Setup.exe installer.go
       - name: Package Windows Artifacts
         shell: pwsh
         run: |
@@ -32,8 +40,8 @@ jobs:
           name: windows
           path: |
             BigPocket.exe
+            BigPocket-Setup.exe
             bigpocket-windows.zip
-
   macos:
     runs-on: macos-latest
     steps:
@@ -154,6 +162,7 @@ jobs:
           prerelease: true
           fail_on_unmatched_files: false
           files: |
+            BigPocket-Setup.exe
             BigPocket.exe
             bigpocket-windows.zip
             BigPocket.dmg
