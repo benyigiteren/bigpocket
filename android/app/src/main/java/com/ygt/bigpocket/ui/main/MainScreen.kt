@@ -179,6 +179,7 @@ data class StreamDeckLiveStats(
     val mediaCover: String = "",
     val mediaPosSec: Int = 0,
     val mediaDurSec: Int = 0,
+    val mediaIsLive: Boolean = false,
     val weatherCity: String = "",
     val weatherTemp: Int = 0,
     val weatherCode: Int = 0,
@@ -853,6 +854,7 @@ private class TelemetryAccumulator {
             mediaCover = extra?.mediaCover ?: current.mediaCover,
             mediaPosSec = extra?.mediaPosSec ?: current.mediaPosSec,
             mediaDurSec = extra?.mediaDurSec ?: current.mediaDurSec,
+            mediaIsLive = extra?.mediaIsLive ?: current.mediaIsLive,
             weatherCity = extra?.weatherCity ?: current.weatherCity,
             weatherTemp = extra?.weatherTemp ?: current.weatherTemp,
             weatherCode = extra?.weatherCode ?: current.weatherCode,
@@ -4310,6 +4312,7 @@ fun ElgatoKeycapTile(
                 coverUrl = live.mediaCover,
                 posSec = live.mediaPosSec,
                 durSec = live.mediaDurSec,
+                isLive = live.mediaIsLive,
                 ipAddress = ipAddress,
                 onLongClick = onLongPress,
                 onAction = { act ->
@@ -4859,6 +4862,7 @@ fun StreamDeckNowPlayingTile(
     coverUrl: String = "",
     posSec: Int = 0,
     durSec: Int = 0,
+    isLive: Boolean = false,
     ipAddress: String = "",
     onAction: (String) -> Unit,
     palette: DeckPalette? = null,
@@ -4994,7 +4998,31 @@ fun StreamDeckNowPlayingTile(
                     val sec = s % 60
                     String.format(java.util.Locale.US, "%d:%02d", m, sec)
                 }
-                if (durSec > 0) {
+                if (isLive) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(99.dp))
+                            .background(Color(0x28EF4444))
+                            .border(1.dp, Color(0x66EF4444), RoundedCornerShape(99.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFEF4444))
+                        )
+                        Text(
+                            text = "CANLI YAYIN",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.06.sp,
+                            color = Color(0xFFEF4444)
+                        )
+                    }
+                } else if (durSec > 0) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
                     ) {
