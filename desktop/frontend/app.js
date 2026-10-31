@@ -1441,9 +1441,33 @@ function setupStreamDeck() {
         pickerModal.addEventListener('click', (e) => {
             if (e.target === pickerModal) pickerModal.classList.remove('active');
         });
-        pickerModal.querySelectorAll('.widget-preset-card').forEach(card => {
+        pickerModal.querySelectorAll('.widget-preset-card, .widget-custom-card').forEach(card => {
+            card.setAttribute('draggable', 'true');
+            const presetKey = card.getAttribute('data-preset') || 'custom';
+
+            card.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', 'preset:' + presetKey);
+                e.dataTransfer.effectAllowed = 'copyMove';
+                card.classList.add('is-dragging');
+                setTimeout(() => {
+                    if (pickerModal.classList.contains('active')) {
+                        pickerModal.classList.add('modal-dragging-preset');
+                    }
+                }, 20);
+            });
+
+            card.addEventListener('dragend', () => {
+                card.classList.remove('is-dragging');
+                pickerModal.classList.remove('modal-dragging-preset');
+                document.querySelectorAll('.deck-btn, .deck-slot-empty').forEach(el => el.classList.remove('drag-over'));
+            });
+
             card.addEventListener('click', () => {
-                createWidgetFromPreset(card.getAttribute('data-preset'));
+                if (presetKey === 'custom') {
+                    createAndEditCustomButton();
+                } else {
+                    createWidgetFromPreset(presetKey);
+                }
                 pickerModal.classList.remove('active');
             });
         });
@@ -4175,7 +4199,17 @@ function renderStreamDeckButtons() {
             e.preventDefault();
             e.stopPropagation();
             item.classList.remove('drag-over');
-            const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+            const dataText = e.dataTransfer.getData('text/plain');
+            if (dataText && dataText.startsWith('preset:')) {
+                const presetKey = dataText.replace('preset:', '');
+                const place = placement.get(btn.id);
+                const cell = place ? { row: place.r, col: place.c } : null;
+                createWidgetFromPreset(presetKey, cell);
+                const pm = document.getElementById('widget-picker-modal');
+                if (pm) pm.classList.remove('active', 'modal-dragging-preset');
+                return;
+            }
+            const draggedId = parseInt(dataText);
             if (!isNaN(draggedId) && draggedId !== btn.id) {
                 swapStreamDeckButtons(draggedId, btn.id);
             }
@@ -4221,7 +4255,15 @@ function renderStreamDeckButtons() {
             e.preventDefault();
             e.stopPropagation();
             emptySlot.classList.remove('drag-over');
-            const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+            const dataText = e.dataTransfer.getData('text/plain');
+            if (dataText && dataText.startsWith('preset:')) {
+                const presetKey = dataText.replace('preset:', '');
+                createWidgetFromPreset(presetKey, { row: hole.r, col: hole.c });
+                const pm = document.getElementById('widget-picker-modal');
+                if (pm) pm.classList.remove('active', 'modal-dragging-preset');
+                return;
+            }
+            const draggedId = parseInt(dataText);
             if (!isNaN(draggedId)) {
                 moveStreamDeckButtonToCell(draggedId, hole.r, hole.c);
             }
