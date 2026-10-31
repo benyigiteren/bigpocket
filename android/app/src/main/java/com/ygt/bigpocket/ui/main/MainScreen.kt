@@ -6186,7 +6186,7 @@ fun StreamDeckTab(
                 )
             }
         } else {
-            var useHybridWebView by rememberSaveable { mutableStateOf(true) }
+            var useHybridWebView by rememberSaveable { mutableStateOf(false) }
             var hasWebViewError by remember { mutableStateOf(false) }
             val deckUrl = remember(ipAddress, password) {
                 "http://$ipAddress:8085/?mode=streamdeck&password=${android.net.Uri.encode(password)}"

@@ -580,14 +580,30 @@ pub struct MediaInfo {
 static MEDIA_COVER_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
 static LAST_SEARCHED_SONG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+fn url_encode(input: &str) -> String {
+    let mut encoded = String::with_capacity(input.len() * 3);
+    for b in input.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            b' ' => encoded.push('+'),
+            _ => {
+                encoded.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    encoded
+}
+
 fn fetch_youtube_thumbnail(query: &str) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let encoded_query = query.replace(' ', "+").replace('&', "+");
+        let encoded_query = url_encode(query);
         let url = format!("https://www.youtube.com/results?search_query={encoded_query}");
         let output = std::process::Command::new("curl")
-            .args(["-s", "-m", "3", "-H", "User-Agent: Mozilla/5.0", &url])
+            .args(["-s", "-m", "5", "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", &url])
             .creation_flags(0x0800_0000)
             .output()
             .ok()?;
@@ -597,7 +613,7 @@ fn fetch_youtube_thumbnail(query: &str) -> Option<String> {
             let after = &text[pos + marker.len()..];
             if let Some(end) = after.find('"') {
                 let vid = &after[..end];
-                if vid.len() == 11 {
+                if vid.len() == 11 && vid.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
                     return Some(format!("https://i.ytimg.com/vi/{vid}/hqdefault.jpg"));
                 }
             }
@@ -642,14 +658,14 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
 
                 // Try iTunes search first for music tracks
                 let term = format!("{artist_clean} {title_clean}").trim().to_string();
-                let encoded_term = term.replace(' ', "+").replace('&', "+");
+                let encoded_term = url_encode(&term);
                 let itunes_url = format!("https://itunes.apple.com/search?term={encoded_term}&media=music&limit=1");
 
                 #[cfg(windows)]
                 {
                     use std::os::windows::process::CommandExt;
                     if let Ok(output) = std::process::Command::new("curl")
-                        .args(["-s", "-m", "3", &itunes_url])
+                        .args(["-s", "-m", "4", &itunes_url])
                         .creation_flags(0x0800_0000)
                         .output()
                     {
@@ -665,10 +681,21 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
                 // Fallback to YouTube thumbnail search
                 fetch_youtube_thumbnail(&format!("{artist_clean} {title_clean}"))
             }).await;
-            if let Ok(Some(cover_url)) = res {
-                if let Ok(mut guard) = MEDIA_COVER_CACHE.lock() {
-                    let cache = guard.get_or_insert_with(std::collections::HashMap::new);
-                    cache.insert(query_key, cover_url);
+
+            match res {
+                Ok(Some(cover_url)) => {
+                    if let Ok(mut guard) = MEDIA_COVER_CACHE.lock() {
+                        let cache = guard.get_or_insert_with(std::collections::HashMap::new);
+                        cache.insert(query_key, cover_url);
+                    }
+                }
+                _ => {
+                    // Reset so next interval can retry
+                    if let Ok(mut last) = LAST_SEARCHED_SONG.lock() {
+                        if last.as_ref() == Some(&query_key) {
+                            *last = None;
+                        }
+                    }
                 }
             }
         });
