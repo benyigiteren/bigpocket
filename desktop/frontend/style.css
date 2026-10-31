@@ -3321,7 +3321,7 @@ input:checked + .slider:before {
 .md-rings {
     position: relative;
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: space-around;
     gap: 4px;
     width: 100%;
@@ -3336,16 +3336,20 @@ input:checked + .slider:before {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 2px;
     flex: 1 1 0;
     min-width: 0;
+    min-height: 0;
 }
 
 .md-ring__svg {
-    width: calc(var(--cell, 112px) * 0.42);
+    width: auto;
     height: calc(var(--cell, 112px) * 0.42);
-    min-width: 26px;
-    min-height: 26px;
+    aspect-ratio: 1 / 1;
+    min-width: 0;
+    min-height: 0;
+    flex: 0 1 auto;
 }
 
 .md-ring__svg svg { width: 100%; height: 100%; }
@@ -3353,12 +3357,14 @@ input:checked + .slider:before {
 .md-ring__val {
     font-size: calc(var(--cell, 112px) * 0.12);
     font-weight: 600;
+    flex: 0 0 auto;
     font-variant-numeric: tabular-nums;
     color: var(--text-main);
 }
 
 .md-ring__label {
     font-size: calc(var(--cell, 112px) * 0.085);
+    flex: 0 0 auto;
     color: var(--text-muted);
     white-space: nowrap;
 }
@@ -3411,13 +3417,13 @@ input:checked + .slider:before {
 .deck-btn:has(.deck-media) {
     position: relative !important;
     overflow: hidden !important;
-    padding: 10px 12px !important;
+    padding: 8px 10px !important;
 }
 .deck-media {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    gap: calc(var(--cell, 112px) * 0.045);
+    gap: clamp(3px, calc(var(--cell, 112px) * 0.04), 9px);
     width: 100%;
     height: 100%;
     min-width: 0;
@@ -3427,6 +3433,12 @@ input:checked + .slider:before {
     border-radius: inherit;
     z-index: 2;
 }
+
+/* The head and transport row keep their size; the text row gives way so a short
+   card ellipsises its title instead of clipping the play controls. */
+.deck-media__head,
+.deck-media__controls { flex: 0 0 auto; }
+.deck-media__meta { flex: 0 1 auto; min-height: 0; overflow: hidden; }
 
 .deck-media__cover-bg {
     position: absolute;
@@ -3527,8 +3539,8 @@ input:checked + .slider:before {
 .deck-media__badge {
     display: grid;
     place-items: center;
-    width: calc(var(--cell, 112px) * 0.22);
-    height: calc(var(--cell, 112px) * 0.22);
+    width: min(calc(var(--cell, 112px) * 0.22), 30px);
+    height: min(calc(var(--cell, 112px) * 0.22), 30px);
     min-width: 18px;
     min-height: 18px;
     flex-shrink: 0;
@@ -3572,6 +3584,9 @@ input:checked + .slider:before {
     display: flex;
     flex-direction: column;
     gap: 3px;
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow: hidden;
     width: 100%;
     margin: 2px 0;
     position: relative;
@@ -3651,8 +3666,8 @@ input:checked + .slider:before {
 .md-media-btn {
     display: grid;
     place-items: center;
-    width: calc(var(--cell, 112px) * 0.28);
-    height: calc(var(--cell, 112px) * 0.28);
+    width: min(calc(var(--cell, 112px) * 0.28), 40px);
+    height: min(calc(var(--cell, 112px) * 0.28), 40px);
     min-width: 22px;
     min-height: 22px;
     border-radius: var(--radius-full);
@@ -3703,12 +3718,15 @@ input:checked + .slider:before {
 }
 
 /* Volume / brightness capsules */
+.deck-btn:has(.apple-pill-slider-container) {
+    padding: 8px 10px !important;
+}
 .apple-pill-slider-container.md-pill {
     position: relative;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    gap: 8px;
+    gap: clamp(4px, calc(var(--cell, 112px) * 0.04), 8px);
     width: 100%;
     height: 100%;
     padding: 0;
@@ -3718,29 +3736,11 @@ input:checked + .slider:before {
     overflow: hidden;
 }
 
-.md-pill__row {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-}
-
 .md-pill__top-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    width: 100%;
-}
-
-.md-pill--compact .md-pill__label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-main);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    word-break: keep-all;
+    flex: 0 0 auto;
     width: 100%;
 }
 
@@ -3760,8 +3760,10 @@ input:checked + .slider:before {
 .md-pill__badge svg { width: 56%; height: 56%; }
 
 .md-pill__label {
-    flex: 1 1 auto;
-    font-size: 13px;
+    flex: 0 1 auto;
+    min-height: 0;
+    width: 100%;
+    font-size: 13.5px;
     font-weight: 600;
     color: var(--text-main);
     overflow: hidden;
@@ -3772,7 +3774,7 @@ input:checked + .slider:before {
 
 .md-pill__value {
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: 13.5px;
     font-weight: 700;
     color: var(--text-main);
     background: none;
@@ -3782,6 +3784,7 @@ input:checked + .slider:before {
 
 .md-pill__track {
     position: relative;
+    flex: 0 0 auto;
     height: 10px;
     margin: 0;
     border: none;

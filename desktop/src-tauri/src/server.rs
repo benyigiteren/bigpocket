@@ -1312,6 +1312,7 @@ async fn handle_control(
         }
         "media_control" => {
             let action = media_hotkey(as_str(payload, "action").unwrap_or(""));
+            crate::system::control_media(action);
             with_input(state, |c| c.simulate_hotkey(action)).await;
         }
         "set_volume" => {
@@ -1527,13 +1528,14 @@ async fn press_button(state: &Arc<AppState>, button_id: i32, toggle: bool, paylo
             let stats = system_stats(state).await;
             state.broadcast(stats);
         }
-        "now_playing" | "media_widget" => {
+        "now_playing" | "media_widget" | "media_control" => {
             let action = if kind == "media_widget" {
                 as_str(payload, "media_action").filter(|a| !a.is_empty()).unwrap_or(&value)
             } else {
                 as_str(payload, "media_action").unwrap_or("")
             };
             let hotkey = media_hotkey(action);
+            crate::system::control_media(hotkey);
             with_input(state, |c| c.simulate_hotkey(hotkey)).await;
         }
         "hotkey" => run_deck_value(state, &value).await,

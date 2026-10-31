@@ -157,7 +157,7 @@ data class StreamDeckButtonInfo(
     val colSpan: Int = 1,
     val bgStyle: String = "default",
     val clockStyle: String = "digital",
-    val fontFamily: String = "mono",
+    val fontFamily: String = "geist",
     /** Point size of the clock digits, `0` means "use the responsive default". */
     val clockFontSize: Int = 0,
     /** Explicit bento row (0-based); `-1` means "let the packer pick the first free cell". */
@@ -374,7 +374,7 @@ private fun fetchStreamDeckConfig(
                             colSpan = item.optInt("col_span", 1),
                             bgStyle = item.optString("bg_style", "default"),
                             clockStyle = item.optString("clock_style", "digital"),
-                            fontFamily = item.optString("font_family", "mono"),
+                            fontFamily = item.optString("font_family", "geist"),
                             clockFontSize = item.optInt("clock_font_size", 0),
                             gridRow = item.optInt("grid_row", -1),
                             gridCol = item.optInt("grid_col", -1),
@@ -1949,10 +1949,13 @@ fun MainScreen(
                                 Spacer(modifier = Modifier.height(10.dp))
                                 EditorChoiceRow(
                                     title = "Yazı Tipi (Font)",
+                                    // Same tokens the PC clock editor sends (`.deck-btn.font-*`), so a
+                                    // clock round-trips Android ⇄ PC with the identical face.
                                     options = listOf(
-                                        "sans" to "Varsayılan (Geist/Sans)",
-                                        "mono" to "Monospace (Daktilo)",
-                                        "serif" to "Serif (Zarif)"
+                                        "geist" to "Geist (Modern Sans)",
+                                        "jetbrains" to "JetBrains Mono (Daktilo)",
+                                        "serif" to "Playfair Serif (Zarif)",
+                                        "inter" to "Inter Sans"
                                     ),
                                     selected = editFontFamily,
                                     onSelect = { editFontFamily = it }
@@ -3143,6 +3146,18 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
 /** Inset between the card edge and the drawn slider track; also the gesture coordinate origin. */
 private val SliderTrackInset = 14.dp
 
+/**
+ * The PC slider card pads itself tighter than every other card
+ * (`padding: 8px 10px` on `.deck-btn:has(.apple-pill-slider-container)`) and, because its
+ * `box-sizing` is `border-box`, its 1px border pushes the content one more pixel in before the
+ * padding starts (11px / 9px from the card's outer edge). The Android card draws that same 1px
+ * hairline *inside* its bounds without shrinking the layout, so the pill folds the border into its
+ * own inset and the content lands exactly where PC puts it. The legacy style families keep the
+ * deck-wide [SliderTrackInset].
+ */
+private val PillPadHorizontal = 11.dp
+private val PillPadVertical = 9.dp
+
 /** Drag updates inside one window are coalesced into a single WebSocket commit. */
 private const val SliderCommitWindowMillis = 150L
 
@@ -3220,9 +3235,11 @@ private class SliderCommitController(private val scope: CoroutineScope) {
 }
 
 /**
- * Template 5 — capsule slider (volume / brightness): soft tonal fill on the flat card surface,
- * round accent badge with the label on the left and the live percentage on the right.
- * Adapts between the horizontal and vertical pill from the cell aspect ratio.
+ * Template 5 — capsule slider (volume / brightness): a 1:1 port of the PC `.md-pill` capsule — a
+ * 32dp elevated badge and the live mono percentage on the top row, the title below and a slim
+ * accent-filled track at the bottom, inset by PC's own `8px 10px` slider-card padding. PC renders
+ * those same three rows at every span and has no vertical pill, so 1×1, 1×2 and 2×1 cells all get
+ * the identical elegant capsule instead of a stretched grey block.
  *
  * Gestures are resolved by one detector so a card cell (which also wants long-press drag to
  * re-order) and the deck page pager (horizontal swipe) never fight the slider for a pointer:
@@ -3272,11 +3289,21 @@ fun AppleCapsuleSlider(
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val isVertical = when (sliderOrientation.lowercase()) {
+        // The Apple/default capsule is always the horizontal PC `.md-pill`, so only the legacy
+        // style families still honour a vertical orientation or a tall cell.
+        val isLegacyStyle = sliderStyle.lowercase() in
+            setOf("samsung", "oneui", "material", "material_you", "framer", "minimal")
+        val verticalRequested = when (sliderOrientation.lowercase()) {
             "vertical", "dikey" -> true
             "horizontal", "yatay" -> false
             else -> maxHeight > maxWidth * 1.15f
         }
+        val isVertical = isLegacyStyle && verticalRequested
+
+        // PC shrinks only the slider card's own padding (`padding: 8px 10px` on
+        // `.deck-btn:has(.apple-pill-slider-container)`).
+        val padHorizontal = if (isLegacyStyle) SliderTrackInset else PillPadHorizontal
+        val padVertical = if (isLegacyStyle) SliderTrackInset else PillPadVertical
 
         // Fill fraction at which the badge of each style is covered by the fill and may switch to
         // the dark tint. See [sliderCoverageFraction]: the extents are the distance of the badge
@@ -3287,9 +3314,6 @@ fun AppleCapsuleSlider(
         val materialVerticalTextCoverage = sliderCoverageFraction(18f, maxHeight.value - 47f)
         val samsungHorizontalCoverage = sliderCoverageFraction(21f, maxWidth.value - 28f)
         val materialHorizontalCoverage = sliderCoverageFraction(24f, maxWidth.value - 28f)
-        val appleVerticalTrack = (maxHeight.value - 49f).coerceAtLeast(24f)
-        val appleVerticalIconCoverage = (1f - sliderCoverageFraction(21f, appleVerticalTrack)).coerceIn(0.5f, 0.95f)
-        val appleVerticalTextCoverage = sliderCoverageFraction(19f, appleVerticalTrack)
 
         // A vertical pill shares the cell with the percentage and label rows, so in a short cell the
         // chrome has to shrink instead of overflowing the capsule and clipping the badge.
@@ -3297,20 +3321,21 @@ fun AppleCapsuleSlider(
 
         val touchModifier = Modifier
             .fillMaxSize()
-            .pointerInput(isVertical) {
+            .pointerInput(isVertical, padHorizontal, padVertical) {
                 val touchSlop = viewConfiguration.touchSlop
                 val longPressTimeout = viewConfiguration.longPressTimeoutMillis
-                val inset = SliderTrackInset.toPx()
+                val insetX = padHorizontal.toPx()
+                val insetY = padVertical.toPx()
 
                 // Track geometry is the drawn capsule, which is inset from the touch target, and is
                 // guarded against a degenerate box so a collapsed cell can never yield NaN.
                 fun levelAt(position: Offset): Float {
                     val fraction = if (isVertical) {
-                        val track = size.height - inset * 2f
-                        if (track <= 1f) 0f else 1f - (position.y - inset) / track
+                        val track = size.height - insetY * 2f
+                        if (track <= 1f) 0f else 1f - (position.y - insetY) / track
                     } else {
-                        val track = size.width - inset * 2f
-                        if (track <= 1f) 0f else (position.x - inset) / track
+                        val track = size.width - insetX * 2f
+                        if (track <= 1f) 0f else (position.x - insetX) / track
                     }
                     return fraction.coerceIn(0f, 1f) * 100f
                 }
@@ -3400,7 +3425,7 @@ fun AppleCapsuleSlider(
                 }
             }
 
-        Box(modifier = touchModifier.padding(SliderTrackInset)) {
+        Box(modifier = touchModifier.padding(horizontal = padHorizontal, vertical = padVertical)) {
             when (sliderStyle.lowercase()) {
                 "samsung", "oneui" -> {
                     // Samsung One UI 6 Volume Bar
@@ -3679,113 +3704,66 @@ fun AppleCapsuleSlider(
                     }
                 }
                 else -> {
-                    // Default: Apple Control Center Capsule (1:1 PC Image 1)
-                    if (isVertical) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.SpaceBetween
+                    // Default: the Apple Control Center capsule — a 1:1 port of the PC `.md-pill`
+                    // (desktop/frontend/app.js + style.css): a 32dp elevated badge and the mono
+                    // percentage on the top row, the 13.5sp title on the next line and a 10dp
+                    // `rgba(255,255,255,0.08)` track pinned to the bottom with an accent fill that
+                    // sweeps from the left. PC renders this same three-row structure at every span,
+                    // so 1×1, 1×2 and 2×1 cells all get the identical elegant capsule instead of a
+                    // stretched grey block.
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .width(if (compactVertical) 40.dp else 52.dp)
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(26.dp))
+                                    .size(32.dp)
+                                    .clip(CircleShape)
                                     .background(MinimalistSurfaceElevated),
-                                contentAlignment = Alignment.BottomCenter
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .fillMaxHeight(fillFraction)
-                                        .clip(RoundedCornerShape(26.dp))
-                                        .background(Color.White)
+                                Icon(
+                                    imageVector = sliderIcon,
+                                    contentDescription = safeLabel,
+                                    tint = accentColor,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Column(
-                                    modifier = Modifier.fillMaxHeight().padding(vertical = if (compactVertical) 4.dp else 12.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Icon(
-                                        imageVector = sliderIcon,
-                                        contentDescription = safeLabel,
-                                        tint = if (fillFraction > appleVerticalIconCoverage) Color.Black else Color.White,
-                                        modifier = Modifier.size(if (compactVertical) 14.dp else 18.dp)
-                                    )
-                                    Text(
-                                        text = "%${clampedValue.toInt()}",
-                                        fontSize = if (compactVertical) 10.sp else 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (fillFraction > appleVerticalTextCoverage) Color.Black else Color.White
-                                    )
-                                }
                             }
-                            Spacer(modifier = Modifier.height(if (compactVertical) 2.dp else 6.dp))
                             Text(
-                                text = safeLabel,
-                                fontSize = if (compactVertical) 10.sp else 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MinimalistSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                text = "%${clampedValue.toInt()}",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = MinimalistPrimary
                             )
                         }
-                    } else {
-                        // Horizontal Capsule (Exact 1:1 match with PC Image 1!)
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.SpaceBetween
+                        Text(
+                            text = safeLabel,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MinimalistPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(MinimalistSurfaceElevated),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = sliderIcon,
-                                        contentDescription = safeLabel,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                Text(
-                                    text = "%${clampedValue.toInt()}",
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White
-                                )
-                            }
-                            Text(
-                                text = safeLabel,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(10.dp)
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(fillFraction)
                                     .clip(RoundedCornerShape(999.dp))
-                                    .background(Color.White.copy(alpha = 0.08f))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fillFraction)
-                                        .clip(RoundedCornerShape(999.dp))
-                                        .background(Color.White)
-                                )
-                            }
+                                    .background(accentColor)
+                            )
                         }
                     }
                 }
@@ -3822,9 +3800,19 @@ private data class ClockFaceSpec(
 )
 
 /**
- * Clock card with six pickable faces: the Pixel Hub / Apple minimal default plus the flip, neon
- * cyberpunk, Turkish word clock, Swiss serif and retro CRT terminal styles selected by
- * `clock_style`. Every face fits the card bounds and is redrawn once a second.
+ * Labels that merely name the widget rather than carrying a custom locality line; a clock using
+ * one of these shows the PC meta text (`İstanbul · yerel saat`) under the numerals instead.
+ */
+private val GenericClockLabels = setOf(
+    "", "saat", "tarih", "clock",
+    "saat & tarih", "saat ve tarih", "saat & takvim", "saat ve takvim",
+    "pixel saat", "tarih ve saat"
+)
+
+/**
+ * Clock card with six pickable faces: the Apple lockscreen default plus the flip, neon cyberpunk,
+ * Turkish word clock, Swiss serif and retro CRT terminal styles selected by `clock_style`. Every
+ * face fits the card bounds and is redrawn once a second.
  */
 @Composable
 fun StreamDeckClockTile(
@@ -3832,7 +3820,7 @@ fun StreamDeckClockTile(
     accentColor: Color,
     colSpan: Int = 1,
     clockStyle: String = "digital",
-    fontFamilyStr: String = "mono",
+    fontFamilyStr: String = "geist",
     clockFontSize: Int = 0,
     palette: DeckPalette? = null,
     modifier: Modifier = Modifier
@@ -3853,7 +3841,9 @@ fun StreamDeckClockTile(
     val dateText = dateFormat.format(now).replaceFirstChar { it.uppercase() }
     val timeText = timeFormat.format(now)
     val wordText = turkishClockWords(calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE))
-    val secondary = if (label.isNotBlank() && label != "Saat & Tarih" && label != "Saat") label else "İstanbul · yerel saat"
+    val secondary = label.trim().takeIf { it.lowercase() !in GenericClockLabels } ?: "İstanbul · yerel saat"
+    // PC `font_family` tokens (`.deck-btn.font-geist|jetbrains|serif|inter`) plus the legacy
+    // Android aliases (`mono`, `sans`, `lcd`) a previously saved deck may still carry.
     val digitsFont = when (fontFamilyStr.lowercase()) {
         "mono", "jetbrains", "lcd" -> FontFamily.Monospace
         "serif" -> FontFamily.Serif
@@ -3862,7 +3852,20 @@ fun StreamDeckClockTile(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val compact = maxHeight < 92.dp
-        val digitSize = if (clockFontSize > 0) clockFontSize.sp else (maxHeight.value * 0.38f).coerceIn(20f, 54f).sp
+        // Apple Lockscreen parity: PC paints the numerals at 46% of the grid cell
+        // (`.md-clock--wide .md-clock__time { font-size: calc(var(--cell) * 0.46) }`), so here the
+        // digits take 46% of the tile's height and are then squeezed to the widest `HH:mm` that
+        // still fits the tile's width (~0.55em per glyph), which keeps 1x1 from clipping while
+        // 2x1 / 3x1 render the same massive numerals as the PC card.
+        val timeChars = timeText.length.coerceAtLeast(1)
+        val byHeight = maxHeight.value * 0.46f
+        val byWidth = (maxWidth.value - 16f) / (timeChars * 0.55f)
+        // A manual size never wins over the card bounds: the numerals still have to fit the tile's
+        // width (`byWidth`) and leave the date/meta lines room (62% of the height at most).
+        val manualCap = minOf(byWidth, maxHeight.value * 0.62f)
+        val digitSize = if (clockFontSize > 0)
+            clockFontSize.toFloat().coerceAtMost(manualCap).coerceAtLeast(16f).sp
+        else minOf(byHeight, byWidth).coerceIn(16f, 132f).sp
         val spec = ClockFaceSpec(
             timeText = timeText,
             dateText = dateText,
@@ -3887,45 +3890,75 @@ fun StreamDeckClockTile(
     }
 }
 
-/** `apple_minimal` (and every unknown style): accent date, thin tabular digits, locality line. */
+/**
+ * `apple_minimal` (and every unknown style) — the Apple Lockscreen typography of the PC
+ * `.md-clock deck-apple-lockscreen-clock md-clock--wide` card, reproduced 1:1:
+ * an uppercase muted date pinned to the top, the giant thin tabular numerals dead-centre and the
+ * locality line under them. The time is laid out in its own centred layer so date/meta length
+ * never nudges it off the middle, and every size is derived from the tile bounds (see
+ * [StreamDeckClockTile]) so 1x1, 2x1, 3x1 and 2x2 all render without clipping.
+ */
 @Composable
 private fun ClockFaceAppleMinimal(spec: ClockFaceSpec) {
-    Column(
+    val digitSize = spec.digitSize
+    val dateSize = (digitSize.value * 0.22f).coerceIn(10f, 13f).sp
+    val metaSize = (digitSize.value * 0.196f).coerceIn(9.5f, 12f).sp
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-        horizontalAlignment = Alignment.Start
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = spec.dateText.uppercase(),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.5.sp,
-            color = MinimalistSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = spec.timeText,
-            fontSize = spec.digitSize,
-            fontWeight = FontWeight.Light,
-            color = MinimalistPrimary,
-            fontFamily = spec.digitsFont,
-            letterSpacing = (-1.5).sp,
-            style = TextStyle(fontFeatureSettings = "tnum"),
-            maxLines = 1
-        )
-        if (!spec.compact) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = spec.dateText.uppercase(java.util.Locale.forLanguageTag("tr")),
+                fontSize = dateSize,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (dateSize.value * 0.03f).sp,
+                color = MinimalistSecondary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
             Text(
                 text = spec.secondary,
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Medium,
+                fontSize = metaSize,
+                fontWeight = FontWeight.Normal,
+                letterSpacing = 0.2.sp,
                 color = MinimalistSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                textAlign = TextAlign.Center,
+                maxLines = if (spec.compact) 1 else 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
             )
         }
+        Text(
+            text = spec.timeText,
+            fontSize = digitSize,
+            fontWeight = FontWeight.Light,
+            fontFamily = spec.digitsFont,
+            letterSpacing = (digitSize.value * -0.03f).sp,
+            lineHeight = (digitSize.value * 0.95f).sp,
+            color = MinimalistPrimary,
+            textAlign = TextAlign.Center,
+            overflow = TextOverflow.Clip,
+            softWrap = false,
+            maxLines = 1,
+            style = TextStyle(
+                fontFeatureSettings = "tnum",
+                shadow = Shadow(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    offset = Offset(0f, 4f),
+                    blurRadius = 16f
+                )
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

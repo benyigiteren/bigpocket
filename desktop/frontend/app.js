@@ -4002,102 +4002,54 @@ function renderStreamDeckButtons() {
                 `;
             }
         } else if (btn.type === 'volume_slider') {
-            const isCompact = colSpan === 1;
             const safeLabel = escapeHtml(btn.label || 'Ses');
             const vol = typeof cachedMasterVolume === 'number' ? cachedMasterVolume : 50;
-            if (isCompact) {
-                bodyContent = `
-                    <div class="apple-pill-slider-container md-pill md-pill--compact">
-                        <div class="md-pill__top-row">
-                            <span class="md-pill__badge">${mdIcon('volume', 14)}</span>
-                            <span class="apple-pill-value md-pill__value">%${vol}</span>
-                        </div>
-                        <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
-                        <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'volume');">
-                            <div class="apple-pill-fill accent-volume md-pill__bar" style="width: ${vol}%;"></div>
-                        </div>
+            bodyContent = `
+                <div class="apple-pill-slider-container md-pill">
+                    <div class="md-pill__top-row">
+                        <span class="md-pill__badge">${mdIcon('volume', 14)}</span>
+                        <span class="apple-pill-value md-pill__value">%${vol}</span>
                     </div>
-                `;
-            } else {
-                bodyContent = `
-                    <div class="apple-pill-slider-container md-pill">
-                        <div class="md-pill__row">
-                            <span class="md-pill__badge">${mdIcon('volume', 14)}</span>
-                            <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
-                            <span class="apple-pill-value md-pill__value">%${vol}</span>
-                        </div>
-                        <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'volume');">
-                            <div class="apple-pill-fill accent-volume md-pill__bar" style="width: ${vol}%;"></div>
-                        </div>
+                    <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
+                    <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'volume');">
+                        <div class="apple-pill-fill accent-volume md-pill__bar" style="width: ${vol}%;"></div>
                     </div>
-                `;
-            }
+                </div>
+            `;
         } else if (btn.type === 'app_volume_slider') {
             const appKey = (btn.value || '').trim().toLowerCase();
             const appSession = appKey ? audioSessionsCache[appKey] : null;
             const appPct = appSession ? Math.round(appSession.volume) : 0;
             const appLabel = btn.label || (appSession && appSession.title) || (appKey ? prettyAppLabel(appKey) : 'Uygulama Sesi');
             const safeAppLabel = escapeHtml(appLabel);
-            const isCompact = colSpan === 1;
-            if (isCompact) {
-                bodyContent = `
-                    <div class="apple-pill-slider-container md-pill md-pill--compact app-session-pill">
-                        <div class="md-pill__top-row">
-                            <span class="md-pill__badge">${mdIcon('app_session', 14)}</span>
-                            <span class="apple-pill-value md-pill__value">${appPct}%</span>
-                        </div>
-                        <span class="apple-pill-title md-pill__label" title="${safeAppLabel}">${safeAppLabel}</span>
-                        <div class="apple-pill-track md-pill__track" data-app-key="${escapeHtml(appKey)}" draggable="false" onpointerdown="startAppVolumeDrag(event)">
-                            <div class="apple-pill-fill accent-app md-pill__bar" style="width: ${appPct}%;"></div>
-                        </div>
+            bodyContent = `
+                <div class="apple-pill-slider-container md-pill app-session-pill">
+                    <div class="md-pill__top-row">
+                        <span class="md-pill__badge">${mdIcon('app_session', 14)}</span>
+                        <span class="apple-pill-value md-pill__value">${appPct}%</span>
                     </div>
-                `;
-            } else {
-                bodyContent = `
-                    <div class="apple-pill-slider-container md-pill app-session-pill">
-                        <div class="md-pill__row">
-                            <span class="md-pill__badge">${mdIcon('app_session', 14)}</span>
-                            <span class="apple-pill-title md-pill__label" title="${safeAppLabel}">${safeAppLabel}</span>
-                            <span class="apple-pill-value md-pill__value">${appPct}%</span>
-                        </div>
-                        <div class="apple-pill-track md-pill__track" data-app-key="${escapeHtml(appKey)}" draggable="false" onpointerdown="startAppVolumeDrag(event)">
-                            <div class="apple-pill-fill accent-app md-pill__bar" style="width: ${appPct}%;"></div>
-                        </div>
+                    <span class="apple-pill-title md-pill__label" title="${safeAppLabel}">${safeAppLabel}</span>
+                    <div class="apple-pill-track md-pill__track" data-app-key="${escapeHtml(appKey)}" draggable="false" onpointerdown="startAppVolumeDrag(event)">
+                        <div class="apple-pill-fill accent-app md-pill__bar" style="width: ${appPct}%;"></div>
                     </div>
-                `;
-            }
+                </div>
+            `;
             if (appKey && !appSession) fetchAudioSessions();
             ensureAppVolumeRefreshLoop();
         } else if (btn.type === 'brightness_slider') {
-            const isCompact = colSpan === 1;
             const safeLabel = escapeHtml(btn.label || 'Parlaklık');
-            if (isCompact) {
-                bodyContent = `
-                    <div class="apple-pill-slider-container md-pill md-pill--compact">
-                        <div class="md-pill__top-row">
-                            <span class="md-pill__badge">${mdIcon('brightness', 14)}</span>
-                            <span class="apple-pill-value md-pill__value">%85</span>
-                        </div>
-                        <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
-                        <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'brightness');">
-                            <div class="apple-pill-fill accent-brightness md-pill__bar" style="width: 85%;"></div>
-                        </div>
+            bodyContent = `
+                <div class="apple-pill-slider-container md-pill">
+                    <div class="md-pill__top-row">
+                        <span class="md-pill__badge">${mdIcon('brightness', 14)}</span>
+                        <span class="apple-pill-value md-pill__value">%85</span>
                     </div>
-                `;
-            } else {
-                bodyContent = `
-                    <div class="apple-pill-slider-container md-pill">
-                        <div class="md-pill__row">
-                            <span class="md-pill__badge">${mdIcon('brightness', 14)}</span>
-                            <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
-                            <span class="apple-pill-value md-pill__value">%85</span>
-                        </div>
-                        <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'brightness');">
-                            <div class="apple-pill-fill accent-brightness md-pill__bar" style="width: 85%;"></div>
-                        </div>
+                    <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
+                    <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'brightness');">
+                        <div class="apple-pill-fill accent-brightness md-pill__bar" style="width: 85%;"></div>
                     </div>
-                `;
-            }
+                </div>
+            `;
         } else if (btn.type === 'live_info') {
             const isNet = btn.value === 'net_speed';
             const isTemp = btn.value === 'cpu_temp';

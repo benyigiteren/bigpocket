@@ -610,12 +610,13 @@ mod tests {
 
     #[test]
     fn parses_the_first_youtube_hit_with_its_title() {
-        let html = r#"{"videoRenderer":{"videoId":"dQw4w9WgXcQ","thumbnail":{"thumbnails":[]},"title":{"runs":[{"text":"Rick Astley - Never Gonna Give You Up"}]}}}"#;
+        let html = r#"{"videoRenderer":{"videoId":"dQw4w9WgXcQ","thumbnail":{"thumbnails":[]},"title":{"runs":[{"text":"Rick Astley - Never Gonna Give You Up"}]},"lengthText":{"simpleText":"3:33"}}}"#;
         assert_eq!(
             parse_first_video_result(html),
             Some((
                 "dQw4w9WgXcQ".to_string(),
-                "Rick Astley - Never Gonna Give You Up".to_string()
+                "Rick Astley - Never Gonna Give You Up".to_string(),
+                213
             ))
         );
         assert_eq!(parse_first_video_result("<html>no results</html>"), None);
@@ -623,13 +624,16 @@ mod tests {
 
     #[test]
     fn decodes_escaped_youtube_titles() {
-        let html = r#""videoId":"abcdefghijk","title":{"runs":[{"text":"Iron Maiden \u0026 Metallica \"Live\""}]}"#;
+        let html = r#""videoId":"abcdefghijk","title":{"runs":[{"text":"Iron Maiden \u0026 Metallica \"Live\""}]},"lengthText":{"simpleText":"5:00"}"#;
         assert_eq!(
             parse_first_video_result(html),
-            Some(("abcdefghijk".to_string(), "Iron Maiden & Metallica \"Live\"".to_string()))
+            Some((
+                "abcdefghijk".to_string(),
+                "Iron Maiden & Metallica \"Live\"".to_string(),
+                300
+            ))
         );
     }
-
     #[test]
     fn rejects_unrelated_youtube_hits() {
         assert!(token_overlap_percent("Funny Cats Compilation", "Funny Cats Compilation 2024") >= 50);
@@ -770,8 +774,9 @@ mod gsmtc {
     enum Request {
         /// Answer with the current media session (`None` = nothing to report).
         Query(Sender<Option<MediaInfo>>),
+        /// Execute media transport control (playpause, next, prev).
+        Action(String, Sender<bool>),
     }
-
     struct Bridge {
         /// `None` while no worker runs: not started yet, exited, or parked
         /// after repeated timeouts.
@@ -854,6 +859,25 @@ mod gsmtc {
         }
     }
 
+    pub(super) fn action(action: &str) -> bool {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        {
+            let mut bridge = bridge();
+            if bridge.worker.is_none() {
+                bridge.worker = spawn_worker();
+            }
+            let worker = match bridge.worker.as_ref() {
+                Some(w) => w.clone(),
+                None => return false,
+            };
+            if worker.send(Request::Action(action.to_string(), reply_tx)).is_err() {
+                bridge.worker = None;
+                return false;
+            }
+        }
+        reply_rx.recv_timeout(Duration::from_millis(1500)).unwrap_or(false)
+    }
+
     /// Starts the worker thread, if the OS still lets us create one.
     fn spawn_worker() -> Option<Sender<Request>> {
         let (request_tx, request_rx) = mpsc::channel::<Request>();
@@ -883,13 +907,70 @@ mod gsmtc {
         if initialized < 0 && initialized != RPC_E_CHANGED_MODE {
             tracing::warn!("COM apartment initialization failed: 0x{:08X}", initialized as u32);
         }
-
-        while let Ok(Request::Query(reply)) = request_rx.recv() {
-            // A caller that already timed out has dropped its receiver.
-            let _ = reply.send(super::query_windows_media_session());
+        while let Ok(req) = request_rx.recv() {
+            match req {
+                Request::Query(reply) => {
+                    let _ = reply.send(super::query_windows_media_session());
+                }
+                Request::Action(action, reply) => {
+                    let _ = reply.send(super::execute_windows_media_action(&action));
+                }
+            }
         }
 
         unsafe { CoUninitialize() };
+    }
+}
+
+pub fn control_media(action: &str) {
+    let act = action.trim().to_ascii_lowercase();
+    #[cfg(windows)]
+    {
+        // 1. Direct Windows GSMTC control on the MTA worker thread
+        let _ = gsmtc::action(&act);
+
+        // 2. Hardware media key simulation via Windows Win32 keybd_event as universal fallback
+        unsafe {
+            #[link(name = "user32")]
+            extern "system" {
+                fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize);
+            }
+            let vk: u8 = match act.as_str() {
+                "next" | "nexttrack" | "next_track" => 0xB0,
+                "prev" | "prevtrack" | "prev_track" | "previous" => 0xB1,
+                _ => 0xB3,
+            };
+            keybd_event(vk, 0, 0, 0);
+            keybd_event(vk, 0, 2, 0);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn execute_windows_media_action(action: &str) -> bool {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+    let manager = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+        Ok(op) => match op.get() {
+            Ok(m) => m,
+            Err(_) => return false,
+        },
+        Err(_) => return false,
+    };
+    let session = match manager.GetCurrentSession() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    match action {
+        "playpause" | "play_pause" | "play" | "pause" => {
+            session.TryTogglePlayPauseAsync().is_ok()
+        }
+        "next" | "nexttrack" | "next_track" => {
+            session.TrySkipNextAsync().is_ok()
+        }
+        "prev" | "prevtrack" | "prev_track" | "previous" => {
+            session.TrySkipPreviousAsync().is_ok()
+        }
+        _ => false,
     }
 }
 
@@ -939,14 +1020,12 @@ fn query_windows_media_session() -> Option<MediaInfo> {
 
     let has_direct_thumb = read_session_thumbnail(&media_props, &title);
 
-    let cover = if has_direct_thumb {
-        format!("/api/media/cover?k={}", url_encode(&title))
+    let (cover, fb_dur) = if has_direct_thumb {
+        (format!("/api/media/cover?k={}", url_encode(&title)), 0)
     } else {
-        // Only ever searches for a real music track or an actual YouTube video
-        // (see `cover_lookup_plan`).
         get_cached_media_cover(&artist, &title)
     };
-
+    let duration_sec = if duration_sec > 0 { duration_sec } else { fb_dur };
     let is_live = observe_live_timeline(&title, position_sec, duration_sec);
     Some(MediaInfo {
         title,
@@ -1099,8 +1178,8 @@ const MEDIA_COVER_MAX_INFLIGHT: usize = 2;
 enum CoverState {
     /// A background lookup is running; do not start a second one.
     Pending,
-    /// Artwork URL resolved.
-    Ready(String),
+    /// Artwork URL and duration resolved.
+    Ready(String, u32),
     /// Lookup finished without artwork.
     Missing(Instant),
 }
@@ -1112,15 +1191,14 @@ struct CoverEntry {
 
 /// Outcome of a cache probe.
 enum CoverLookup {
-    /// Cached artwork URL.
-    Hit(String),
+    /// Cached artwork URL and duration.
+    Hit(String, u32),
     /// Nothing to report: the key has no artwork, is already being searched, or
     /// was dropped because [`MEDIA_COVER_MAX_INFLIGHT`] lookups are running.
     Miss,
     /// Absent or stale; the caller should search (the key is now `Pending`).
     Search,
 }
-
 /// `HashMap::new` is not a `const fn`, so the map itself is created on first
 /// use (a `Mutex<HashMap<…>>` cannot be built in a `static` initializer).
 static MEDIA_COVER_CACHE: std::sync::LazyLock<
@@ -1136,7 +1214,7 @@ fn prune_media_cover_cache(
     cache.retain(|_, entry| match entry.state {
         CoverState::Missing(at) => at.elapsed() < MEDIA_COVER_MISS_TTL,
         CoverState::Pending => entry.inserted.elapsed() < MEDIA_COVER_PENDING_TTL,
-        CoverState::Ready(_) => true,
+        CoverState::Ready(..) => true,
     });
     while cache.len() > MEDIA_COVER_CACHE_MAX {
         let Some(oldest) = cache
@@ -1163,7 +1241,7 @@ fn media_cover_lookup(key: &str) -> CoverLookup {
     };
     let found = match cache.get(key) {
         Some(entry) => match &entry.state {
-            CoverState::Ready(url) => Some(CoverLookup::Hit(url.clone())),
+            CoverState::Ready(url, dur) => Some(CoverLookup::Hit(url.clone(), *dur)),
             CoverState::Missing(at) if at.elapsed() < MEDIA_COVER_MISS_TTL => {
                 Some(CoverLookup::Miss)
             }
@@ -1203,14 +1281,14 @@ fn media_cover_lookup(key: &str) -> CoverLookup {
 }
 
 /// Store the outcome of a finished lookup (`None` = no artwork).
-fn record_media_cover(key: &str, url: Option<String>) {
+fn record_media_cover(key: &str, result: Option<(String, u32)>) {
     let mut cache = match MEDIA_COVER_CACHE.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
     let now = Instant::now();
-    let state = match url {
-        Some(url) => CoverState::Ready(url),
+    let state = match result {
+        Some((url, dur)) => CoverState::Ready(url, dur),
         None => CoverState::Missing(now),
     };
     cache.insert(key.to_string(), CoverEntry { state, inserted: now });
@@ -1239,27 +1317,26 @@ fn url_encode(input: &str) -> String {
 /// accepted when its title actually covers the query; a stray title can
 /// therefore never pin an unrelated clip as artwork.
 #[cfg(windows)]
-fn fetch_youtube_thumbnail(query: &str) -> Option<String> {
+fn fetch_youtube_thumbnail(query: &str) -> Option<(String, u32)> {
     let url = format!(
         "https://www.youtube.com/results?search_query={}",
         url_encode(query)
     );
     let html = curl_body(&url, 5)?;
-    let (video_id, result_title) = parse_first_video_result(&html)?;
+    let (video_id, result_title, dur) = parse_first_video_result(&html)?;
     if !result_title.is_empty() && token_overlap_percent(query, &result_title) < YOUTUBE_TITLE_MATCH_PERCENT {
         return None;
     }
-    Some(format!("https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"))
+    Some((format!("https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"), dur))
 }
 
 #[cfg(not(windows))]
-fn fetch_youtube_thumbnail(_query: &str) -> Option<String> {
+fn fetch_youtube_thumbnail(_query: &str) -> Option<(String, u32)> {
     None
 }
 
-/// Artwork of the iTunes catalogue entry for `term` (`"artist title"`).
 #[cfg(windows)]
-fn fetch_itunes_artwork(term: &str) -> Option<String> {
+fn fetch_itunes_artwork(term: &str) -> Option<(String, u32)> {
     let url = format!(
         "https://itunes.apple.com/search?term={}&media=music&limit=1",
         url_encode(term)
@@ -1267,14 +1344,14 @@ fn fetch_itunes_artwork(term: &str) -> Option<String> {
     let body = curl_body(&url, 4)?;
     let json: serde_json::Value = serde_json::from_str(&body).ok()?;
     let artwork = json.get("results")?.get(0)?.get("artworkUrl100")?.as_str()?;
-    Some(artwork.replace("100x100bb.jpg", "600x600bb.jpg"))
+    let dur_ms = json.get("results")?.get(0)?.get("trackTimeMillis")?.as_u64().unwrap_or(0);
+    Some((artwork.replace("100x100bb.jpg", "600x600bb.jpg"), (dur_ms / 1000) as u32))
 }
 
 #[cfg(not(windows))]
-fn fetch_itunes_artwork(_term: &str) -> Option<String> {
+fn fetch_itunes_artwork(_term: &str) -> Option<(String, u32)> {
     None
 }
-
 /// Runs `curl` for `url` and returns its response body, without flashing a
 /// console window and with the same polite user agent a browser sends.
 #[cfg(windows)]
@@ -1330,9 +1407,8 @@ fn token_overlap_percent(query: &str, result: &str) -> u32 {
     (matched * 100 / query_tokens.len()) as u32
 }
 
-/// First `"videoId"` of a YouTube search page together with the title of the
-/// result it belongs to; `None` when the page carries no usable video.
-fn parse_first_video_result(html: &str) -> Option<(String, String)> {
+/// First `"videoId"` of a YouTube search page together with the title and duration.
+fn parse_first_video_result(html: &str) -> Option<(String, String, u32)> {
     const VIDEO_ID_MARKER: &str = "\"videoId\":\"";
     let mut from = 0;
     while let Some(offset) = html[from..].find(VIDEO_ID_MARKER) {
@@ -1341,11 +1417,36 @@ fn parse_first_video_result(html: &str) -> Option<(String, String)> {
         let value_end = value.find('"')?;
         let id = &value[..value_end];
         if id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-            return Some((id.to_string(), result_title_after(value)));
+            let title = result_title_after(value);
+            let dur = result_duration_after(value);
+            return Some((id.to_string(), title, dur));
         }
         from = value_start;
     }
     None
+}
+
+fn result_duration_after(after_video_id: &str) -> u32 {
+    let window = &after_video_id[..after_video_id.len().min(4_000)];
+    let marker = "\"lengthText\":{";
+    if let Some(offset) = window.find(marker) {
+        let rest = &window[offset + marker.len()..];
+        if let Some(st_idx) = rest.find("\"simpleText\":\"") {
+            let time_str = read_json_string(&rest[st_idx + 14..]);
+            let parts: Vec<&str> = time_str.split(':').collect();
+            if parts.len() == 2 {
+                let m: u32 = parts[0].parse().unwrap_or(0);
+                let s: u32 = parts[1].parse().unwrap_or(0);
+                return m * 60 + s;
+            } else if parts.len() == 3 {
+                let h: u32 = parts[0].parse().unwrap_or(0);
+                let m: u32 = parts[1].parse().unwrap_or(0);
+                let s: u32 = parts[2].parse().unwrap_or(0);
+                return h * 3600 + m * 60 + s;
+            }
+        }
+    }
+    0
 }
 
 /// Title of the search result that follows `"videoId"` in a search page.
@@ -1609,22 +1710,22 @@ fn cover_lookup_plan(artist: &str, title: &str) -> Option<CoverLookupPlan> {
 }
 
 /// Runs one planned lookup (on a blocking worker, never on the async runtime).
-fn resolve_cover(plan: CoverLookupPlan) -> Option<String> {
+fn resolve_cover(plan: CoverLookupPlan) -> Option<(String, u32)> {
     match plan {
         CoverLookupPlan::YouTubeVideo(title) => fetch_youtube_thumbnail(&title),
         CoverLookupPlan::ITunes(term) => fetch_itunes_artwork(&term),
     }
 }
 
-pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
+pub fn get_cached_media_cover(artist: &str, title: &str) -> (String, u32) {
     let key = format!("{artist} - {title}").trim().to_lowercase();
     if key.is_empty() || key == "-" {
-        return String::new();
+        return (String::new(), 0);
     }
 
     match media_cover_lookup(&key) {
-        CoverLookup::Hit(url) => return url,
-        CoverLookup::Miss => return String::new(),
+        CoverLookup::Hit(url, dur) => return (url, dur),
+        CoverLookup::Miss => return (String::new(), 0),
         CoverLookup::Search => {}
     }
 
@@ -1633,7 +1734,7 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
     // and a blind YouTube search for them returns unrelated clips.
     let Some(plan) = cover_lookup_plan(artist, title) else {
         record_media_cover(&key, None);
-        return String::new();
+        return (String::new(), 0);
     };
 
     // A plain thread, not `tokio::spawn`: this runs on the stats ticker *and*
@@ -1649,7 +1750,7 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
             record_media_cover(&query_key, resolve_cover(plan));
         });
 
-    String::new()
+    (String::new(), 0)
 }
 
 #[cfg(windows)]
@@ -1725,12 +1826,13 @@ fn detect_media_info_internal() -> MediaInfo {
             let mut parts = t.splitn(2, " - ");
             let artist = parts.next().unwrap_or("Spotify").trim().to_string();
             let track = parts.next().unwrap_or("").trim().to_string();
-            let cover = get_cached_media_cover(&artist, &track);
+            let (cover, dur) = get_cached_media_cover(&artist, &track);
             return MediaInfo {
                 title: track,
                 artist,
                 is_playing: true,
                 cover_url: cover,
+                duration_sec: dur,
                 ..Default::default()
             };
         }
@@ -1751,16 +1853,17 @@ fn detect_media_info_internal() -> MediaInfo {
                     Some((artist, track)) => (artist.trim().to_string(), track.trim().to_string()),
                     None => ("YouTube".to_string(), video_title.clone()),
                 };
-                let cover = if is_video_page {
+                let (cover, dur) = if is_video_page {
                     get_cached_media_cover("YouTube", &video_title)
                 } else {
-                    String::new()
+                    (String::new(), 0)
                 };
                 return MediaInfo {
                     title: track,
                     artist,
                     is_playing: true,
                     cover_url: cover,
+                    duration_sec: dur,
                     ..Default::default()
                 };
             }
@@ -1790,12 +1893,13 @@ fn detect_media_info_internal() -> MediaInfo {
             let mut parts = t.splitn(2, " - ");
             let artist = parts.next().unwrap_or("").trim().to_string();
             let track = parts.next().unwrap_or("").trim().to_string();
-            let cover = get_cached_media_cover(&artist, &track);
+            let (cover, dur) = get_cached_media_cover(&artist, &track);
             return MediaInfo {
                 title: track,
                 artist,
                 is_playing: true,
                 cover_url: cover,
+                duration_sec: dur,
                 ..Default::default()
             };
         }
