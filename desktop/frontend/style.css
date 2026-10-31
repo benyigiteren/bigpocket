@@ -3835,9 +3835,55 @@ input:checked + .slider:before {
     background: var(--status-red-txt);
     color: var(--text-inverse);
 }
+/* --- Pure borderless full-screen Stream Deck in mobile-mode --- */
+body.mobile-mode .sidebar,
+body.mobile-mode .content-header,
+body.mobile-mode .deck-top-bar,
+body.mobile-mode .deck-quick-actions,
+body.mobile-mode .deck-resize-edge,
+body.mobile-mode .floating-quick-actions {
+    display: none !important;
+}
 
-body.mobile-mode .deck-quick-actions { display: none; }
+body.mobile-mode,
+body.mobile-mode .app-container,
+body.mobile-mode .main-content,
+body.mobile-mode .tab-panel,
+body.mobile-mode .deck-studio-card,
+body.mobile-mode .deck-studio-workspace,
+body.mobile-mode .deck-canvas-stage,
+body.mobile-mode .deck-phone-mockup,
+body.mobile-mode .deck-hardware-frame {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #101012 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
+}
+body.mobile-mode .buttons-grid,
+body.mobile-mode .deck-hardware-frame .buttons-grid {
+    padding: 10px !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    gap: 10px !important;
+    box-sizing: border-box !important;
+    grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(var(--rows, 2), minmax(0, 1fr)) !important;
+    grid-auto-rows: auto !important;
+    background: #101012 !important;
+    border: none !important;
+}
 
+body.mobile-mode .deck-btn {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
+    border-radius: 18px !important;
+}
 /* --- Sade kart penceresi (4 alan) --- */
 .edit-modal-card { width: 100%; max-width: 440px; padding: 0; overflow: hidden; }
 .edit-modal-title { font-size: 17px; font-weight: 600; color: var(--text-main); margin-top: 3px; }

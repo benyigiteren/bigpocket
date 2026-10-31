@@ -58,9 +58,14 @@ function apiUrl(path) {
 
 // Auth helpers
 function getAuthPassword() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlPw = urlParams.get("password");
+    if (urlPw) {
+        localStorage.setItem("bigpocket_password", urlPw);
+        return urlPw;
+    }
     return localStorage.getItem("bigpocket_password") || "";
 }
-
 function setAuthPassword(pw) {
     localStorage.setItem("bigpocket_password", pw);
 }
