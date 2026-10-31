@@ -4821,13 +4821,13 @@ fun StreamDeckNowPlayingTile(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Top Row: Miniature thumbnail + "ŞİMDİ ÇALIYOR" badge
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
                 if (hasCover) {
                     AsyncImage(
@@ -4835,14 +4835,14 @@ fun StreamDeckNowPlayingTile(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(22.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(22.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
@@ -4851,13 +4851,13 @@ fun StreamDeckNowPlayingTile(
                             imageVector = Icons.Default.MusicNote,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
                 Text(
                     text = "ŞİMDİ ÇALIYOR",
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.08.sp,
                     color = Color.White.copy(alpha = 0.70f),
@@ -4869,12 +4869,12 @@ fun StreamDeckNowPlayingTile(
             // Bottom Section: Title, Subtitle, and clustered Controls
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = title.ifBlank { "Medya yok" },
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = titleColor,
                         maxLines = 1,
@@ -4884,7 +4884,7 @@ fun StreamDeckNowPlayingTile(
                     if (!compact) {
                         Text(
                             text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
-                            fontSize = 11.5.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.Medium,
                             color = artistColor,
                             maxLines = 1,
@@ -4894,9 +4894,9 @@ fun StreamDeckNowPlayingTile(
                     }
                 }
 
-                // Controls: tightly clustered with 10.dp gap (exactly as on PC!)
+                // Controls: tightly clustered with 8.dp gap, sized proportionally
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     DeckTransportButton(
@@ -4933,7 +4933,7 @@ private fun DeckTransportButton(
     val haptic = LocalHapticFeedback.current
     Box(
         modifier = Modifier
-            .size(if (emphasised) 36.dp else 30.dp)
+            .size(if (emphasised) 28.dp else 24.dp)
             .clip(CircleShape)
             .background(if (emphasised) Color.White else Color.White.copy(alpha = 0.12f))
             .then(
@@ -4949,7 +4949,7 @@ private fun DeckTransportButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = if (emphasised) Color.Black else Color.White,
-            modifier = Modifier.size(if (emphasised) 18.dp else 15.dp)
+            modifier = Modifier.size(if (emphasised) 15.dp else 12.dp)
         )
     }
 }

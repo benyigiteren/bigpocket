@@ -3433,8 +3433,8 @@ input:checked + .slider:before {
 .deck-btn:has(.deck-media) {
     position: relative !important;
     overflow: hidden !important;
+    padding: 10px 12px !important;
 }
-
 .deck-media {
     display: flex;
     flex-direction: column;
