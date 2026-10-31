@@ -3,8 +3,30 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
-## v1.5.0-beta
+## v1.5.1-beta
 
+### 🎚️ 4 Farklı Sürgü Tasarım Sistemi (Apple, Samsung One UI, Material You, Framer)
+- **4 Özel Sürgü Tarzı:** Ses ve parlaklık kontrolleri için kullanıcı tercihine bağlı 4 farklı tasarım dili:
+  - *Apple Capsule:* 10dp inceliğinde zarif beyaz yatay kapsül veya iOS Denetim Merkezi dikey hap sürgüsü.
+  - *Samsung One UI 6:* Galaxy S24 tarzı yumuşak dokunsal kalın çubuk ve entegre simge.
+  - *Google Material You:* Android 14/15 kabarcık (bubbly) hap formu ve hareketli dolguya gömülü simge.
+  - *Framer Minimal:* Siberpunk / Nothing OS esintili 3dp kılcal ray ve parlak neon yeşil disk göstergesi.
+- **Yatay & Dikey Yön Seçici:** İster otomatik (hücre en-boy oranına göre), ister zorunlu dikey (yukarıdan aşağıya), ister yatay sürgü yönü.
+
+### 📱 1:1 Hibrit PC Stream Deck Motoru & Kenarlıksız Tam Ekran
+- **PC ile Birebir Piksel Eşitliği:** Mobil Stream Deck sekmesi artık doğrudan PC'nin servis ettiği tam ekran web sahnesini donanım hızlandırmalı olarak açar. Yazı tipleri, albüm kapağının hafif buzlu cam efekti, beyaz zeminli medya butonları, sayaçlar ve kısayollar PC ile %100 aynıdır.
+- **Sıfır Gecikme:** Dokunmalar yerel WebSocket üzerinden 0-1 ms içinde PC'ye iletilir.
+- **Çift Yönlü Donanım Sesi Eşitleme:** PC'deki klavye/kulaklık veya telefondaki kaydırıcı birbirini anında senkronize eder.
+
+### 📥 WhatsApp Akışı Canlı İndirme & Aç
+- **Anlık Yükleme Göstergesi:** İndirme butonuna basıldığı an canlı dairesel yükleme halkası çıkar.
+- **Doğrudan Aç Düğmesi:** İndirme tamamlandığında buton yeşil "✓ Aç" hapına dönüşür ve galeri/dosya yöneticisiyle anında açılır.
+
+### 🛡️ Android 14/15 Ağ & Cleartext Düzeltmesi
+- **android:usesCleartextTraffic="true":** Android WebView'ın yerel ağdaki `http://` bağlantılarını engellemesi sorunu çözüldü, siyah ekran riski tamamen ortadan kaldırıldı.
+- **Otomatik Fail-Safe:** Ağ gecikmesinde bile ekranın asla boş kalmaması için yerel ızgara koruması devrede.
+
+## v1.5.0-beta
 ### 🦀 Rust + Tauri v2 Mimari Dönüşümü
 - **Tamamı Rust Backend:** Masaüstü sunucusu Go'dan sıfır gecikmeli, bellek güvenli ve asenkron Rust (Tauri v2 + Tokio + Axum) mimarisine taşındı.
 - **Çapraz Platform Mimarisi:** macOS ve Linux için platform soyutlamaları eklendi; Windows Defender yanlış alarmları (false-positive) sıfırlandı.

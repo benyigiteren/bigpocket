@@ -92,12 +92,9 @@ object UpdateManager {
     /** Detailed check for manual button in Settings */
     suspend fun checkDetailed(context: Context): CheckResult = withContext(Dispatchers.IO) {
         try {
-            val isBeta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("beta_updates", false)
-            val targetUrl = if (isBeta) {
-                "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=5"
-            } else {
-                "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
-            }
+            val current = currentVersion(context)
+            val isBeta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("beta_updates", false) || current.contains("beta", ignoreCase = true)
+            val targetUrl = "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=10"
 
             val req = Request.Builder()
                 .url(targetUrl)
@@ -108,13 +105,15 @@ object UpdateManager {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext CheckResult.Error("GitHub API HTTP ${resp.code}")
                 val bodyStr = resp.body?.string() ?: return@withContext CheckResult.Error("Boş yanıt")
-                val current = currentVersion(context)
 
                 val releases = mutableListOf<JSONObject>()
-                if (isBeta) {
+                if (bodyStr.trim().startsWith("[")) {
                     val arr = org.json.JSONArray(bodyStr)
                     for (i in 0 until arr.length()) {
-                        releases.add(arr.getJSONObject(i))
+                        val r = arr.getJSONObject(i)
+                        if (isBeta || !r.optBoolean("prerelease", false)) {
+                            releases.add(r)
+                        }
                     }
                 } else {
                     releases.add(JSONObject(bodyStr))
@@ -156,12 +155,9 @@ object UpdateManager {
     /** Returns update info when a newer release with an APK exists, otherwise null. */
     suspend fun check(context: Context, ignoreSkipped: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
-            val isBeta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("beta_updates", false)
-            val targetUrl = if (isBeta) {
-                "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=5"
-            } else {
-                "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
-            }
+            val current = currentVersion(context)
+            val isBeta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("beta_updates", false) || current.contains("beta", ignoreCase = true)
+            val targetUrl = "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=10"
 
             val req = Request.Builder()
                 .url(targetUrl)
@@ -172,18 +168,19 @@ object UpdateManager {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val bodyStr = resp.body?.string() ?: return@withContext null
-                val current = currentVersion(context)
 
                 val releases = mutableListOf<JSONObject>()
-                if (isBeta) {
+                if (bodyStr.trim().startsWith("[")) {
                     val arr = org.json.JSONArray(bodyStr)
                     for (i in 0 until arr.length()) {
-                        releases.add(arr.getJSONObject(i))
+                        val r = arr.getJSONObject(i)
+                        if (isBeta || !r.optBoolean("prerelease", false)) {
+                            releases.add(r)
+                        }
                     }
                 } else {
                     releases.add(JSONObject(bodyStr))
                 }
-
                 var bestRelease: JSONObject? = null
                 for (rel in releases) {
                     val tag = rel.optString("tag_name").removePrefix("v")

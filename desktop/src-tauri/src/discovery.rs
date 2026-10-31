@@ -32,7 +32,7 @@ pub fn format_payload(port: u16) -> String {
         "app": "bigpocket",
         "name": host,
         "port": port,
-        "version": "1.5.0",
+        "version": "1.5.1",
         "needsPassword": needs_password,
     })
     .to_string()

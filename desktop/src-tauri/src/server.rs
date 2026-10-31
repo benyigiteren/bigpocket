@@ -48,10 +48,9 @@ pub const AUDIO_TCP_PORT: u16 = 8084;
 pub const SCREEN_TCP_PORT: u16 = 8086;
 
 /// Version reported by the update checker (mirrors Go's `AppVersion`).
-pub const APP_VERSION: &str = "v1.5.0-beta";
+pub const APP_VERSION: &str = "v1.5.1-beta";
 /// Public repository that publishes releases.
 pub const GITHUB_REPO: &str = "benyigiteren/bigpocket";
-
 /// Password attempts before an IP is temporarily blocked.
 const AUTH_MAX_FAILURES: u32 = 5;
 /// Window in which failures are counted.
@@ -1952,11 +1951,8 @@ async fn check_for_update(force: bool, is_beta: bool) -> Value {
     }
 
     let current_version = APP_VERSION.trim_start_matches('v');
-    let target = if is_beta {
-        format!("https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=5")
-    } else {
-        format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest")
-    };
+    let check_beta = is_beta || APP_VERSION.contains("beta");
+    let target = format!("https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=10");
 
     let body = match http_get(&target).await {
         Ok(body) => body,
@@ -1977,11 +1973,11 @@ async fn check_for_update(force: bool, is_beta: bool) -> Value {
         }
     };
 
-    let candidates: Vec<Value> = if is_beta {
-        parsed.as_array().cloned().unwrap_or_default()
-    } else {
-        vec![parsed]
-    };
+    let all_releases: Vec<Value> = parsed.as_array().cloned().unwrap_or_else(|| vec![parsed]);
+    let candidates: Vec<Value> = all_releases
+        .into_iter()
+        .filter(|rel| check_beta || !rel.get("prerelease").and_then(Value::as_bool).unwrap_or(false))
+        .collect();
     if candidates.is_empty() {
         return update_info_json(
             current_version, "", false, String::new(), String::new(), String::new(),
