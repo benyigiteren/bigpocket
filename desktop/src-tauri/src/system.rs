@@ -134,6 +134,7 @@ impl SystemMonitor {
             "media_title": media.title,
             "media_artist": media.artist,
             "media_playing": media.is_playing,
+            "media_cover": media.cover_url,
         })
     }
 
@@ -573,6 +574,78 @@ pub struct MediaInfo {
     pub title: String,
     pub artist: String,
     pub is_playing: bool,
+    pub cover_url: String,
+}
+
+static MEDIA_COVER_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
+static LAST_SEARCHED_SONG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
+    let key = format!("{artist} - {title}").trim().to_lowercase();
+    if key.is_empty() || key == "-" {
+        return String::new();
+    }
+
+    if let Ok(guard) = MEDIA_COVER_CACHE.lock() {
+        if let Some(cache) = guard.as_ref() {
+            if let Some(url) = cache.get(&key) {
+                return url.clone();
+            }
+        }
+    }
+
+    let should_search = {
+        let mut last = LAST_SEARCHED_SONG.lock().unwrap();
+        if last.as_deref() != Some(&key) {
+            *last = Some(key.clone());
+            true
+        } else {
+            false
+        }
+    };
+
+    if should_search {
+        let artist_clean = artist.to_string();
+        let title_clean = title.to_string();
+        let query_key = key.clone();
+        tokio::spawn(async move {
+            let term = format!("{artist_clean} {title_clean}").trim().to_string();
+            let encoded_term = term.replace(' ', "+").replace('&', "+");
+            let url = format!("https://itunes.apple.com/search?term={encoded_term}&media=music&limit=1");
+
+            let res = tokio::task::spawn_blocking(move || -> Option<String> {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let output = std::process::Command::new("curl")
+                        .args(["-s", "-m", "3", &url])
+                        .creation_flags(0x0800_0000)
+                        .output()
+                        .ok()?;
+                    let body = String::from_utf8_lossy(&output.stdout);
+                    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+                    let art = json.get("results")?
+                        .get(0)?
+                        .get("artworkUrl100")?
+                        .as_str()?;
+                    Some(art.replace("100x100bb.jpg", "600x600bb.jpg"))
+                }
+                #[cfg(not(windows))]
+                {
+                    None
+                }
+            }).await;
+
+            if let Ok(Some(cover_url)) = res {
+                if let Ok(mut guard) = MEDIA_COVER_CACHE.lock() {
+                    let cache = guard.get_or_insert_with(std::collections::HashMap::new);
+                    cache.insert(query_key, cover_url);
+                }
+            }
+        });
+    }
+
+    String::new()
 }
 
 #[cfg(windows)]
@@ -625,16 +698,19 @@ pub fn detect_media_info() -> MediaInfo {
                 title: "Spotify".to_string(),
                 artist: "Duraklatıldı".to_string(),
                 is_playing: false,
+                cover_url: String::new(),
             };
         }
         if lower.contains("spotify") && t.contains(" - ") {
             let mut parts = t.splitn(2, " - ");
             let artist = parts.next().unwrap_or("Spotify").trim().to_string();
             let track = parts.next().unwrap_or("").trim().to_string();
+            let cover = get_cached_media_cover(&artist, &track);
             return MediaInfo {
                 title: track,
                 artist,
                 is_playing: true,
+                cover_url: cover,
             };
         }
 
@@ -654,16 +730,20 @@ pub fn detect_media_info() -> MediaInfo {
                     let mut parts = cleaned.splitn(2, " - ");
                     let artist = parts.next().unwrap_or("YouTube").trim().to_string();
                     let track = parts.next().unwrap_or("").trim().to_string();
+                    let cover = get_cached_media_cover(&artist, &track);
                     return MediaInfo {
                         title: track,
                         artist,
                         is_playing: true,
+                        cover_url: cover,
                     };
                 }
+                let cover = get_cached_media_cover("YouTube", &cleaned);
                 return MediaInfo {
                     title: cleaned,
                     artist: "YouTube".to_string(),
                     is_playing: true,
+                    cover_url: cover,
                 };
             }
         }
@@ -672,10 +752,12 @@ pub fn detect_media_info() -> MediaInfo {
         if lower.contains("vlc media player") {
             let cleaned = t.replace(" - VLC media player", "").trim().to_string();
             if !cleaned.is_empty() {
+                let cover = get_cached_media_cover("VLC", &cleaned);
                 return MediaInfo {
                     title: cleaned,
                     artist: "VLC Player".to_string(),
                     is_playing: true,
+                    cover_url: cover,
                 };
             }
         }
@@ -689,10 +771,12 @@ pub fn detect_media_info() -> MediaInfo {
             let mut parts = t.splitn(2, " - ");
             let artist = parts.next().unwrap_or("").trim().to_string();
             let track = parts.next().unwrap_or("").trim().to_string();
+            let cover = get_cached_media_cover(&artist, &track);
             return MediaInfo {
                 title: track,
                 artist,
                 is_playing: true,
+                cover_url: cover,
             };
         }
     }

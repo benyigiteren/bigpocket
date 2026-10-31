@@ -3407,6 +3407,84 @@ input:checked + .slider:before {
     height: 100%;
     min-width: 0;
     background: var(--bg-surface);
+    position: relative;
+    overflow: hidden;
+    border-radius: inherit;
+}
+
+.deck-media__cover-bg {
+    position: absolute;
+    inset: -8px;
+    background-size: cover;
+    background-position: center;
+    filter: blur(14px) brightness(0.48) saturate(1.4);
+    transform: scale(1.18);
+    z-index: 0;
+    transition: background-image 0.4s ease, opacity 0.4s ease;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.deck-media.has-cover .deck-media__cover-bg {
+    opacity: 1;
+}
+
+.deck-media__cover-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(14, 15, 18, 0.35) 0%, rgba(14, 15, 18, 0.88) 100%);
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.deck-media.has-cover .deck-media__cover-overlay {
+    opacity: 1;
+}
+
+.deck-media__head,
+.deck-media__meta,
+.deck-media__controls {
+    position: relative;
+    z-index: 2;
+}
+
+.deck-media__thumb {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+    flex-shrink: 0;
+    display: none;
+}
+
+.deck-media.has-cover .deck-media__thumb {
+    display: block;
+}
+.deck-media.has-cover .deck-media__badge {
+    display: none;
+}
+
+.deck-btn,
+.deck-btn * {
+    user-select: none;
+    -webkit-user-select: none;
+}
+.deck-btn img,
+.deck-btn svg,
+.deck-btn span,
+.deck-btn p,
+.deck-btn .btn-label {
+    pointer-events: none;
+}
+.deck-btn button,
+.deck-btn .deck-quick-actions,
+.deck-btn .deck-quick-actions *,
+.deck-btn .deck-resize-edge {
+    pointer-events: auto;
 }
 
 .deck-media__head { display: flex; align-items: center; gap: 6px; min-width: 0; }

@@ -769,6 +769,7 @@ function connectWebSocket() {
                 media_title: msg.media_title || "",
                 media_artist: msg.media_artist || "",
                 media_playing: !!msg.media_playing,
+                media_cover: msg.media_cover || "",
                 weather_city: msg.weather_city || "Istanbul",
                 weather_temp: msg.weather_temp || 0,
                 weather_code: msg.weather_code || 0,
@@ -1741,6 +1742,7 @@ let cachedLiveStats = {
     media_title: "",
     media_artist: "",
     media_playing: false,
+    media_cover: "",
     weather_city: "Istanbul",
     weather_temp: 0,
     weather_code: 0,
@@ -2009,15 +2011,30 @@ function updateLiveStatsDOM() {
             return;
         }
 
-        if (btn.type === 'now_playing' || btn.type === 'media_control') {
+        if (btn.type === 'now_playing' || btn.type === 'media_control' || btn.type === 'media_widget') {
             const titleEl = btnEl.querySelector('.deck-np-title');
             const artistEl = btnEl.querySelector('.deck-np-artist');
             const playEl = btnEl.querySelector('.deck-np-play-glyph');
+            const mediaCard = btnEl.querySelector('.deck-media');
+            const bgEl = btnEl.querySelector('.deck-media__cover-bg');
+            const thumbEl = btnEl.querySelector('.deck-media__thumb');
             const title = cachedLiveStats.media_title || (btn.label || 'Şimdi Çalıyor');
             const artist = cachedLiveStats.media_artist || 'Medya bekleniyor';
+            const cover = cachedLiveStats.media_cover || '';
+
             if (titleEl) titleEl.textContent = title;
             if (artistEl) artistEl.textContent = artist;
             if (playEl) playEl.innerHTML = cachedLiveStats.media_playing ? mdIcon('pause', 14) : mdIcon('play', 14);
+
+            if (mediaCard) {
+                mediaCard.classList.toggle('has-cover', !!cover);
+            }
+            if (bgEl && cover) {
+                bgEl.style.backgroundImage = `url("${cover}")`;
+            }
+            if (thumbEl && cover) {
+                thumbEl.src = cover;
+            }
             return;
         }
 
@@ -4032,11 +4049,16 @@ function renderStreamDeckButtons() {
             const rich = btn.type === 'now_playing' || btn.type === 'media_control' || colSpan >= 2;
             const title = cachedLiveStats.media_title || (btn.label || 'Şimdi Çalıyor');
             const artist = cachedLiveStats.media_artist || 'Medya bekleniyor';
+            const cover = cachedLiveStats.media_cover || '';
+            const hasCover = !!cover;
             const playIcon = cachedLiveStats.media_playing ? mdIcon('pause', 14) : mdIcon('play', 14);
             bodyContent = `
-                <div class="deck-media ${rich ? 'is-rich' : 'is-compact'}">
+                <div class="deck-media ${rich ? 'is-rich' : 'is-compact'} ${hasCover ? 'has-cover' : ''}">
+                    <div class="deck-media__cover-bg" ${hasCover ? `style="background-image: url('${escapeHtml(cover)}');"` : ''}></div>
+                    <div class="deck-media__cover-overlay"></div>
                     ${rich ? `
                     <div class="deck-media__head">
+                        <img src="${escapeHtml(cover)}" class="deck-media__thumb" alt="Kapak">
                         <span class="deck-media__badge">${mdIcon('music', 14)}</span>
                         <span class="deck-media__label">Şimdi Çalıyor</span>
                     </div>
@@ -4175,6 +4197,10 @@ function renderStreamDeckButtons() {
 
         // Drag & Drop event handlers
         item.addEventListener('dragstart', (e) => {
+            if (e.target.closest('.deck-quick-actions, .deck-resize-edge, input, button')) {
+                e.preventDefault();
+                return;
+            }
             item.classList.add('dragging');
             e.dataTransfer.setData('text/plain', btn.id.toString());
             e.dataTransfer.effectAllowed = 'move';

@@ -46,6 +46,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
@@ -165,6 +166,7 @@ data class StreamDeckLiveStats(
     val mediaTitle: String = "",
     val mediaArtist: String = "",
     val mediaPlaying: Boolean = false,
+    val mediaCover: String = "",
     val weatherCity: String = "",
     val weatherTemp: Int = 0,
     val weatherCode: Int = 0,
@@ -774,6 +776,7 @@ private class TelemetryAccumulator {
             mediaTitle = extra?.mediaTitle ?: current.mediaTitle,
             mediaArtist = extra?.mediaArtist ?: current.mediaArtist,
             mediaPlaying = extra?.mediaPlaying ?: current.mediaPlaying,
+            mediaCover = extra?.mediaCover ?: current.mediaCover,
             weatherCity = extra?.weatherCity ?: current.weatherCity,
             weatherTemp = extra?.weatherTemp ?: current.weatherTemp,
             weatherCode = extra?.weatherCode ?: current.weatherCode,
@@ -3777,6 +3780,7 @@ fun ElgatoKeycapTile(
                 title = live.mediaTitle,
                 artist = live.mediaArtist,
                 isPlaying = live.mediaPlaying,
+                coverUrl = live.mediaCover,
                 palette = palette,
                 onAction = { act ->
                     SocketManager.sendControl(JSONObject().apply {
@@ -4312,12 +4316,35 @@ fun StreamDeckNowPlayingTile(
     title: String,
     artist: String,
     isPlaying: Boolean,
+    coverUrl: String = "",
     onAction: (String) -> Unit,
     palette: DeckPalette? = null,
     modifier: Modifier = Modifier
 ) {
     val p = palette ?: deckPaletteFor("now_playing", "", "")
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        if (coverUrl.isNotBlank()) {
+            AsyncImage(
+                model = coverUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.35f)
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.40f),
+                                Color.Black.copy(alpha = 0.85f)
+                            )
+                        )
+                    )
+            )
+        }
         val compact = maxHeight < 96.dp
         Column(
             modifier = Modifier
@@ -4329,19 +4356,31 @@ fun StreamDeckNowPlayingTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(MinimalistSurfaceElevated),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
+                if (coverUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = coverUrl,
                         contentDescription = null,
-                        tint = p.accent,
-                        modifier = Modifier.size(15.dp)
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(MinimalistSurfaceElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = p.accent,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
                 Text(
                     text = label.ifBlank { "Şimdi Çalıyor" },
