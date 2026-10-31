@@ -135,6 +135,8 @@ impl SystemMonitor {
             "media_artist": media.artist,
             "media_playing": media.is_playing,
             "media_cover": media.cover_url,
+            "media_pos_sec": media.position_sec,
+            "media_dur_sec": media.duration_sec,
         })
     }
 
@@ -575,6 +577,60 @@ pub struct MediaInfo {
     pub artist: String,
     pub is_playing: bool,
     pub cover_url: String,
+    pub position_sec: u32,
+    pub duration_sec: u32,
+}
+
+static MEDIA_TIMELINE: std::sync::Mutex<Option<MediaTimelineTracker>> = std::sync::Mutex::new(None);
+
+struct MediaTimelineTracker {
+    last_title: String,
+    started_at: std::time::Instant,
+    accumulated_sec: u32,
+    duration_sec: u32,
+    is_playing: bool,
+}
+
+impl MediaTimelineTracker {
+    fn update(title: &str, is_playing: bool) -> (u32, u32) {
+        if title.is_empty() || title == "Spotify" || title == "Duraklatıldı" {
+            return (0, 0);
+        }
+        let mut guard = MEDIA_TIMELINE.lock().unwrap();
+        let tracker = guard.get_or_insert_with(|| MediaTimelineTracker {
+            last_title: title.to_string(),
+            started_at: std::time::Instant::now(),
+            accumulated_sec: 0,
+            duration_sec: 215,
+            is_playing,
+        });
+
+        if tracker.last_title != title {
+            tracker.last_title = title.to_string();
+            tracker.started_at = std::time::Instant::now();
+            tracker.accumulated_sec = 0;
+            tracker.duration_sec = 215;
+            tracker.is_playing = is_playing;
+            return (0, tracker.duration_sec);
+        }
+
+        if tracker.is_playing != is_playing {
+            if is_playing {
+                tracker.started_at = std::time::Instant::now();
+            } else {
+                tracker.accumulated_sec = tracker.accumulated_sec.saturating_add(tracker.started_at.elapsed().as_secs() as u32);
+            }
+            tracker.is_playing = is_playing;
+        }
+
+        let current_pos = if tracker.is_playing {
+            (tracker.accumulated_sec + tracker.started_at.elapsed().as_secs() as u32) % (tracker.duration_sec + 1)
+        } else {
+            tracker.accumulated_sec.min(tracker.duration_sec)
+        };
+
+        (current_pos, tracker.duration_sec)
+    }
 }
 
 static MEDIA_COVER_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
@@ -706,11 +762,19 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
 
 #[cfg(windows)]
 pub fn detect_media_info() -> MediaInfo {
+    let mut media = detect_media_info_internal();
+    let (pos, dur) = MediaTimelineTracker::update(&media.title, media.is_playing);
+    media.position_sec = pos;
+    media.duration_sec = dur;
+    media
+}
+
+#[cfg(windows)]
+fn detect_media_info_internal() -> MediaInfo {
     use std::ffi::c_void;
     type HWND = *mut c_void;
     type BOOL = i32;
     type LPARAM = isize;
-
     #[link(name = "user32")]
     extern "system" {
         fn EnumWindows(lpEnumFunc: unsafe extern "system" fn(HWND, LPARAM) -> BOOL, lParam: LPARAM) -> BOOL;
@@ -755,6 +819,7 @@ pub fn detect_media_info() -> MediaInfo {
                 artist: "Duraklatıldı".to_string(),
                 is_playing: false,
                 cover_url: String::new(),
+                ..Default::default()
             };
         }
         if lower.contains("spotify") && t.contains(" - ") {
@@ -767,6 +832,7 @@ pub fn detect_media_info() -> MediaInfo {
                 artist,
                 is_playing: true,
                 cover_url: cover,
+                ..Default::default()
             };
         }
 
@@ -792,6 +858,7 @@ pub fn detect_media_info() -> MediaInfo {
                         artist,
                         is_playing: true,
                         cover_url: cover,
+                        ..Default::default()
                     };
                 }
                 let cover = get_cached_media_cover("YouTube", &cleaned);
@@ -800,6 +867,7 @@ pub fn detect_media_info() -> MediaInfo {
                     artist: "YouTube".to_string(),
                     is_playing: true,
                     cover_url: cover,
+                    ..Default::default()
                 };
             }
         }
@@ -814,6 +882,7 @@ pub fn detect_media_info() -> MediaInfo {
                     artist: "VLC Player".to_string(),
                     is_playing: true,
                     cover_url: cover,
+                    ..Default::default()
                 };
             }
         }
@@ -833,6 +902,7 @@ pub fn detect_media_info() -> MediaInfo {
                 artist,
                 is_playing: true,
                 cover_url: cover,
+                ..Default::default()
             };
         }
     }

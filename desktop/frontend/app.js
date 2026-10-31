@@ -2036,9 +2036,14 @@ function updateLiveStatsDOM() {
             const mediaCard = btnEl.querySelector('.deck-media');
             const bgEl = btnEl.querySelector('.deck-media__cover-bg');
             const thumbEl = btnEl.querySelector('.deck-media__thumb');
+            const progBar = btnEl.querySelector('.deck-media__progress-bar');
+            const curTimeEl = btnEl.querySelector('.deck-media__time-cur');
+            const durTimeEl = btnEl.querySelector('.deck-media__time-dur');
             const title = cachedLiveStats.media_title || (btn.label || 'Şimdi Çalıyor');
             const artist = cachedLiveStats.media_artist || 'Medya bekleniyor';
             const cover = cachedLiveStats.media_cover || '';
+            const pos = Number(cachedLiveStats.media_pos_sec) || 0;
+            const dur = Number(cachedLiveStats.media_dur_sec) || 0;
 
             if (titleEl) titleEl.textContent = title;
             if (artistEl) artistEl.textContent = artist;
@@ -2053,6 +2058,13 @@ function updateLiveStatsDOM() {
             if (thumbEl && cover) {
                 thumbEl.src = cover;
             }
+            if (progBar && dur > 0) {
+                const pct = Math.min(100, Math.round((pos / dur) * 100));
+                progBar.style.width = `${pct}%`;
+            }
+            const fmtSec = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+            if (curTimeEl) curTimeEl.textContent = fmtSec(pos);
+            if (durTimeEl) durTimeEl.textContent = fmtSec(dur);
             return;
         }
 
@@ -4071,6 +4083,10 @@ function renderStreamDeckButtons() {
             const cover = cachedLiveStats.media_cover || '';
             const hasCover = !!cover;
             const playIcon = cachedLiveStats.media_playing ? mdIcon('pause', 14) : mdIcon('play', 14);
+            const pos = Number(cachedLiveStats.media_pos_sec) || 0;
+            const dur = Number(cachedLiveStats.media_dur_sec) || 215;
+            const pct = dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0;
+            const fmtSec = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
             bodyContent = `
                 <div class="deck-media ${rich ? 'is-rich' : 'is-compact'} ${hasCover ? 'has-cover' : ''}">
                     <div class="deck-media__cover-bg" ${hasCover ? `style="background-image: url('${escapeHtml(cover)}');"` : ''}></div>
@@ -4088,6 +4104,15 @@ function renderStreamDeckButtons() {
                     <div class="deck-media__meta">
                         <span class="deck-media__title deck-np-title">${escapeHtml(btn.label || title)}</span>
                     </div>`}
+                    <div class="deck-media__progress-wrap">
+                        <div class="deck-media__progress-track">
+                            <div class="deck-media__progress-bar" style="width: ${pct}%;"></div>
+                        </div>
+                        <div class="deck-media__progress-times">
+                            <span class="deck-media__time-cur">${fmtSec(pos)}</span>
+                            <span class="deck-media__time-dur">${fmtSec(dur)}</span>
+                        </div>
+                    </div>
                     <div class="deck-media__controls">
                         <button type="button" class="md-media-btn" data-tooltip="Önceki parça" aria-label="Önceki parça" onclick="event.stopPropagation(); triggerMediaAction('prev');">${mdIcon('prev', 14)}</button>
                         <button type="button" class="md-media-btn md-media-btn--play" data-tooltip="Oynat / Duraklat" aria-label="Oynat veya duraklat" onclick="event.stopPropagation(); triggerMediaAction('playpause');"><span class="deck-np-play-glyph">${playIcon}</span></button>
@@ -4838,16 +4863,38 @@ const EDIT_VALUE_HINTS = {
 
 function applyEditTypeHints(type) {
     const hint = EDIT_VALUE_HINTS[type] || { label: 'Değer', placeholder: '' };
-    document.getElementById('edit-value-label').textContent = hint.label;
-    document.getElementById('edit-value').placeholder = hint.placeholder;
+    const labelEl = document.getElementById('edit-value-label');
+    if (labelEl) labelEl.textContent = hint.label;
+    const valEl = document.getElementById('edit-value');
+    if (valEl) valEl.placeholder = hint.placeholder;
+
+    // Show raw text field ONLY for actual text commands/hotkeys
+    const textTypes = ['hotkey', 'command', 'url', 'text_snippet'];
+    const valGroup = document.getElementById('edit-value-group');
+    if (valGroup) valGroup.style.display = textTypes.includes(type) ? 'block' : 'none';
+
     const appGroup = document.getElementById('installed-apps-group');
-    appGroup.style.display = type === 'command' ? 'block' : 'none';
-    // Clock typography controls only apply to the clock widget.
+    if (appGroup) appGroup.style.display = type === 'command' ? 'block' : 'none';
+
+    // Clock typography controls
     const isClock = type === 'clock_widget';
     ['clock-options-group', 'clock-font-group', 'clock-size-group'].forEach(id => {
         const group = document.getElementById(id);
         if (group) group.style.display = isClock ? 'block' : 'none';
     });
+
+    // Live info / sensor group
+    const liveGroup = document.getElementById('live-info-group');
+    if (liveGroup) liveGroup.style.display = type === 'live_info' ? 'block' : 'none';
+
+    // Slider options group
+    const sliderGroup = document.getElementById('slider-options-group');
+    if (sliderGroup) sliderGroup.style.display = (type === 'volume_slider' || type === 'brightness_slider') ? 'block' : 'none';
+
+    // Weather options group
+    const weatherGroup = document.getElementById('weather-options-group');
+    if (weatherGroup) weatherGroup.style.display = type === 'weather' ? 'block' : 'none';
+
     if (type === 'command') loadInstalledApps();
 }
 
@@ -4868,11 +4915,36 @@ function openEditButtonModal(id) {
     document.getElementById('edit-type').value = btn.type || 'hotkey';
     document.getElementById('edit-value').value = btn.value || '';
     const clockStyleSel = document.getElementById('edit-clock-style');
-    if (clockStyleSel) clockStyleSel.value = btn.clock_style || 'apple_lockscreen';
+    if (clockStyleSel) clockStyleSel.value = btn.clock_style || 'apple_minimal';
     const fontSel = document.getElementById('edit-font-family');
     if (fontSel) fontSel.value = btn.font_family || 'geist';
     const sizeSel = document.getElementById('edit-clock-size');
     if (sizeSel) sizeSel.value = btn.clock_font_size || 'auto';
+
+    // Set sensor select
+    const metricSel = document.getElementById('edit-metric-select');
+    if (metricSel) metricSel.value = btn.value || 'cpu';
+
+    // Set slider options
+    const sliderStyleSel = document.getElementById('edit-slider-style');
+    if (sliderStyleSel) sliderStyleSel.value = btn.slider_style || 'apple';
+    const sliderOriSel = document.getElementById('edit-slider-orientation');
+    if (sliderOriSel) sliderOriSel.value = btn.slider_orientation || 'auto';
+
+    // Set weather city
+    const weatherCitySel = document.getElementById('edit-weather-city');
+    if (weatherCitySel) {
+        const city = btn.value || 'Istanbul';
+        if (['Istanbul', 'Ankara', 'Izmir', 'Bursa', 'Antalya', 'London', 'New York'].includes(city)) {
+            weatherCitySel.value = city;
+        } else {
+            weatherCitySel.value = 'custom';
+            document.getElementById('edit-value').value = city;
+            const valGroup = document.getElementById('edit-value-group');
+            if (valGroup) valGroup.style.display = 'block';
+        }
+    }
+
     applyEditTypeHints(btn.type || 'hotkey');
     setEditSizePills(btn.col_span || 1, btn.row_span || 1);
     renderIconPickerGallery(btn.icon);
@@ -4880,7 +4952,6 @@ function openEditButtonModal(id) {
     document.getElementById('edit-button-modal').classList.add('active');
     setTimeout(() => document.getElementById('edit-label').focus(), 60);
 }
-
 const AVAILABLE_ICONS = [
     { key: 'mic', name: 'Mikrofon' },
     { key: 'volup', name: 'Ses Aç' },
@@ -4955,8 +5026,27 @@ function renderIconPickerGallery(selectedIcon) {
 function applyButtonEdit() {
     const label = document.getElementById('edit-label').value.trim();
     const type = document.getElementById('edit-type').value;
-    const value = document.getElementById('edit-value').value;
+    let value = document.getElementById('edit-value').value;
     const icon = document.getElementById('edit-icon-select').value;
+
+    if (type === 'clock_widget') {
+        const clockStyleSel = document.getElementById('edit-clock-style');
+        value = clockStyleSel ? clockStyleSel.value : 'apple_minimal';
+    } else if (type === 'live_info') {
+        const metricSel = document.getElementById('edit-metric-select');
+        value = metricSel ? metricSel.value : 'cpu';
+    } else if (type === 'volume_slider') {
+        value = 'master_volume';
+    } else if (type === 'brightness_slider') {
+        value = 'display_brightness';
+    } else if (type === 'now_playing') {
+        value = 'media_session';
+    } else if (type === 'weather') {
+        const citySel = document.getElementById('edit-weather-city');
+        if (citySel && citySel.value !== 'custom') {
+            value = citySel.value;
+        }
+    }
 
     const saveAndClose = (finalIcon) => {
         const idx = apiConfig.stream_deck_buttons.findIndex(b => b.id === editingButtonId);
@@ -4978,14 +5068,20 @@ function applyButtonEdit() {
             const fontSel = document.getElementById('edit-font-family');
             const sizeSel = document.getElementById('edit-clock-size');
             if (type === 'clock_widget') {
-                updated.clock_style = clockStyleSel ? clockStyleSel.value : (existing.clock_style || '');
-                updated.font_family = fontSel ? fontSel.value : (existing.font_family || '');
+                updated.clock_style = clockStyleSel ? clockStyleSel.value : (existing.clock_style || 'apple_minimal');
+                updated.font_family = fontSel ? fontSel.value : (existing.font_family || 'geist');
                 const size = sizeSel ? sizeSel.value : 'auto';
                 updated.clock_font_size = size === 'auto' ? '' : size;
             } else {
                 updated.clock_style = '';
                 updated.font_family = '';
                 updated.clock_font_size = '';
+            }
+            if (type === 'volume_slider' || type === 'brightness_slider') {
+                const sliderStyleSel = document.getElementById('edit-slider-style');
+                const sliderOriSel = document.getElementById('edit-slider-orientation');
+                updated.slider_style = sliderStyleSel ? sliderStyleSel.value : 'apple';
+                updated.slider_orientation = sliderOriSel ? sliderOriSel.value : 'auto';
             }
             apiConfig.stream_deck_buttons[idx] = updated;
             targetEmptyCell = null;

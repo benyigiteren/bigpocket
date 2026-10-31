@@ -3590,6 +3590,42 @@ input:checked + .slider:before {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.deck-media__progress-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    margin: 2px 0;
+    position: relative;
+    z-index: 3;
+}
+
+.deck-media__progress-track {
+    width: 100%;
+    height: 3.5px;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.16);
+    overflow: hidden;
+    position: relative;
+}
+
+.deck-media__progress-bar {
+    height: 100%;
+    border-radius: 99px;
+    background: #ffffff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+    transition: width 0.3s ease;
+}
+
+.deck-media__progress-times {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.65);
+    line-height: 1;
+}
+
 
 .deck-media__controls { display: flex; align-items: center; gap: 6px; }
 

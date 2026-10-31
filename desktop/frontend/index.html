@@ -331,11 +331,91 @@
                                 </select>
                             </div>
 
-                            <div class="form-group">
+                            <div class="form-group" id="edit-value-group">
                                 <label for="edit-value" id="edit-value-label">Görev / Değer</label>
                                 <input type="text" id="edit-value" placeholder="ctrl+alt+t" autocomplete="off">
                             </div>
 
+                            <div class="form-group" id="clock-options-group" style="display: none;">
+                                <label for="edit-clock-style">Saat Stili (Görerek Seçin)</label>
+                                <select id="edit-clock-style">
+                                    <option value="apple_minimal">🍏 Apple Minimal — büyük minimalist rakamlar & yerel saat</option>
+                                    <option value="flip_clock">⏱️ Flip Clock — split-flap daktilo kartları</option>
+                                    <option value="neon_cyberpunk">⚡ Neon Cyberpunk — cyan parıltılı dijital</option>
+                                    <option value="word_clock">💬 Word Clock — Türkçe metin saati (DÖRT KIRK BEŞ)</option>
+                                    <option value="swiss_serif">🏛️ Swiss Serif — lüks serif tipografi</option>
+                                    <option value="retro_terminal">📟 Retro Terminal — yeşil CRT fosfor konsol</option>
+                                    <option value="apple_lockscreen">📱 Apple Lockscreen — geniş kilit ekranı</option>
+                                    <option value="apple_stacked">⬛ Apple Stacked — üst üste büyük rakamlar</option>
+                                    <option value="digital_clean">🔢 Digital Clean — sade dijital</option>
+                                    <option value="digital_seconds">⏳ Digital Seconds — saniyeli hassas saat</option>
+                                    <option value="analog">⏰ Analog — yuvarlak kadran</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="clock-font-group" style="display: none;">
+                                <label for="edit-font-family">Saat Yazı Tipi</label>
+                                <select id="edit-font-family">
+                                    <option value="geist">Geist (Modern Sans — Varsayılan)</option>
+                                    <option value="jetbrains">JetBrains Mono (Daktilo)</option>
+                                    <option value="serif">Playfair Serif (Zarif)</option>
+                                    <option value="inter">Inter Sans</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="clock-size-group" style="display: none;">
+                                <label for="edit-clock-size">Saat Boyutu</label>
+                                <select id="edit-clock-size">
+                                    <option value="auto">Otomatik</option>
+                                    <option value="compact">Kompakt</option>
+                                    <option value="regular">Normal</option>
+                                    <option value="large">Büyük</option>
+                                    <option value="huge">Devasa</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="live-info-group" style="display: none;">
+                                <label for="edit-metric-select">Canlı Sensör / Metrik</label>
+                                <select id="edit-metric-select">
+                                    <option value="cpu">⚡ İşlemci (CPU Yükü %)</option>
+                                    <option value="cpu_temp">🌡️ İşlemci Sıcaklığı (°C)</option>
+                                    <option value="ram">🧠 Bellek (RAM Kullanımı %)</option>
+                                    <option value="disk">💾 Disk Doluluk (C: Boş/Toplam GB)</option>
+                                    <option value="gpu">🎮 Ekran Kartı (GPU Yükü %)</option>
+                                    <option value="net_speed">🌐 Ağ Hızı (Canlı Download/Upload)</option>
+                                    <option value="combo">⭕ 3'lü Sensör Halkası (CPU + RAM + Sıcaklık)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="slider-options-group" style="display: none;">
+                                <label for="edit-slider-style">Sürgü Tasarım Dili</label>
+                                <select id="edit-slider-style">
+                                    <option value="apple">🍏 Apple Capsule — 10dp zarif yatay kapsül</option>
+                                    <option value="samsung">📱 Samsung One UI — yumuşak dokunsal kalın çubuk</option>
+                                    <option value="material">🤖 Google Material You — kabarcık hap formu</option>
+                                    <option value="framer">⚡ Framer Minimal — 3dp kılcal neon disk</option>
+                                </select>
+                                <label for="edit-slider-orientation" style="margin-top: 8px;">Sürgü Yönü</label>
+                                <select id="edit-slider-orientation">
+                                    <option value="auto">Otomatik (Hücreye Göre)</option>
+                                    <option value="horizontal">Yatay (Soldan Sağa)</option>
+                                    <option value="vertical">Dikey (Aşağıdan Yukarıya)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="weather-options-group" style="display: none;">
+                                <label for="edit-weather-city">Şehir</label>
+                                <select id="edit-weather-city">
+                                    <option value="Istanbul">İstanbul</option>
+                                    <option value="Ankara">Ankara</option>
+                                    <option value="Izmir">İzmir</option>
+                                    <option value="Bursa">Bursa</option>
+                                    <option value="Antalya">Antalya</option>
+                                    <option value="London">Londra</option>
+                                    <option value="New York">New York</option>
+                                    <option value="custom">Özel Şehir...</option>
+                                </select>
+                            </div>
                             <div class="form-group" id="installed-apps-group" style="display: none;">
                                 <label for="edit-app-select">Kurulu Uygulama</label>
                                 <div class="edit-inline-row">
@@ -394,45 +474,6 @@
                                 <div class="icon-picker-gallery" id="icon-picker-gallery"></div>
                             </div>
 
-                            <div class="form-group" id="clock-options-group" style="display: none;">
-                                <label for="edit-clock-style">Saat Stili</label>
-                                <select id="edit-clock-style">
-                                    <option value="apple_minimal">Apple Minimal — büyük minimalist rakamlar</option>
-                                    <option value="flip_clock">Flip Clock — Fliqlo split-flap kart</option>
-                                    <option value="neon_cyberpunk">Neon Cyberpunk — cyan parıltılı dijital</option>
-                                    <option value="word_clock">Word Clock — Türkçe metin saati</option>
-                                    <option value="swiss_serif">Swiss Serif — Playfair/Bodoni tipografi</option>
-                                    <option value="retro_terminal">Retro Terminal — yeşil CRT fosfor</option>
-                                    <option value="apple_lockscreen">Apple Lockscreen — geniş saat</option>
-                                    <option value="apple_stacked">Apple Stacked — üst üste rakamlar</option>
-                                    <option value="digital_clean">Digital Clean — sade dijital</option>
-                                    <option value="digital_seconds">Digital Seconds — saniyeli</option>
-                                    <option value="analog">Analog — kadran</option>
-                                    <option value="world_clock">World Clock — İstanbul / New York</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group" id="clock-font-group" style="display: none;">
-                                <label for="edit-font-family">Yazı Tipi</label>
-                                <select id="edit-font-family">
-                                    <option value="geist">Geist (Modern Sans)</option>
-                                    <option value="jetbrains">JetBrains Mono</option>
-                                    <option value="serif">Serif (Playfair / Georgia)</option>
-                                    <option value="lcd">LCD / Digital</option>
-                                    <option value="inter">Inter</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group" id="clock-size-group" style="display: none;">
-                                <label for="edit-clock-size">Saat Boyutu</label>
-                                <select id="edit-clock-size">
-                                    <option value="auto">Otomatik</option>
-                                    <option value="compact">Kompakt</option>
-                                    <option value="regular">Normal</option>
-                                    <option value="large">Büyük</option>
-                                    <option value="huge">Dev</option>
-                                </select>
-                            </div>
                         </div>
 
                         <div class="modal-footer-sticky">

@@ -177,6 +177,8 @@ data class StreamDeckLiveStats(
     val mediaArtist: String = "",
     val mediaPlaying: Boolean = false,
     val mediaCover: String = "",
+    val mediaPosSec: Int = 0,
+    val mediaDurSec: Int = 0,
     val weatherCity: String = "",
     val weatherTemp: Int = 0,
     val weatherCode: Int = 0,
@@ -849,6 +851,8 @@ private class TelemetryAccumulator {
             mediaArtist = extra?.mediaArtist ?: current.mediaArtist,
             mediaPlaying = extra?.mediaPlaying ?: current.mediaPlaying,
             mediaCover = extra?.mediaCover ?: current.mediaCover,
+            mediaPosSec = extra?.mediaPosSec ?: current.mediaPosSec,
+            mediaDurSec = extra?.mediaDurSec ?: current.mediaDurSec,
             weatherCity = extra?.weatherCity ?: current.weatherCity,
             weatherTemp = extra?.weatherTemp ?: current.weatherTemp,
             weatherCode = extra?.weatherCode ?: current.weatherCode,
@@ -4304,6 +4308,8 @@ fun ElgatoKeycapTile(
                 artist = live.mediaArtist,
                 isPlaying = live.mediaPlaying,
                 coverUrl = live.mediaCover,
+                posSec = live.mediaPosSec,
+                durSec = live.mediaDurSec,
                 palette = palette,
                 onLongClick = onLongPress,
                 onAction = { act ->
@@ -4851,6 +4857,8 @@ fun StreamDeckNowPlayingTile(
     artist: String,
     isPlaying: Boolean,
     coverUrl: String = "",
+    posSec: Int = 0,
+    durSec: Int = 0,
     onAction: (String) -> Unit,
     palette: DeckPalette? = null,
     onLongClick: (() -> Unit)? = null,
@@ -4976,8 +4984,51 @@ fun StreamDeckNowPlayingTile(
                         )
                     }
                 }
+                val progressFraction = if (durSec > 0) (posSec.toFloat() / durSec.toFloat()).coerceIn(0f, 1f) else 0f
+                val formatMediaTime: (Int) -> String = { s ->
+                    val m = s / 60
+                    val sec = s % 60
+                    String.format(java.util.Locale.US, "%d:%02d", m, sec)
+                }
+                if (durSec > 0) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(1.5.dp))
+                                .background(Color.White.copy(alpha = 0.16f))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(progressFraction)
+                                    .clip(RoundedCornerShape(1.5.dp))
+                                    .background(Color.White)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 1.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatMediaTime(posSec),
+                                fontSize = 8.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                            Text(
+                                text = formatMediaTime(durSec),
+                                fontSize = 8.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
+                    }
+                }
 
-                // Controls: tightly clustered with 8.dp gap, sized proportionally
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
