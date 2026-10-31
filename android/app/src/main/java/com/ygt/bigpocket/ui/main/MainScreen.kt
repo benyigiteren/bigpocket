@@ -5565,10 +5565,8 @@ fun StreamDeckNowPlayingTile(
                                 .padding(top = (1f * scale).dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            // Elapsed time rides the animated fraction so it counts up in step with
-                            // the bar instead of snapping once per received sample.
                             Text(
-                                text = formatMediaTime((progressFraction * durSec).toInt()),
+                                text = formatMediaTime(posSec),
                                 fontSize = fitSp(timeFont * scale * timeScale),
                                 fontFamily = FontFamily.Monospace,
                                 color = Color.White.copy(alpha = 0.70f),
@@ -5584,6 +5582,22 @@ fun StreamDeckNowPlayingTile(
                                 style = textShadow
                             )
                         }
+                    }
+                } else if (posSec > 0) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = (1f * scale).dp),
+                        horizontalArrangement = Arrangement.Start
+                    ) {
+                        Text(
+                            text = formatMediaTime(posSec),
+                            fontSize = fitSp(timeFont * scale * timeScale),
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White.copy(alpha = 0.70f),
+                            maxLines = 1,
+                            style = textShadow
+                        )
                     }
                 }
 

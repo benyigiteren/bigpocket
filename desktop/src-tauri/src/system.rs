@@ -575,6 +575,8 @@ mod tests {
     fn strips_browser_and_youtube_title_suffixes() {
         assert_eq!(strip_tab_suffixes("Funny Cats - YouTube - Google Chrome"), "Funny Cats");
         assert_eq!(strip_tab_suffixes("Song - YouTube Music - Brave"), "Song");
+        assert_eq!(strip_tab_suffixes("YouTube - YENİ TRANSFERLERİ İLE BURSASPOR'U KURTARIYORUZ ! - YouTube"), "YENİ TRANSFERLERİ İLE BURSASPOR'U KURTARIYORUZ !");
+        assert_eq!(strip_tab_suffixes("(1) YouTube - Funny Cats - YouTube"), "Funny Cats");
         assert_eq!(strip_tab_suffixes("Track - VLC media player"), "Track - VLC media player");
     }
 
@@ -926,26 +928,87 @@ pub fn control_media(action: &str) {
     let act = action.trim().to_ascii_lowercase();
     #[cfg(windows)]
     {
-        // 1. Direct Windows GSMTC control on the MTA worker thread
-        let _ = gsmtc::action(&act);
+        use std::ffi::c_void;
+        type HWND = *mut c_void;
+        type BOOL = i32;
+        type LPARAM = isize;
+        type WPARAM = usize;
+        type UINT = u32;
 
-        // 2. Hardware media key simulation via Windows Win32 keybd_event as universal fallback
+        const WM_APPCOMMAND: UINT = 0x0319;
+        const HWND_BROADCAST: HWND = 0xFFFF as HWND;
+        const APPCOMMAND_MEDIA_PLAY_PAUSE: u32 = 14;
+        const APPCOMMAND_MEDIA_NEXTTRACK: u32 = 11;
+        const APPCOMMAND_MEDIA_PREVIOUSTRACK: u32 = 12;
+
+        #[link(name = "user32")]
+        extern "system" {
+            fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize);
+            fn PostMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> BOOL;
+            fn EnumWindows(lpEnumFunc: unsafe extern "system" fn(HWND, LPARAM) -> BOOL, lParam: LPARAM) -> BOOL;
+            fn IsWindowVisible(hWnd: HWND) -> BOOL;
+            fn GetWindowTextLengthW(hWnd: HWND) -> i32;
+            fn GetWindowTextW(hWnd: HWND, lpString: *mut u16, nMaxCount: i32) -> i32;
+        }
+
+        let (vk, cmd) = match act.as_str() {
+            "next" | "nexttrack" | "next_track" => (0xB0u8, APPCOMMAND_MEDIA_NEXTTRACK),
+            "prev" | "prevtrack" | "prev_track" | "previous" => (0xB1u8, APPCOMMAND_MEDIA_PREVIOUSTRACK),
+            _ => (0xB3u8, APPCOMMAND_MEDIA_PLAY_PAUSE),
+        };
+
+        // 1. Instant hardware keyboard simulation (0 ms latency)
         unsafe {
-            #[link(name = "user32")]
-            extern "system" {
-                fn keybd_event(bVk: u8, bScan: u8, dwFlags: u32, dwExtraInfo: usize);
-            }
-            let vk: u8 = match act.as_str() {
-                "next" | "nexttrack" | "next_track" => 0xB0,
-                "prev" | "prevtrack" | "prev_track" | "previous" => 0xB1,
-                _ => 0xB3,
-            };
             keybd_event(vk, 0, 0, 0);
             keybd_event(vk, 0, 2, 0);
         }
+
+        // 2. Direct WM_APPCOMMAND to all candidate media players & browsers
+        let lparam = ((cmd as usize) << 16) as LPARAM;
+        struct MediaCollector {
+            hwnds: Vec<HWND>,
+        }
+        unsafe extern "system" fn enum_media_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            if IsWindowVisible(hwnd) != 0 {
+                let len = GetWindowTextLengthW(hwnd);
+                if len > 0 && len < 256 {
+                    let mut buf = [0u16; 256];
+                    let read = GetWindowTextW(hwnd, buf.as_mut_ptr(), 256);
+                    if read > 0 {
+                        let title = String::from_utf16_lossy(&buf[..read as usize]).to_lowercase();
+                        if title.contains("youtube")
+                            || title.contains("spotify")
+                            || title.contains("chrome")
+                            || title.contains("brave")
+                            || title.contains("edge")
+                            || title.contains("firefox")
+                            || title.contains("vlc")
+                        {
+                            let collector = &mut *(lparam as *mut MediaCollector);
+                            collector.hwnds.push(hwnd);
+                        }
+                    }
+                }
+            }
+            1
+        }
+        let mut collector = MediaCollector { hwnds: Vec::new() };
+        unsafe {
+            EnumWindows(enum_media_proc, &mut collector as *mut _ as LPARAM);
+            for h in collector.hwnds {
+                PostMessageW(h, WM_APPCOMMAND, h as WPARAM, lparam);
+            }
+            // 3. Broadcast WM_APPCOMMAND to top-level windows
+            PostMessageW(HWND_BROADCAST, WM_APPCOMMAND, 0, lparam);
+        }
+
+        // 4. Background GSMTC action (non-blocking)
+        let act_clone = act.clone();
+        let _ = std::thread::spawn(move || {
+            let _ = gsmtc::action(&act_clone);
+        });
     }
 }
-
 #[cfg(windows)]
 fn execute_windows_media_action(action: &str) -> bool {
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
@@ -987,9 +1050,30 @@ fn query_windows_media_session() -> Option<MediaInfo> {
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
 
-    let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().ok()?.get().ok()?;
-    let session = manager.GetCurrentSession().ok()?;
-
+    eprintln!("DEBUG: query_windows_media_session START");
+    let manager_op = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
+        Ok(op) => op,
+        Err(e) => {
+            eprintln!("DEBUG: RequestAsync err: {:?}", e);
+            return None;
+        }
+    };
+    let manager = match manager_op.get() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("DEBUG: manager get err: {:?}", e);
+            return None;
+        }
+    };
+    eprintln!("DEBUG: manager acquired");
+    let session = match manager.GetCurrentSession() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("DEBUG: GetCurrentSession err: {:?}", e);
+            return None;
+        }
+    };
+    eprintln!("DEBUG: session acquired");
     let timeline = session.GetTimelineProperties().ok()?;
     // Times are 100-nanosecond ticks. A player that has no timeline (live
     // streams, most browsers) reports an end time of zero, and some report a
@@ -1548,10 +1632,13 @@ fn next_hex4(chars: &mut std::str::Chars) -> Option<u32> {
 }
 
 /// Browser names appended to window titles, lowercase.
-const BROWSER_TITLE_SUFFIXES: [&str; 5] = [
+const BROWSER_TITLE_SUFFIXES: [&str; 8] = [
+    " - google chrome canary",
     " - google chrome",
     " - microsoft edge",
     " - mozilla firefox",
+    " - chromium",
+    " - firefox",
     " - brave",
     " - opera",
 ];
@@ -1567,7 +1654,28 @@ const YOUTUBE_TITLE_SUFFIXES: [&str; 4] = [
 /// `"Song - YouTube - Google Chrome"` → `"Song"`, keeping the original casing.
 fn strip_tab_suffixes(title: &str) -> String {
     let without_browser = strip_title_suffixes(title, &BROWSER_TITLE_SUFFIXES);
-    strip_title_suffixes(&without_browser, &YOUTUBE_TITLE_SUFFIXES)
+    let mut clean = strip_title_suffixes(&without_browser, &YOUTUBE_TITLE_SUFFIXES);
+
+    // Strip leading notification badges like "(1) " or "(99+) "
+    if clean.starts_with('(') {
+        if let Some(close_idx) = clean.find(')') {
+            let inside = &clean[1..close_idx];
+            if inside.chars().all(|c| c.is_ascii_digit() || c == '+') {
+                clean = clean[close_idx + 1..].trim_start().to_string();
+            }
+        }
+    }
+
+    // Strip leading YouTube prefixes like "YouTube - " or "YouTube: "
+    let lower = clean.to_lowercase();
+    for prefix in &["youtube - ", "youtube: "] {
+        if lower.starts_with(prefix) {
+            clean = clean[prefix.len()..].trim_start().to_string();
+            break;
+        }
+    }
+
+    clean
 }
 
 /// Strips every suffix in `suffixes` (case-insensitively) from the end of
@@ -1607,6 +1715,7 @@ fn is_generic_youtube_page(title: &str) -> bool {
         ""
             | "youtube"
             | "youtube studio"
+            | "studio"
             | "youtube music"
             | "youtube kids"
             | "youtube tv"
@@ -1755,16 +1864,18 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> (String, u32) {
 
 #[cfg(windows)]
 pub fn detect_media_info() -> MediaInfo {
-    if let Some(media) = query_windows_media_control() {
-        sync_thumbnail_with_title(&media.title);
-        return media;
+    let mut media = if let Some(media) = query_windows_media_control() {
+        media
+    } else {
+        detect_media_info_internal()
+    };
+    if media.duration_sec == 0 && !media.title.is_empty() {
+        let (_, fb_dur) = get_cached_media_cover(&media.artist, &media.title);
+        if fb_dur > 0 {
+            media.duration_sec = fb_dur;
+        }
     }
-    let mut media = detect_media_info_internal();
     media.position_sec = MediaTimelineTracker::update(&media.title, media.is_playing);
-    // The window-title fallback knows no playback timeline at all: reporting an
-    // unknown duration keeps the clients from drawing a progress bar against an
-    // invented total.
-    media.duration_sec = 0;
     sync_thumbnail_with_title(&media.title);
     media
 }
@@ -1842,22 +1953,13 @@ fn detect_media_info_internal() -> MediaInfo {
         //    it, and searching YouTube for those titles would pin an unrelated
         //    clip as the cover.
         if lower.contains("youtube") {
-            let tab_title = strip_title_suffixes(t, &BROWSER_TITLE_SUFFIXES);
-            let is_video_page = tab_title.to_lowercase().ends_with(" - youtube");
-            let video_title = strip_title_suffixes(&tab_title, &YOUTUBE_TITLE_SUFFIXES);
-            if !video_title.is_empty() && !is_generic_youtube_page(&video_title) {
-                // Channel-prefixed tab titles keep their "artist - track" split
-                // for display, while the cover is looked up for the whole
-                // video title.
-                let (artist, track) = match video_title.split_once(" - ") {
+            let clean = strip_tab_suffixes(t);
+            if !clean.is_empty() && !is_generic_youtube_page(&clean) {
+                let (artist, track) = match clean.split_once(" - ") {
                     Some((artist, track)) => (artist.trim().to_string(), track.trim().to_string()),
-                    None => ("YouTube".to_string(), video_title.clone()),
+                    None => ("YouTube".to_string(), clean.clone()),
                 };
-                let (cover, dur) = if is_video_page {
-                    get_cached_media_cover("YouTube", &video_title)
-                } else {
-                    (String::new(), 0)
-                };
+                let (cover, dur) = get_cached_media_cover("YouTube", &clean);
                 return MediaInfo {
                     title: track,
                     artist,
