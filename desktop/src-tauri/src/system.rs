@@ -580,6 +580,32 @@ pub struct MediaInfo {
 static MEDIA_COVER_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
 static LAST_SEARCHED_SONG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+fn fetch_youtube_thumbnail(query: &str) -> Option<String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let encoded_query = query.replace(' ', "+").replace('&', "+");
+        let url = format!("https://www.youtube.com/results?search_query={encoded_query}");
+        let output = std::process::Command::new("curl")
+            .args(["-s", "-m", "3", "-H", "User-Agent: Mozilla/5.0", &url])
+            .creation_flags(0x0800_0000)
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let marker = "\"videoId\":\"";
+        if let Some(pos) = text.find(marker) {
+            let after = &text[pos + marker.len()..];
+            if let Some(end) = after.find('"') {
+                let vid = &after[..end];
+                if vid.len() == 11 {
+                    return Some(format!("https://i.ytimg.com/vi/{vid}/hqdefault.jpg"));
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
     let key = format!("{artist} - {title}").trim().to_lowercase();
     if key.is_empty() || key == "-" {
@@ -609,33 +635,36 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
         let title_clean = title.to_string();
         let query_key = key.clone();
         tokio::spawn(async move {
-            let term = format!("{artist_clean} {title_clean}").trim().to_string();
-            let encoded_term = term.replace(' ', "+").replace('&', "+");
-            let url = format!("https://itunes.apple.com/search?term={encoded_term}&media=music&limit=1");
-
             let res = tokio::task::spawn_blocking(move || -> Option<String> {
+                if artist_clean.eq_ignore_ascii_case("YouTube") {
+                    return fetch_youtube_thumbnail(&title_clean);
+                }
+
+                // Try iTunes search first for music tracks
+                let term = format!("{artist_clean} {title_clean}").trim().to_string();
+                let encoded_term = term.replace(' ', "+").replace('&', "+");
+                let itunes_url = format!("https://itunes.apple.com/search?term={encoded_term}&media=music&limit=1");
+
                 #[cfg(windows)]
                 {
                     use std::os::windows::process::CommandExt;
-                    let output = std::process::Command::new("curl")
-                        .args(["-s", "-m", "3", &url])
+                    if let Ok(output) = std::process::Command::new("curl")
+                        .args(["-s", "-m", "3", &itunes_url])
                         .creation_flags(0x0800_0000)
                         .output()
-                        .ok()?;
-                    let body = String::from_utf8_lossy(&output.stdout);
-                    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-                    let art = json.get("results")?
-                        .get(0)?
-                        .get("artworkUrl100")?
-                        .as_str()?;
-                    Some(art.replace("100x100bb.jpg", "600x600bb.jpg"))
+                    {
+                        let body = String::from_utf8_lossy(&output.stdout);
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                            if let Some(art) = json.get("results").and_then(|r| r.get(0)).and_then(|i| i.get("artworkUrl100")).and_then(|u| u.as_str()) {
+                                return Some(art.replace("100x100bb.jpg", "600x600bb.jpg"));
+                            }
+                        }
+                    }
                 }
-                #[cfg(not(windows))]
-                {
-                    None
-                }
-            }).await;
 
+                // Fallback to YouTube thumbnail search
+                fetch_youtube_thumbnail(&format!("{artist_clean} {title_clean}"))
+            }).await;
             if let Ok(Some(cover_url)) = res {
                 if let Ok(mut guard) = MEDIA_COVER_CACHE.lock() {
                     let cache = guard.get_or_insert_with(std::collections::HashMap::new);
