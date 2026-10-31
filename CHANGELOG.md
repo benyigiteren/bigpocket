@@ -3,8 +3,14 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
-## v1.5.1-beta
+## v1.5.2-beta
 
+### 🎵 Şimdi Çalıyor Kartı Hücre Oranı & Boyutlandırma İyileştirmesi
+- **Tam Sığdırma & Sıfır Kesilme:** Mobil Stream Deck ızgarasında 2×1 Şimdi Çalıyor kartının dikey içeriği 128dp'den 92dp'ye optimize edildi; alttaki Oynat/Durdur butonlarının kart kenarından taşması ve kesilmesi tamamen giderildi.
+- **Proposyonel Buton Çapları:** Oynatma kontrolleri PC standartlarına uygun olarak 28dp / 24dp boyutuna dengelendi; dar telefon ekranlarında bile ferah kenar boşluklarıyla kusursuz oturur.
+- **Hassas Dikey Padding:** Kartın üst ve alt dikey iç boşluğu 9dp'ye optimize edildi; başlık, albüm kapağı rozeti ve şarkı bilgileri tek bakışta net okunur.
+
+## v1.5.1-beta
 ### 🎚️ 4 Farklı Sürgü Tasarım Sistemi (Apple, Samsung One UI, Material You, Framer)
 - **4 Özel Sürgü Tarzı:** Ses ve parlaklık kontrolleri için kullanıcı tercihine bağlı 4 farklı tasarım dili:
   - *Apple Capsule:* 10dp inceliğinde zarif beyaz yatay kapsül veya iOS Denetim Merkezi dikey hap sürgüsü.

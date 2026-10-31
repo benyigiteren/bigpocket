@@ -48,10 +48,9 @@ pub const AUDIO_TCP_PORT: u16 = 8084;
 pub const SCREEN_TCP_PORT: u16 = 8086;
 
 /// Version reported by the update checker (mirrors Go's `AppVersion`).
-pub const APP_VERSION: &str = "v1.5.1-beta";
+pub const APP_VERSION: &str = "v1.5.2-beta";
 /// Public repository that publishes releases.
 pub const GITHUB_REPO: &str = "benyigiteren/bigpocket";
-/// Password attempts before an IP is temporarily blocked.
 const AUTH_MAX_FAILURES: u32 = 5;
 /// Window in which failures are counted.
 const AUTH_FAIL_WINDOW: Duration = Duration::from_secs(5 * 60);

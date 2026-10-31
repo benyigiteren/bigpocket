@@ -42,7 +42,7 @@ var embedFS embed.FS
 
 const (
 	appName    = "BigPocket"
-	appVersion = "1.5.1"
+	appVersion = "1.5.2"
 	publisher  = "benyigiteren"
 
 	wizardClassName = "BigPocketSetupWizard"
