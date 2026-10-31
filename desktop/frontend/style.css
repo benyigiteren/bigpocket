@@ -3470,7 +3470,7 @@ input:checked + .slider:before {
 .deck-media__cover-overlay {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0.72) 100%);
+    background: rgba(0, 0, 0, 0.42);
     z-index: 1;
     pointer-events: none;
     opacity: 0;

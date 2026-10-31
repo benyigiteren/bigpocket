@@ -816,12 +816,13 @@ function connectWebSocket() {
             }
         } else if (msg.type === 'volume_changed') {
             const volPct = Math.round(msg.level || 0);
+            cachedMasterVolume = volPct;
             document.querySelectorAll('.apple-pill-slider-container').forEach(c => {
                 const fill = c.querySelector('.apple-pill-fill.accent-volume');
                 const val = c.querySelector('.apple-pill-value');
                 if (fill && val) {
                     fill.style.width = `${volPct}%`;
-                    val.textContent = `${volPct}%`;
+                    val.textContent = `%${volPct}`;
                 }
             });
         } else if (msg.type === 'app_volume_changed') {
@@ -3803,16 +3804,17 @@ function renderStreamDeckButtons() {
         } else if (btn.type === 'volume_slider') {
             const isCompact = colSpan === 1;
             const safeLabel = escapeHtml(btn.label || 'Ses');
+            const vol = typeof cachedMasterVolume === 'number' ? cachedMasterVolume : 50;
             if (isCompact) {
                 bodyContent = `
                     <div class="apple-pill-slider-container md-pill md-pill--compact">
                         <div class="md-pill__top-row">
                             <span class="md-pill__badge">${mdIcon('volume', 14)}</span>
-                            <span class="apple-pill-value md-pill__value">%75</span>
+                            <span class="apple-pill-value md-pill__value">%${vol}</span>
                         </div>
                         <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
                         <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'volume');">
-                            <div class="apple-pill-fill accent-volume md-pill__bar" style="width: 75%;"></div>
+                            <div class="apple-pill-fill accent-volume md-pill__bar" style="width: ${vol}%;"></div>
                         </div>
                     </div>
                 `;
@@ -3822,10 +3824,10 @@ function renderStreamDeckButtons() {
                         <div class="md-pill__row">
                             <span class="md-pill__badge">${mdIcon('volume', 14)}</span>
                             <span class="apple-pill-title md-pill__label" title="${safeLabel}">${safeLabel}</span>
-                            <span class="apple-pill-value md-pill__value">%75</span>
+                            <span class="apple-pill-value md-pill__value">%${vol}</span>
                         </div>
                         <div class="apple-pill-track md-pill__track" onclick="handleSliderTrackClick(event, 'volume');">
-                            <div class="apple-pill-fill accent-volume md-pill__bar" style="width: 75%;"></div>
+                            <div class="apple-pill-fill accent-volume md-pill__bar" style="width: ${vol}%;"></div>
                         </div>
                     </div>
                 `;

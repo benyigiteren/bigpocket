@@ -4336,6 +4336,7 @@ fun StreamDeckNowPlayingTile(
             .fillMaxSize()
             .clip(RoundedCornerShape(DeckCorner))
             .background(MinimalistSurface)
+            .border(1.dp, if (hasCover) Color.White.copy(alpha = 0.18f) else p.border, RoundedCornerShape(DeckCorner))
             .pointerInput(Unit) {
                 detectTapGestures(
                     onLongPress = {
@@ -4345,122 +4346,217 @@ fun StreamDeckNowPlayingTile(
                 )
             }
     ) {
-        val compact = maxHeight < 96.dp
+        val totalHeight = maxHeight
+        val isWide = maxWidth > totalHeight * 1.35f
+        val compact = totalHeight < 96.dp
         val titleColor = if (hasCover) Color.White else MinimalistPrimary
         val artistColor = if (hasCover) Color.White.copy(alpha = 0.85f) else MinimalistSecondary
-        if (coverUrl.isNotBlank()) {
+
+        if (hasCover) {
             AsyncImage(
                 model = coverUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .scale(1.15f)
-                    .blur(16.dp)
-                    .alpha(0.68f)
+                    .scale(1.10f)
+                    .blur(10.dp)
             )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Black.copy(alpha = 0.28f),
-                                Color.Black.copy(alpha = 0.82f)
-                            )
-                        )
-                    )
+                    .background(Color.Black.copy(alpha = 0.42f))
             )
         }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
+
+        if (isWide) {
+            // Apple Control Center / Dynamic Island wide layout
             Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                if (coverUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = coverUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
+                // Album squircle thumbnail
+                Box(
+                    modifier = Modifier
+                        .size((totalHeight - 24.dp).coerceIn(44.dp, 84.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (hasCover) {
+                        AsyncImage(
+                            model = coverUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
                         Icon(
                             imageVector = Icons.Default.MusicNote,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
-                Text(
-                    text = "ŞİMDİ ÇALIYOR",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.08.sp,
-                    color = Color.White.copy(alpha = 0.70f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = title.ifBlank { "Medya yok" },
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = titleColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 8f)) else TextStyle.Default
-                )
-                if (!compact) {
-                    Text(
-                        text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = artistColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 6f)) else TextStyle.Default
-                    )
+
+                // Info + Controls column
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "ŞİMDİ ÇALIYOR",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.08.sp,
+                            color = Color.White.copy(alpha = 0.70f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = title.ifBlank { "Medya yok" },
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = titleColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 8f)) else TextStyle.Default
+                        )
+                        Text(
+                            text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = artistColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 6f)) else TextStyle.Default
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DeckTransportButton(
+                            icon = Icons.Default.SkipPrevious,
+                            contentDescription = "Önceki Parça",
+                            palette = p
+                        ) { onAction("prevtrack") }
+                        DeckTransportButton(
+                            icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Oynat / Durdur",
+                            palette = p,
+                            emphasised = true
+                        ) { onAction("playpause") }
+                        DeckTransportButton(
+                            icon = Icons.Default.SkipNext,
+                            contentDescription = "Sonraki Parça",
+                            palette = p
+                        ) { onAction("nexttrack") }
+                    }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        } else {
+            // Standard vertical / square layout
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                DeckTransportButton(
-                    icon = Icons.Default.SkipPrevious,
-                    contentDescription = "Önceki Parça",
-                    palette = p
-                ) { onAction("prevtrack") }
-                DeckTransportButton(
-                    icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Oynat / Durdur",
-                    palette = p,
-                    emphasised = true
-                ) { onAction("playpause") }
-                DeckTransportButton(
-                    icon = Icons.Default.SkipNext,
-                    contentDescription = "Sonraki Parça",
-                    palette = p
-                ) { onAction("nexttrack") }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (hasCover) {
+                        AsyncImage(
+                            model = coverUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "ŞİMDİ ÇALIYOR",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.08.sp,
+                        color = Color.White.copy(alpha = 0.70f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = title.ifBlank { "Medya yok" },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 8f)) else TextStyle.Default
+                    )
+                    if (!compact) {
+                        Text(
+                            text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = artistColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 6f)) else TextStyle.Default
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DeckTransportButton(
+                        icon = Icons.Default.SkipPrevious,
+                        contentDescription = "Önceki Parça",
+                        palette = p
+                    ) { onAction("prevtrack") }
+                    DeckTransportButton(
+                        icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Oynat / Durdur",
+                        palette = p,
+                        emphasised = true
+                    ) { onAction("playpause") }
+                    DeckTransportButton(
+                        icon = Icons.Default.SkipNext,
+                        contentDescription = "Sonraki Parça",
+                        palette = p
+                    ) { onAction("nexttrack") }
+                }
             }
         }
     }

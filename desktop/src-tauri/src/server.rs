@@ -775,6 +775,13 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
     } else {
         authenticated.store(true, Ordering::Relaxed);
         let _ = out_tx.send(json!({"type": "auth_success"}).to_string()).await;
+        if let Some(vol) = volume_get() {
+            let _ = out_tx.send(json!({
+                "type": "volume_changed",
+                "action": "sync",
+                "level": vol,
+            }).to_string()).await;
+        }
         state.broadcast(json!({"type": "client_connected"}));
     }
 
@@ -823,6 +830,13 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
                     state.auth.record_success(&host);
                     state.auth.register_authorized_ip(&host);
                     let _ = out_tx.send(json!({"type": "auth_success"}).to_string()).await;
+                    if let Some(vol) = volume_get() {
+                        let _ = out_tx.send(json!({
+                            "type": "volume_changed",
+                            "action": "sync",
+                            "level": vol,
+                        }).to_string()).await;
+                    }
                     state.broadcast(json!({"type": "client_connected"}));
                 } else {
                     state.auth.record_failure(&host);
@@ -3218,6 +3232,7 @@ pub async fn bind_and_start_server(
     tracing::info!("BigPocket control server listening on http://0.0.0.0:{port}");
 
     spawn_stats_ticker(state.clone());
+    spawn_volume_monitor(state.clone());
     start_screen_stream_server(state.clone());
     start_camera_stream_server(state.clone());
     start_audio_stream_server(state.clone());
@@ -3258,6 +3273,35 @@ fn spawn_stats_ticker(state: Arc<AppState>) {
     });
 }
 
+/// Continuously monitors Windows master volume (e.g. keyboard media keys, system slider, headphones)
+/// and synchronizes it to all connected mobile & desktop clients in real-time.
+fn spawn_volume_monitor(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_millis(300));
+        let mut last_reported = volume_get();
+        loop {
+            ticker.tick().await;
+            if state.client_count() == 0 {
+                continue;
+            }
+            if let Some(current) = volume_get() {
+                let should_sync = match last_reported {
+                    Some(prev) => prev != current,
+                    None => true,
+                };
+                if should_sync {
+                    last_reported = Some(current);
+                    remember_volume(&state, current);
+                    state.broadcast(json!({
+                        "type": "volume_changed",
+                        "action": "sync",
+                        "level": current,
+                    }));
+                }
+            }
+        }
+    });
+}
 
 /// TCP screen stream server on port 8086.
 pub fn start_screen_stream_server(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
