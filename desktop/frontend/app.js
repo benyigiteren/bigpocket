@@ -4204,6 +4204,26 @@ function renderStreamDeckButtons() {
             item.classList.add('dragging');
             e.dataTransfer.setData('text/plain', btn.id.toString());
             e.dataTransfer.effectAllowed = 'move';
+
+            // Create elevated 3D drag ghost that floats in the air
+            const rect = item.getBoundingClientRect();
+            const ghost = item.cloneNode(true);
+            ghost.classList.remove('dragging', 'selected');
+            ghost.classList.add('deck-drag-ghost-elevated');
+            ghost.style.position = 'fixed';
+            ghost.style.top = '-9999px';
+            ghost.style.left = '-9999px';
+            ghost.style.width = rect.width + 'px';
+            ghost.style.height = rect.height + 'px';
+            ghost.style.zIndex = '99999';
+            document.body.appendChild(ghost);
+
+            const offsetX = Math.min(Math.max(10, e.clientX - rect.left), rect.width - 10);
+            const offsetY = Math.min(Math.max(10, e.clientY - rect.top), rect.height - 10);
+            e.dataTransfer.setDragImage(ghost, offsetX, offsetY);
+            setTimeout(() => {
+                if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
+            }, 0);
         });
 
         item.addEventListener('dragend', () => {
@@ -4217,10 +4237,10 @@ function renderStreamDeckButtons() {
             item.classList.add('drag-over');
         });
 
-        item.addEventListener('dragleave', () => {
+        item.addEventListener('dragleave', (e) => {
+            if (item.contains(e.relatedTarget)) return;
             item.classList.remove('drag-over');
         });
-
         item.addEventListener('drop', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -4273,7 +4293,8 @@ function renderStreamDeckButtons() {
             emptySlot.classList.add('drag-over');
         });
 
-        emptySlot.addEventListener('dragleave', () => {
+        emptySlot.addEventListener('dragleave', (e) => {
+            if (emptySlot.contains(e.relatedTarget)) return;
             emptySlot.classList.remove('drag-over');
         });
 

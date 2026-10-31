@@ -520,8 +520,9 @@ pub struct AppState {
     pub screen_stream_fps: AtomicU32,
     /// Configurable JPEG quality for 2nd monitor stream (40..95).
     pub screen_stream_quality: AtomicU32,
+    /// Signalled when a second instance tries to launch, to wake and unhide the main window.
+    pub show_window: Arc<tokio::sync::Notify>,
 }
-
 impl AppState {
     /// Build the state with a fresh Flow manager and telemetry monitor.
     pub fn create() -> Self {
@@ -540,6 +541,7 @@ impl AppState {
             camera_frame: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             screen_stream_fps: AtomicU32::new(30),
             screen_stream_quality: AtomicU32::new(60),
+            show_window: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -624,6 +626,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/camera_frame", get(camera_frame_handler))
         .route("/api/update/check", get(update_check))
         .route("/api/qr", get(api_qr))
+        .route("/api/show_window", get(api_show_window).post(api_show_window))
         .fallback_service(static_service());
 
     public
@@ -3720,6 +3723,11 @@ async fn api_qr(Query(params): Query<HashMap<String, String>>) -> Response {
         HeaderValue::from_static("image/svg+xml"),
     );
     resp
+}
+
+async fn api_show_window(State(state): State<Arc<AppState>>) -> Response {
+    state.show_window.notify_waiters();
+    json_response(StatusCode::OK, json!({"success": true, "message": "Window restored"}))
 }
 
 #[derive(serde::Serialize, Clone)]

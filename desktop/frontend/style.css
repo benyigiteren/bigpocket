@@ -589,14 +589,27 @@ body {
 /* Minimalist Stream Deck Keycap Card */
 .deck-btn.dragging {
     opacity: 0.35;
-    transform: scale(0.96);
-    border: 1px dashed rgba(255, 255, 255, 0.4);
+    border: 2px dashed rgba(99, 102, 241, 0.6) !important;
+    background: rgba(99, 102, 241, 0.06) !important;
 }
 
-.deck-btn.drag-over {
-    border: 1px solid var(--accent-solid);
-    background: rgba(255, 255, 255, 0.05);
-    transform: scale(1.01);
+.deck-btn.drag-over,
+.deck-slot-empty.drag-over {
+    border-color: #818cf8 !important;
+    background: rgba(99, 102, 241, 0.24) !important;
+    transform: scale(1.04) !important;
+    box-shadow: 0 0 25px rgba(99, 102, 241, 0.5) !important;
+    z-index: 30 !important;
+}
+
+.deck-drag-ghost-elevated {
+    background: var(--bg-surface) !important;
+    border: 2px solid #818cf8 !important;
+    border-radius: var(--radius-lg) !important;
+    transform: scale(1.06) !important;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.75), 0 0 24px rgba(99, 102, 241, 0.5) !important;
+    opacity: 0.95 !important;
+    pointer-events: none !important;
 }
 
 /* Span classes are applied inline via grid-column / grid-row spans from the
@@ -2984,8 +2997,7 @@ input:checked + .slider:before {
     transition: border-color 0.14s ease, background 0.14s ease;
 }
 
-.deck-slot-empty:hover,
-.deck-slot-empty.drag-over {
+.deck-slot-empty:hover {
     border-color: rgba(255, 255, 255, 0.18);
     background: rgba(255, 255, 255, 0.08);
 }

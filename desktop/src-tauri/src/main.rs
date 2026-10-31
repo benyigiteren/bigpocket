@@ -54,10 +54,21 @@ fn check_single_instance() -> bool {
 fn main() {
     // Single instance guard: prevent duplicate processes and duplicate tray icons
     if !check_single_instance() {
-        // A BigPocket instance is already running; ping to wake its window, then exit.
-        let _ = std::process::Command::new("curl")
-            .args(["-s", "http://127.0.0.1:8085/system_info"])
-            .output();
+        // A BigPocket instance is already running; wake and show its window, then exit.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("curl")
+                .args(["-s", "-m", "2", "http://127.0.0.1:8085/api/show_window"])
+                .creation_flags(0x0800_0000)
+                .output();
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = std::process::Command::new("curl")
+                .args(["-s", "-m", "2", "http://127.0.0.1:8085/api/show_window"])
+                .output();
+        }
         std::process::exit(0);
     }
 
@@ -141,6 +152,19 @@ fn main() {
             // Prevent window close from terminating the app; instead minimize to tray!
             if let Some(window) = app.get_webview_window("main") {
                 let w = window.clone();
+                let w_wake = window.clone();
+                let show_notify = state.show_window.clone();
+
+                // Wakes and restores the window when desktop shortcut or start menu is clicked again
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        show_notify.notified().await;
+                        let _ = w_wake.show();
+                        let _ = w_wake.unminimize();
+                        let _ = w_wake.set_focus();
+                    }
+                });
+
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
@@ -152,7 +176,6 @@ fn main() {
                     let _ = window.hide();
                 }
             }
-
             Ok(())
         })
         .run(tauri::generate_context!())
