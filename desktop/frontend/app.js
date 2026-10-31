@@ -4319,6 +4319,35 @@ function renderStreamDeckButtons() {
         list.appendChild(emptySlot);
     });
 
+    // Container-level drop listener ensures drops anywhere in the grid work seamlessly
+    list.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    });
+    list.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        document.querySelectorAll('.deck-btn, .deck-slot-empty').forEach(el => el.classList.remove('drag-over'));
+        const dataText = e.dataTransfer.getData('text/plain');
+        if (!dataText) return;
+        const cell = cellFromEvent(e, list, rows, cols);
+        if (dataText.startsWith('preset:')) {
+            const presetKey = dataText.replace('preset:', '');
+            createWidgetFromPreset(presetKey, cell);
+            const pm = document.getElementById('widget-picker-modal');
+            if (pm) pm.classList.remove('active', 'modal-dragging-preset');
+            return;
+        }
+        const draggedId = parseInt(dataText);
+        if (!isNaN(draggedId)) {
+            const targetBtn = pageButtons.find(b => b.id !== draggedId && b.grid_row === cell.row && b.grid_col === cell.col);
+            if (targetBtn) {
+                swapStreamDeckButtons(draggedId, targetBtn.id);
+            } else {
+                moveStreamDeckButtonToCell(draggedId, cell.row, cell.col);
+            }
+        }
+    });
     // Weather cards lazily fetch their own city on first paint
     pageButtons.forEach(btn => {
         if (btn.type !== 'weather') return;
@@ -4664,10 +4693,15 @@ function swapStreamDeckButtons(draggedId, targetId) {
     const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
     const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
 
-    const targetR = Number.isInteger(target.grid_row) ? target.grid_row : 0;
-    const targetC = Number.isInteger(target.grid_col) ? target.grid_col : 0;
-    const draggedR = Number.isInteger(dragged.grid_row) ? dragged.grid_row : 0;
-    const draggedC = Number.isInteger(dragged.grid_col) ? dragged.grid_col : 0;
+    // Run packBentoGrid first to ensure all buttons have concrete coordinates resolved
+    const layout = packBentoGrid(pageButtons, rows, cols);
+    const draggedPlace = layout.placed.get(draggedId);
+    const targetPlace = layout.placed.get(targetId);
+
+    const targetR = targetPlace ? targetPlace.r : Math.max(0, target.grid_row || 0);
+    const targetC = targetPlace ? targetPlace.c : Math.max(0, target.grid_col || 0);
+    const draggedR = draggedPlace ? draggedPlace.r : Math.max(0, dragged.grid_row || 0);
+    const draggedC = draggedPlace ? draggedPlace.c : Math.max(0, dragged.grid_col || 0);
 
     dragged.grid_row = Math.max(0, Math.min(rows - (dragged.row_span || 1), targetR));
     dragged.grid_col = Math.max(0, Math.min(cols - (dragged.col_span || 1), targetC));
@@ -4691,6 +4725,8 @@ function moveStreamDeckButtonToCell(draggedId, targetRow, targetCol) {
 
     const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
     const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
+
+    packBentoGrid(pageButtons, rows, cols);
 
     const cs = Math.min(cols, Math.max(1, dragged.col_span || 1));
     const rs = Math.min(rows, Math.max(1, dragged.row_span || 1));
