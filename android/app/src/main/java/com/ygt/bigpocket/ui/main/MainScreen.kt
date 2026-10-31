@@ -6186,169 +6186,74 @@ fun StreamDeckTab(
                 )
             }
         } else {
-            var useHybridWebView by rememberSaveable { mutableStateOf(false) }
-            var hasWebViewError by remember { mutableStateOf(false) }
-            val deckUrl = remember(ipAddress, password) {
-                "http://$ipAddress:8085/?mode=streamdeck&password=${android.net.Uri.encode(password)}"
-            }
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (isEditMode) {
+                    DeckEditFloatingBar(
+                        pages = pages,
+                        activePage = activePage,
+                        onPageChange = onPageChange,
+                        onAddPage = onAddPage,
+                        rows = rowCount,
+                        cols = colCount,
+                        onApplyGridLayout = onApplyGridLayout,
+                        onOpenGridSettings = onOpenGridSettings,
+                        onDone = exitEditMode,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
 
-            if (useHybridWebView && !hasWebViewError) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    AndroidView(
-                        factory = { ctx ->
-                            android.webkit.WebView(ctx).apply {
-                                layoutParams = android.view.ViewGroup.LayoutParams(
-                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                setBackgroundColor(android.graphics.Color.parseColor("#101012"))
-                                settings.apply {
-                                    javaScriptEnabled = true
-                                    domStorageEnabled = true
-                                    databaseEnabled = true
-                                    useWideViewPort = true
-                                    loadWithOverviewMode = true
-                                    setSupportZoom(false)
-                                    displayZoomControls = false
-                                    mediaPlaybackRequiresUserGesture = false
-                                    cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                                }
-                                webViewClient = object : android.webkit.WebViewClient() {
-                                    override fun onReceivedError(
-                                        view: android.webkit.WebView?,
-                                        errorCode: Int,
-                                        description: String?,
-                                        failingUrl: String?
-                                    ) {
-                                        android.util.Log.e("StreamDeckWebView", "Error $errorCode: $description on $failingUrl")
-                                        hasWebViewError = true
+                BentoDeckGrid(
+                    buttons = pageButtons,
+                    rows = rowCount,
+                    cols = colCount,
+                    gap = if (effectiveLandscape) 6.dp else 8.dp,
+                    live = live,
+                    masterVolume = masterVolume,
+                    onVolumeChange = onVolumeChange,
+                    brightness = brightness,
+                    onBrightnessChange = onBrightnessChange,
+                    ipAddress = ipAddress,
+                    password = password,
+                    onPress = { btn ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        SocketManager.sendControl(JSONObject().apply {
+                            put("type", "stream_deck_press")
+                            put("button_id", btn.id)
+                        })
+                    },
+                    onLongPress = { btn -> handleCardLongPress(btn) },
+                    onEmptySlotClick = { onAddWidgetClick(it) },
+                    onEmptySlotLongPress = { if (!isEditMode) enterEditMode() },
+                    isEditMode = isEditMode,
+                    selectedForSwapId = selectedForSwapId,
+                    onSelectForSwap = { btn -> handleCardTap(btn) },
+                    onResizeButton = { btn -> handleResize(btn) },
+                    onDeleteButton = { btn -> handleDelete(btn) },
+                    onCustomizeButton = { btn -> onButtonLongClick(btn) },
+                    onMoveToCell = { r, c -> handleMoveToCell(r, c) },
+                    onSwapButtons = { id1, id2 ->
+                        val layout = packBentoLayout(pageButtons, rowCount, colCount)
+                        val from = layout.placements.firstOrNull { it.button.id == id1 }
+                        val to = layout.placements.firstOrNull { it.button.id == id2 }
+                        if (from != null && to != null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onButtonsUpdated(
+                                buttons.map {
+                                    when (it.id) {
+                                        from.button.id -> it.copy(gridRow = to.row, gridCol = to.col)
+                                        to.button.id -> it.copy(gridRow = from.row, gridCol = from.col)
+                                        else -> it
                                     }
                                 }
-                                loadUrl(deckUrl)
-                            }
-                        },
-                        update = { webView ->
-                            if (webView.url != deckUrl) {
-                                webView.loadUrl(deckUrl)
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.55f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .clickable { useHybridWebView = false }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF4ADE80))
-                            )
-                            Text("1:1 PC", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
-                        }
-                    }
-                }
-            } else {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        if (isEditMode) {
-                            DeckEditFloatingBar(
-                                pages = pages,
-                                activePage = activePage,
-                                onPageChange = onPageChange,
-                                onAddPage = onAddPage,
-                                rows = rowCount,
-                                cols = colCount,
-                                onApplyGridLayout = onApplyGridLayout,
-                                onOpenGridSettings = onOpenGridSettings,
-                                onDone = exitEditMode,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
                             )
                         }
-
-                        BentoDeckGrid(
-                            buttons = pageButtons,
-                            rows = rowCount,
-                            cols = colCount,
-                            gap = if (effectiveLandscape) 6.dp else 8.dp,
-                            live = live,
-                            masterVolume = masterVolume,
-                            onVolumeChange = onVolumeChange,
-                            brightness = brightness,
-                            onBrightnessChange = onBrightnessChange,
-                            ipAddress = ipAddress,
-                            password = password,
-                            onPress = { btn ->
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                SocketManager.sendControl(JSONObject().apply {
-                                    put("type", "stream_deck_press")
-                                    put("button_id", btn.id)
-                                })
-                            },
-                            onLongPress = { btn -> handleCardLongPress(btn) },
-                            onEmptySlotClick = { onAddWidgetClick(it) },
-                            onEmptySlotLongPress = { if (!isEditMode) enterEditMode() },
-                            isEditMode = isEditMode,
-                            selectedForSwapId = selectedForSwapId,
-                            onSelectForSwap = { btn -> handleCardTap(btn) },
-                            onResizeButton = { btn -> handleResize(btn) },
-                            onDeleteButton = { btn -> handleDelete(btn) },
-                            onCustomizeButton = { btn -> onButtonLongClick(btn) },
-                            onMoveToCell = { r, c -> handleMoveToCell(r, c) },
-                            onSwapButtons = { id1, id2 ->
-                                val layout = packBentoLayout(pageButtons, rowCount, colCount)
-                                val from = layout.placements.firstOrNull { it.button.id == id1 }
-                                val to = layout.placements.firstOrNull { it.button.id == id2 }
-                                if (from != null && to != null) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onButtonsUpdated(
-                                        buttons.map {
-                                            when (it.id) {
-                                                from.button.id -> it.copy(gridRow = to.row, gridCol = to.col)
-                                                to.button.id -> it.copy(gridRow = from.row, gridCol = from.col)
-                                                else -> it
-                                            }
-                                        }
-                                    )
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        )
-                    }
-
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.55f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .clickable { useHybridWebView = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text("Yerel", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MinimalistSecondary)
-                        }
-                    }
-                }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
             }
         }
     }
