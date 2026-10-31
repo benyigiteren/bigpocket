@@ -1442,6 +1442,7 @@ fun MainScreen(
             var editRowSpan by remember(currentBtn) { mutableIntStateOf(currentBtn.rowSpan) }
             var editClockStyle by remember(currentBtn) { mutableStateOf(normalizeClockStyle(currentBtn.clockStyle)) }
             var editFontFamily by remember(currentBtn) { mutableStateOf(currentBtn.fontFamily) }
+            var editClockFontSize by remember(currentBtn) { mutableIntStateOf(currentBtn.clockFontSize) }
             var editSliderStyle by remember(currentBtn) { mutableStateOf(currentBtn.sliderStyle.ifBlank { "apple" }) }
             var editSliderOrientation by remember(currentBtn) { mutableStateOf(currentBtn.sliderOrientation.ifBlank { "auto" }) }
             var appSearchQuery by remember(currentBtn) { mutableStateOf("") }
@@ -1572,84 +1573,152 @@ fun MainScreen(
                                 }
                             }
                         }
+                        if (editType == "hotkey" || editType == "command" || editType == "url" || editType == "text_snippet") {
+                            OutlinedTextField(
+                                value = editValue,
+                                onValueChange = { editValue = it },
+                                label = {
+                                    Text(
+                                        when (editType) {
+                                            "hotkey" -> "Kısayol Tuş Kombinasyonu"
+                                            "url" -> "Web Adresi (https://...)"
+                                            "text_snippet" -> "Yapıştırılacak Metin"
+                                            else -> "Uygulama / Komut Yolu"
+                                        }
+                                    )
+                                },
+                                placeholder = {
+                                    Text(
+                                        when (editType) {
+                                            "hotkey" -> "Örn. ctrl+c veya ctrl+shift+esc"
+                                            "url" -> "https://youtube.com"
+                                            "text_snippet" -> "Örn. Merhaba, iyi çalışmalar."
+                                            else -> "Örn. notepad.exe veya chrome.exe"
+                                        }
+                                    )
+                                },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
 
-                        OutlinedTextField(
-                            value = editValue,
-                            onValueChange = { editValue = it },
-                            label = {
-                                Text(
-                                    when (editType) {
-                                        "hotkey" -> "Tuş Kombinasyonu (Örn. ctrl+c)"
-                                        "weather" -> "Şehir (Örn. Istanbul)"
-                                        "now_playing" -> "Medya Kaynağı"
-                                        else -> "Uygulama / Komut Yolu"
-                                    }
-                                )
-                            },
-                            placeholder = {
-                                Text(
-                                    when (editType) {
-                                        "hotkey" -> "ctrl+shift+esc veya volumeup"
-                                        "weather" -> "Istanbul, Ankara, London..."
-                                        "now_playing" -> "media_session"
-                                        else -> "notepad.exe veya cmd.exe"
-                                    }
-                                )
-                            },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // Live value pickers for the new widget families.
+                        // Live value pickers for widget families
                         when (editType) {
-                            "live_info" -> EditorChoiceRow(
-                                title = "Canlı Metrik",
-                                options = listOf(
-                                    "cpu" to "CPU %",
-                                    "cpu_temp" to "PC Sıcaklık",
-                                    "ram" to "RAM",
-                                    "disk" to "Disk Doluluk",
-                                    "gpu" to "GPU Yükü",
-                                    "net_speed" to "Ağ Hızı",
-                                    "combo" to "Kombo"
-                                ),
-                                selected = editValue,
-                                onSelect = { editValue = it }
-                            )
-                            "weather" -> EditorChoiceRow(
-                                title = "Şehir",
-                                options = listOf(
-                                    "Istanbul" to "Istanbul",
-                                    "Ankara" to "Ankara",
-                                    "Izmir" to "Izmir",
-                                    "Bursa" to "Bursa",
-                                    "Antalya" to "Antalya",
-                                    "London" to "London",
-                                    "New York" to "New York"
-                                ),
-                                selected = editValue,
-                                onSelect = { editValue = it }
-                            )
-                            "clock_widget" -> {
+                            "live_info" -> {
                                 EditorChoiceRow(
-                                    title = "Saat Stili",
+                                    title = "Canlı Metrik",
                                     options = listOf(
-                                        "apple_minimal" to "Apple Minimal",
-                                        "flip_clock" to "Flip",
-                                        "neon_cyberpunk" to "Neon",
-                                        "word_clock" to "Kelime",
-                                        "swiss_serif" to "İsviçre",
-                                        "retro_terminal" to "Terminal"
+                                        "cpu" to "İşlemci (CPU)",
+                                        "cpu_temp" to "Sıcaklık (°C)",
+                                        "ram" to "Bellek (RAM)",
+                                        "disk" to "Disk Doluluk",
+                                        "gpu" to "Ekran Kartı",
+                                        "net_speed" to "Ağ Hızı",
+                                        "combo" to "3'lü Kombo Halka"
                                     ),
-                                    selected = editClockStyle,
-                                    onSelect = { editClockStyle = it }
+                                    selected = editValue,
+                                    onSelect = { editValue = it }
+                                )
+                            }
+                            "weather" -> {
+                                EditorChoiceRow(
+                                    title = "Şehir",
+                                    options = listOf(
+                                        "Istanbul" to "İstanbul",
+                                        "Ankara" to "Ankara",
+                                        "Izmir" to "İzmir",
+                                        "Bursa" to "Bursa",
+                                        "Antalya" to "Antalya",
+                                        "London" to "Londra",
+                                        "New York" to "New York"
+                                    ),
+                                    selected = editValue,
+                                    onSelect = { editValue = it }
+                                )
+                            }
+                            "clock_widget" -> {
+                                Text("Saat Tasarım Stili", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MinimalistPrimary)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                // Visual Live Preview Cards for Clock Styles
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    val clockStyles = listOf(
+                                        Triple("apple_minimal", "Apple Minimal", "17:30\nİstanbul · yerel saat"),
+                                        Triple("flip_clock", "Flip Saat", "17 : 30\nSplit-Flap"),
+                                        Triple("neon_cyberpunk", "Neon Cyber", "17:30\nCyan Parlak"),
+                                        Triple("word_clock", "Kelime Saati", "BEŞ\nOTUZ"),
+                                        Triple("swiss_serif", "İsviçre Serif", "17:30\nLüks Kadran"),
+                                        Triple("retro_terminal", "Retro Terminal", "[17:30:00] ok")
+                                    )
+                                    for ((cKey, cTitle, cPreview) in clockStyles) {
+                                        val isSel = editClockStyle == cKey
+                                        Box(
+                                            modifier = Modifier
+                                                .width(118.dp)
+                                                .height(86.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(if (isSel) MinimalistSurfaceElevated else MinimalistSurface)
+                                                .border(
+                                                    if (isSel) 2.dp else 1.dp,
+                                                    if (isSel) Color(0xFF4ADE80) else MinimalistBorder,
+                                                    RoundedCornerShape(14.dp)
+                                                )
+                                                .clickable { editClockStyle = cKey }
+                                                .padding(8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                Text(
+                                                    text = cTitle,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSel) Color(0xFF4ADE80) else MinimalistPrimary
+                                                )
+                                                Text(
+                                                    text = cPreview,
+                                                    fontSize = 10.sp,
+                                                    fontFamily = if (cKey == "retro_terminal" || cKey == "flip_clock") FontFamily.Monospace else FontFamily.Default,
+                                                    color = if (isSel) Color.White else MinimalistSecondary,
+                                                    textAlign = TextAlign.Center,
+                                                    lineHeight = 13.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                // Clock Size Chips
+                                val clockSizes = listOf(
+                                    0 to "Otomatik",
+                                    24 to "Kompakt",
+                                    32 to "Normal",
+                                    42 to "Büyük",
+                                    52 to "Devasa"
                                 )
                                 EditorChoiceRow(
-                                    title = "Yazı Tipi",
+                                    title = "Saat Boyutu",
+                                    options = clockSizes.map { it.first.toString() to it.second },
+                                    selected = editClockFontSize.toString(),
+                                    onSelect = { editClockFontSize = it.toIntOrNull() ?: 0 }
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                EditorChoiceRow(
+                                    title = "Yazı Tipi (Font)",
                                     options = listOf(
-                                        "mono" to "Mono",
-                                        "serif" to "Serif",
-                                        "sans" to "Sans"
+                                        "sans" to "Varsayılan (Geist/Sans)",
+                                        "mono" to "Monospace (Daktilo)",
+                                        "serif" to "Serif (Zarif)"
                                     ),
                                     selected = editFontFamily,
                                     onSelect = { editFontFamily = it }
@@ -1871,7 +1940,13 @@ fun MainScreen(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val builtInIcons = listOf("mic", "volup", "voldown", "play", "calc", "web", "lock", "task", "settings", "info", "star", "refresh")
+                            val builtInIcons = listOf(
+                                "keyboard", "clock", "timer", "mic", "volume", "volup", "voldown", "bright",
+                                "play", "skip", "prev", "spotify", "headphones", "speaker", "calc", "web",
+                                "lock", "task", "terminal", "folder", "camera", "monitor", "cpu", "ram",
+                                "disk", "gpu", "speed", "weather", "thermometer", "paint", "copy", "bell",
+                                "wifi", "settings", "info", "refresh", "star", "add", "close"
+                            )
                             for (iconName in builtInIcons) {
                                 Box(
                                     modifier = Modifier
@@ -1962,6 +2037,7 @@ fun MainScreen(
                                         rowSpan = editRowSpan,
                                         clockStyle = if (editType == "clock_widget") editClockStyle else currentBtn.clockStyle,
                                         fontFamily = if (editType == "clock_widget") editFontFamily else currentBtn.fontFamily,
+                                        clockFontSize = if (editType == "clock_widget") editClockFontSize else currentBtn.clockFontSize,
                                         sliderStyle = editSliderStyle,
                                         sliderOrientation = editSliderOrientation
                                     )
@@ -2779,6 +2855,11 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
     val clean = iconName.substringBefore(":").lowercase()
     return when (clean) {
         "keyboard", "hotkey", "key" -> Icons.Default.Keyboard
+        "clock", "time", "watch", "apple_minimal", "digital" -> Icons.Default.Schedule
+        "timer", "pomodoro", "stopwatch" -> Icons.Default.Timer
+        "paint", "brush" -> Icons.Default.Brush
+        "speed", "net", "network", "net_speed" -> Icons.Default.Speed
+        "thermometer", "temp", "cpu_temp" -> Icons.Default.DeviceThermostat
         "mic" -> Icons.Default.Mic
         "volup", "volume_up" -> Icons.Default.VolumeUp
         "voldown", "volume_down" -> Icons.Default.VolumeDown
@@ -3376,10 +3457,10 @@ fun StreamDeckClockTile(
     val timeText = timeFormat.format(now)
     val wordText = turkishClockWords(calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE))
     val secondary = if (label.isNotBlank() && label != "Saat & Tarih" && label != "Saat") label else "İstanbul · yerel saat"
-    val digitsFont = when (fontFamilyStr) {
+    val digitsFont = when (fontFamilyStr.lowercase()) {
+        "mono", "jetbrains", "lcd" -> FontFamily.Monospace
         "serif" -> FontFamily.Serif
-        "sans", "sans_serif" -> FontFamily.SansSerif
-        else -> FontFamily.Monospace
+        else -> FontFamily.SansSerif
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -3415,14 +3496,16 @@ private fun ClockFaceAppleMinimal(spec: ClockFaceSpec) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.Start
     ) {
         Text(
-            text = spec.dateText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = spec.accent,
+            text = spec.dateText.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+            color = MinimalistSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -3432,14 +3515,14 @@ private fun ClockFaceAppleMinimal(spec: ClockFaceSpec) {
             fontWeight = FontWeight.Light,
             color = MinimalistPrimary,
             fontFamily = spec.digitsFont,
-            letterSpacing = (-0.5).sp,
+            letterSpacing = (-1.5).sp,
             style = TextStyle(fontFeatureSettings = "tnum"),
             maxLines = 1
         )
         if (!spec.compact) {
             Text(
                 text = spec.secondary,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Medium,
                 color = MinimalistSecondary,
                 maxLines = 1,
