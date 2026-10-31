@@ -4310,7 +4310,7 @@ fun ElgatoKeycapTile(
                 coverUrl = live.mediaCover,
                 posSec = live.mediaPosSec,
                 durSec = live.mediaDurSec,
-                palette = palette,
+                ipAddress = ipAddress,
                 onLongClick = onLongPress,
                 onAction = { act ->
                     SocketManager.sendControl(JSONObject().apply {
@@ -4859,6 +4859,7 @@ fun StreamDeckNowPlayingTile(
     coverUrl: String = "",
     posSec: Int = 0,
     durSec: Int = 0,
+    ipAddress: String = "",
     onAction: (String) -> Unit,
     palette: DeckPalette? = null,
     onLongClick: (() -> Unit)? = null,
@@ -4866,7 +4867,10 @@ fun StreamDeckNowPlayingTile(
 ) {
     val p = palette ?: deckPaletteFor("now_playing", "", "")
     val haptic = LocalHapticFeedback.current
-    val hasCover = coverUrl.isNotBlank()
+    val fullCoverUrl = remember(coverUrl, ipAddress) {
+        if (coverUrl.startsWith("/")) "http://$ipAddress:8085$coverUrl" else coverUrl
+    }
+    val hasCover = fullCoverUrl.isNotBlank()
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -4888,7 +4892,7 @@ fun StreamDeckNowPlayingTile(
 
         if (hasCover) {
             AsyncImage(
-                model = coverUrl,
+                model = fullCoverUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -4922,7 +4926,7 @@ fun StreamDeckNowPlayingTile(
             ) {
                 if (hasCover) {
                     AsyncImage(
-                        model = coverUrl,
+                        model = fullCoverUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier

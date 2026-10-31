@@ -633,6 +633,79 @@ impl MediaTimelineTracker {
     }
 }
 
+static CURRENT_MEDIA_THUMBNAIL: std::sync::Mutex<Option<(String, Vec<u8>)>> = std::sync::Mutex::new(None);
+
+pub fn get_current_media_cover_bytes() -> Option<Vec<u8>> {
+    CURRENT_MEDIA_THUMBNAIL.lock().ok()?.as_ref().map(|(_, bytes)| bytes.clone())
+}
+
+#[cfg(windows)]
+fn query_windows_media_control() -> Option<MediaInfo> {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+
+    let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().ok()?.get().ok()?;
+    let session = manager.GetCurrentSession().ok()?;
+
+    let timeline = session.GetTimelineProperties().ok()?;
+    let pos_ticks = timeline.Position().ok()?.Duration; // 100-nanosecond units
+    let end_ticks = timeline.EndTime().ok()?.Duration;
+    let position_sec = (pos_ticks / 10_000_000) as u32;
+    let duration_sec = (end_ticks / 10_000_000) as u32;
+
+    let playback_info = session.GetPlaybackInfo().ok()?;
+    let status = playback_info.PlaybackStatus().ok()?;
+    let is_playing = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+
+    let media_props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let title = media_props.Title().ok()?.to_string();
+    let artist = media_props.Artist().ok()?.to_string();
+
+    if title.is_empty() && artist.is_empty() {
+        return None;
+    }
+
+    let mut has_direct_thumb = false;
+    if let Ok(thumb_ref) = media_props.Thumbnail() {
+        if let Ok(stream_op) = thumb_ref.OpenReadAsync() {
+            if let Ok(stream) = stream_op.get() {
+                if let Ok(size) = stream.Size() {
+                    if size > 0 && size < 5 * 1024 * 1024 {
+                        use windows::Storage::Streams::DataReader;
+                        if let Ok(reader) = DataReader::CreateDataReader(&stream) {
+                            if let Ok(load_op) = reader.LoadAsync(size as u32) {
+                                if load_op.get().is_ok() {
+                                    let mut bytes = vec![0u8; size as usize];
+                                    if reader.ReadBytes(&mut bytes).is_ok() {
+                                        if let Ok(mut guard) = CURRENT_MEDIA_THUMBNAIL.lock() {
+                                            *guard = Some((title.clone(), bytes));
+                                            has_direct_thumb = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let cover = if has_direct_thumb {
+        format!("/api/media/cover?k={}", url_encode(&title))
+    } else {
+        get_cached_media_cover(&artist, &title)
+    };
+
+    Some(MediaInfo {
+        title,
+        artist,
+        is_playing,
+        cover_url: cover,
+        position_sec,
+        duration_sec,
+    })
+}
 static MEDIA_COVER_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
 static LAST_SEARCHED_SONG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -762,6 +835,9 @@ pub fn get_cached_media_cover(artist: &str, title: &str) -> String {
 
 #[cfg(windows)]
 pub fn detect_media_info() -> MediaInfo {
+    if let Some(media) = query_windows_media_control() {
+        return media;
+    }
     let mut media = detect_media_info_internal();
     let (pos, dur) = MediaTimelineTracker::update(&media.title, media.is_playing);
     media.position_sec = pos;

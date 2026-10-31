@@ -327,6 +327,7 @@ dependencies = [
  "tower-http 0.5.2",
  "tracing",
  "tracing-subscriber",
+ "windows 0.57.0",
  "xcap",
 ]
 

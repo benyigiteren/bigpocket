@@ -624,6 +624,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/camera_frame", get(camera_frame_handler))
         .route("/api/update/check", get(update_check))
         .route("/api/qr", get(api_qr))
+        .route("/api/media/cover", get(media_cover_handler))
         .route("/api/show_window", get(api_show_window).post(api_show_window))
         .fallback_service(static_service());
 
@@ -1832,6 +1833,19 @@ fn merge_button(button: &Value, previous: &HashMap<i64, Map<String, Value>>) -> 
         }
     }
     Value::Object(merged)
+}
+
+async fn media_cover_handler() -> Response {
+    if let Some(bytes) = crate::system::get_current_media_cover_bytes() {
+        let content_type = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+            "image/png"
+        } else {
+            "image/jpeg"
+        };
+        ([(axum::http::header::CONTENT_TYPE, content_type), (axum::http::header::CACHE_CONTROL, "public, max-age=60")], bytes).into_response()
+    } else {
+        axum::http::StatusCode::NOT_FOUND.into_response()
+    }
 }
 
 async fn system_info() -> Response {
