@@ -2389,11 +2389,308 @@ pub fn set_virtual_monitor(enable: bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Master volume (waveOut)
+// Master volume (Windows Core Audio IAudioEndpointVolume with waveOut fallback)
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
 fn volume_get() -> Option<u8> {
+    core_audio_get_volume().or_else(waveout_volume_get)
+}
+
+#[cfg(windows)]
+fn volume_set(percent: u8) {
+    if !core_audio_set_volume(percent) {
+        waveout_volume_set(percent);
+    }
+}
+
+#[cfg(windows)]
+fn volume_set_mute(mute: bool) {
+    let _ = core_audio_set_mute(mute);
+}
+
+#[cfg(windows)]
+fn core_audio_get_volume() -> Option<u8> {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+
+    #[repr(C)]
+    struct GUID {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    }
+
+    const CLSID_MM: GUID = GUID {
+        data1: 0xBCDE0395,
+        data2: 0xE52F,
+        data3: 0x467C,
+        data4: [0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E],
+    };
+    const IID_IMM: GUID = GUID {
+        data1: 0xA95664D2,
+        data2: 0x9614,
+        data3: 0x4F35,
+        data4: [0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6],
+    };
+    const IID_AEV: GUID = GUID {
+        data1: 0x5CDF2C82,
+        data2: 0x841E,
+        data3: 0x4546,
+        data4: [0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A],
+    };
+
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoInitialize(pvReserved: Handle) -> i32;
+        fn CoCreateInstance(
+            rclsid: *const GUID,
+            pUnkOuter: Handle,
+            dwClsContext: u32,
+            riid: *const GUID,
+            ppv: *mut Handle,
+        ) -> i32;
+    }
+
+    unsafe {
+        let _ = CoInitialize(std::ptr::null_mut());
+
+        let mut p_enumerator: Handle = std::ptr::null_mut();
+        if CoCreateInstance(&CLSID_MM, std::ptr::null_mut(), 1, &IID_IMM, &mut p_enumerator) != 0 || p_enumerator.is_null() {
+            return None;
+        }
+
+        let enum_vtable = *(p_enumerator as *mut *mut usize);
+        type GetDefaultEndpointFn = unsafe extern "system" fn(Handle, i32, i32, *mut Handle) -> i32;
+        type ReleaseFn = unsafe extern "system" fn(Handle) -> u32;
+
+        let get_default_endpoint: GetDefaultEndpointFn = std::mem::transmute(*enum_vtable.add(4));
+        let enum_release: ReleaseFn = std::mem::transmute(*enum_vtable.add(2));
+
+        let mut p_device: Handle = std::ptr::null_mut();
+        let ret = get_default_endpoint(p_enumerator, 0, 0, &mut p_device);
+        enum_release(p_enumerator);
+
+        if ret != 0 || p_device.is_null() {
+            return None;
+        }
+
+        let dev_vtable = *(p_device as *mut *mut usize);
+        type ActivateFn = unsafe extern "system" fn(Handle, *const GUID, u32, Handle, *mut Handle) -> i32;
+        let activate: ActivateFn = std::mem::transmute(*dev_vtable.add(3));
+        let dev_release: ReleaseFn = std::mem::transmute(*dev_vtable.add(2));
+
+        let mut p_volume: Handle = std::ptr::null_mut();
+        let ret = activate(p_device, &IID_AEV, 1, std::ptr::null_mut(), &mut p_volume);
+        dev_release(p_device);
+
+        if ret != 0 || p_volume.is_null() {
+            return None;
+        }
+
+        let vol_vtable = *(p_volume as *mut *mut usize);
+        type GetScalarFn = unsafe extern "system" fn(Handle, *mut f32) -> i32;
+        let get_scalar: GetScalarFn = std::mem::transmute(*vol_vtable.add(9));
+        let vol_release: ReleaseFn = std::mem::transmute(*vol_vtable.add(2));
+
+        let mut level: f32 = 0.0;
+        let ret = get_scalar(p_volume, &mut level);
+        vol_release(p_volume);
+
+        if ret == 0 {
+            Some((level * 100.0).round().clamp(0.0, 100.0) as u8)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(windows)]
+fn core_audio_set_volume(percent: u8) -> bool {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+
+    #[repr(C)]
+    struct GUID {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    }
+
+    const CLSID_MM: GUID = GUID {
+        data1: 0xBCDE0395,
+        data2: 0xE52F,
+        data3: 0x467C,
+        data4: [0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E],
+    };
+    const IID_IMM: GUID = GUID {
+        data1: 0xA95664D2,
+        data2: 0x9614,
+        data3: 0x4F35,
+        data4: [0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6],
+    };
+    const IID_AEV: GUID = GUID {
+        data1: 0x5CDF2C82,
+        data2: 0x841E,
+        data3: 0x4546,
+        data4: [0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A],
+    };
+
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoInitialize(pvReserved: Handle) -> i32;
+        fn CoCreateInstance(
+            rclsid: *const GUID,
+            pUnkOuter: Handle,
+            dwClsContext: u32,
+            riid: *const GUID,
+            ppv: *mut Handle,
+        ) -> i32;
+    }
+
+    unsafe {
+        let _ = CoInitialize(std::ptr::null_mut());
+
+        let mut p_enumerator: Handle = std::ptr::null_mut();
+        if CoCreateInstance(&CLSID_MM, std::ptr::null_mut(), 1, &IID_IMM, &mut p_enumerator) != 0 || p_enumerator.is_null() {
+            return false;
+        }
+
+        let enum_vtable = *(p_enumerator as *mut *mut usize);
+        type GetDefaultEndpointFn = unsafe extern "system" fn(Handle, i32, i32, *mut Handle) -> i32;
+        type ReleaseFn = unsafe extern "system" fn(Handle) -> u32;
+
+        let get_default_endpoint: GetDefaultEndpointFn = std::mem::transmute(*enum_vtable.add(4));
+        let enum_release: ReleaseFn = std::mem::transmute(*enum_vtable.add(2));
+
+        let mut p_device: Handle = std::ptr::null_mut();
+        let ret = get_default_endpoint(p_enumerator, 0, 0, &mut p_device);
+        enum_release(p_enumerator);
+
+        if ret != 0 || p_device.is_null() {
+            return false;
+        }
+
+        let dev_vtable = *(p_device as *mut *mut usize);
+        type ActivateFn = unsafe extern "system" fn(Handle, *const GUID, u32, Handle, *mut Handle) -> i32;
+        let activate: ActivateFn = std::mem::transmute(*dev_vtable.add(3));
+        let dev_release: ReleaseFn = std::mem::transmute(*dev_vtable.add(2));
+
+        let mut p_volume: Handle = std::ptr::null_mut();
+        let ret = activate(p_device, &IID_AEV, 1, std::ptr::null_mut(), &mut p_volume);
+        dev_release(p_device);
+
+        if ret != 0 || p_volume.is_null() {
+            return false;
+        }
+
+        let vol_vtable = *(p_volume as *mut *mut usize);
+        type SetScalarFn = unsafe extern "system" fn(Handle, f32, Handle) -> i32;
+        let set_scalar: SetScalarFn = std::mem::transmute(*vol_vtable.add(7));
+        let vol_release: ReleaseFn = std::mem::transmute(*vol_vtable.add(2));
+
+        let scalar = (percent as f32) / 100.0f32;
+        let ret = set_scalar(p_volume, scalar, std::ptr::null_mut());
+        vol_release(p_volume);
+        ret == 0
+    }
+}
+
+#[cfg(windows)]
+fn core_audio_set_mute(mute: bool) -> bool {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+
+    #[repr(C)]
+    struct GUID {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    }
+
+    const CLSID_MM: GUID = GUID {
+        data1: 0xBCDE0395,
+        data2: 0xE52F,
+        data3: 0x467C,
+        data4: [0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E],
+    };
+    const IID_IMM: GUID = GUID {
+        data1: 0xA95664D2,
+        data2: 0x9614,
+        data3: 0x4F35,
+        data4: [0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6],
+    };
+    const IID_AEV: GUID = GUID {
+        data1: 0x5CDF2C82,
+        data2: 0x841E,
+        data3: 0x4546,
+        data4: [0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A],
+    };
+
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoInitialize(pvReserved: Handle) -> i32;
+        fn CoCreateInstance(
+            rclsid: *const GUID,
+            pUnkOuter: Handle,
+            dwClsContext: u32,
+            riid: *const GUID,
+            ppv: *mut Handle,
+        ) -> i32;
+    }
+
+    unsafe {
+        let _ = CoInitialize(std::ptr::null_mut());
+
+        let mut p_enumerator: Handle = std::ptr::null_mut();
+        if CoCreateInstance(&CLSID_MM, std::ptr::null_mut(), 1, &IID_IMM, &mut p_enumerator) != 0 || p_enumerator.is_null() {
+            return false;
+        }
+
+        let enum_vtable = *(p_enumerator as *mut *mut usize);
+        type GetDefaultEndpointFn = unsafe extern "system" fn(Handle, i32, i32, *mut Handle) -> i32;
+        type ReleaseFn = unsafe extern "system" fn(Handle) -> u32;
+
+        let get_default_endpoint: GetDefaultEndpointFn = std::mem::transmute(*enum_vtable.add(4));
+        let enum_release: ReleaseFn = std::mem::transmute(*enum_vtable.add(2));
+
+        let mut p_device: Handle = std::ptr::null_mut();
+        let ret = get_default_endpoint(p_enumerator, 0, 0, &mut p_device);
+        enum_release(p_enumerator);
+
+        if ret != 0 || p_device.is_null() {
+            return false;
+        }
+
+        let dev_vtable = *(p_device as *mut *mut usize);
+        type ActivateFn = unsafe extern "system" fn(Handle, *const GUID, u32, Handle, *mut Handle) -> i32;
+        let activate: ActivateFn = std::mem::transmute(*dev_vtable.add(3));
+        let dev_release: ReleaseFn = std::mem::transmute(*dev_vtable.add(2));
+
+        let mut p_volume: Handle = std::ptr::null_mut();
+        let ret = activate(p_device, &IID_AEV, 1, std::ptr::null_mut(), &mut p_volume);
+        dev_release(p_device);
+
+        if ret != 0 || p_volume.is_null() {
+            return false;
+        }
+
+        let vol_vtable = *(p_volume as *mut *mut usize);
+        type SetMuteFn = unsafe extern "system" fn(Handle, i32, Handle) -> i32;
+        let set_mute: SetMuteFn = std::mem::transmute(*vol_vtable.add(14));
+        let vol_release: ReleaseFn = std::mem::transmute(*vol_vtable.add(2));
+
+        let ret = set_mute(p_volume, if mute { 1 } else { 0 }, std::ptr::null_mut());
+        vol_release(p_volume);
+        ret == 0
+    }
+}
+
+#[cfg(windows)]
+fn waveout_volume_get() -> Option<u8> {
     use std::ffi::c_void;
     #[link(name = "winmm")]
     extern "system" {
@@ -2409,7 +2706,7 @@ fn volume_get() -> Option<u8> {
 }
 
 #[cfg(windows)]
-fn volume_set(percent: u8) {
+fn waveout_volume_set(percent: u8) {
     use std::ffi::c_void;
     #[link(name = "winmm")]
     extern "system" {
@@ -2430,16 +2727,30 @@ fn volume_get() -> Option<u8> {
 #[cfg(not(windows))]
 fn volume_set(_percent: u8) {}
 
+#[cfg(not(windows))]
+fn volume_set_mute(_mute: bool) {}
+
 // ---------------------------------------------------------------------------
-// Display brightness (DDC/CI, gamma-ramp fallback)
+// Display brightness (DDC/CI, laptop WMI, gamma-ramp fallback)
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
+fn set_brightness_wmi(level: u8) -> bool {
+    use std::os::windows::process::CommandExt;
+    let script = format!("(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue).WmiSetBrightness(1, {level})");
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .creation_flags(0x0800_0000)
+        .output();
+    if let Ok(out) = output {
+        return out.status.success();
+    }
+    false
+}
+
+#[cfg(windows)]
 fn set_display_brightness(level: u8) -> bool {
-    // DDC/CI first (external monitors); the gamma ramp is the internal-panel
-    // fallback. The caller only tells clients the new level when one of the two
-    // actually took effect.
-    set_brightness_ddc(level) || set_brightness_gamma(level)
+    set_brightness_ddc(level) || set_brightness_wmi(level) || set_brightness_gamma(level)
 }
 
 #[cfg(windows)]

@@ -3432,11 +3432,11 @@ input:checked + .slider:before {
 
 .deck-media__cover-bg {
     position: absolute;
-    inset: -14px;
+    inset: -6px;
     background-size: cover;
     background-position: center;
-    filter: blur(18px) brightness(0.48) saturate(1.4);
-    transform: scale(1.2);
+    filter: blur(5px) brightness(0.65) saturate(1.15);
+    transform: scale(1.08);
     z-index: 0;
     transition: background-image 0.4s ease, opacity 0.4s ease;
     opacity: 0;
@@ -3450,7 +3450,7 @@ input:checked + .slider:before {
 .deck-media__cover-overlay {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(8, 9, 12, 0.28) 0%, rgba(8, 9, 12, 0.85) 100%);
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0.72) 100%);
     z-index: 1;
     pointer-events: none;
     opacity: 0;
