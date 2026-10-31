@@ -50,6 +50,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
@@ -3732,7 +3734,7 @@ fun ElgatoKeycapTile(
             .background(surface)
             .border(1.dp, if (isSelectedForSwap) palette.accent else palette.border, shape)
             .then(
-                if (isEditMode) {
+                if (isEditMode || isVolume || isBrightness || button.type == "now_playing") {
                     Modifier
                 } else {
                     Modifier.pointerInput(button.id) {
@@ -3785,6 +3787,7 @@ fun ElgatoKeycapTile(
                 isPlaying = live.mediaPlaying,
                 coverUrl = live.mediaCover,
                 palette = palette,
+                onLongClick = onLongPress,
                 onAction = { act ->
                     SocketManager.sendControl(JSONObject().apply {
                         put("type", "stream_deck_press")
@@ -4322,10 +4325,29 @@ fun StreamDeckNowPlayingTile(
     coverUrl: String = "",
     onAction: (String) -> Unit,
     palette: DeckPalette? = null,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val p = palette ?: deckPaletteFor("now_playing", "", "")
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    val haptic = LocalHapticFeedback.current
+    val hasCover = coverUrl.isNotBlank()
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(DeckCorner))
+            .background(MinimalistSurface)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick?.invoke()
+                    }
+                )
+            }
+    ) {
+        val compact = maxHeight < 96.dp
+        val titleColor = if (hasCover) Color.White else MinimalistPrimary
+        val artistColor = if (hasCover) Color.White.copy(alpha = 0.85f) else MinimalistSecondary
         if (coverUrl.isNotBlank()) {
             AsyncImage(
                 model = coverUrl,
@@ -4333,7 +4355,9 @@ fun StreamDeckNowPlayingTile(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .alpha(0.35f)
+                    .scale(1.15f)
+                    .blur(16.dp)
+                    .alpha(0.68f)
             )
             Box(
                 modifier = Modifier
@@ -4341,14 +4365,13 @@ fun StreamDeckNowPlayingTile(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color.Black.copy(alpha = 0.40f),
-                                Color.Black.copy(alpha = 0.85f)
+                                Color.Black.copy(alpha = 0.28f),
+                                Color.Black.copy(alpha = 0.82f)
                             )
                         )
                     )
             )
         }
-        val compact = maxHeight < 96.dp
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -4365,31 +4388,32 @@ fun StreamDeckNowPlayingTile(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(30.dp)
+                            .size(26.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(30.dp)
+                            .size(26.dp)
                             .clip(CircleShape)
-                            .background(MinimalistSurfaceElevated),
+                            .background(Color.White.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.MusicNote,
                             contentDescription = null,
-                            tint = p.accent,
-                            modifier = Modifier.size(15.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
                 Text(
-                    text = label.ifBlank { "Şimdi Çalıyor" },
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MinimalistSecondary,
+                    text = "ŞİMDİ ÇALIYOR",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.08.sp,
+                    color = Color.White.copy(alpha = 0.70f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -4397,20 +4421,22 @@ fun StreamDeckNowPlayingTile(
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = title.ifBlank { "Medya yok" },
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MinimalistPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = titleColor,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 8f)) else TextStyle.Default
                 )
                 if (!compact) {
                     Text(
                         text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
-                        fontSize = 11.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MinimalistSecondary,
+                        color = artistColor,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 6f)) else TextStyle.Default
                     )
                 }
             }
@@ -4440,7 +4466,7 @@ fun StreamDeckNowPlayingTile(
     }
 }
 
-/** Round tonal transport control used by the now-playing card. */
+/** Round tonal transport control matching PC styling 1:1. */
 @Composable
 private fun DeckTransportButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -4452,11 +4478,14 @@ private fun DeckTransportButton(
     val haptic = LocalHapticFeedback.current
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .size(if (emphasised) 36.dp else 30.dp)
             .clip(CircleShape)
-            .background(if (emphasised) MinimalistPrimary else MinimalistSurfaceElevated)
+            .background(if (emphasised) Color.White else Color.White.copy(alpha = 0.12f))
+            .then(
+                if (emphasised) Modifier else Modifier.border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+            )
             .clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onClick()
             },
         contentAlignment = Alignment.Center
@@ -4464,8 +4493,8 @@ private fun DeckTransportButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (emphasised) MinimalistBackground else MinimalistPrimary,
-            modifier = Modifier.size(16.dp)
+            tint = if (emphasised) Color.Black else Color.White,
+            modifier = Modifier.size(if (emphasised) 18.dp else 15.dp)
         )
     }
 }

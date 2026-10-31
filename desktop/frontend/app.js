@@ -4159,22 +4159,92 @@ function renderStreamDeckButtons() {
         // Setup edge-dragging to resize
         setupEdgeResize(item, btn);
 
-        // Disambiguate click vs drag movement
-        let downX = 0, downY = 0, movedSignificantly = false;
+        // Direct tactile pointer dragging (eliminates buggy browser HTML5 drag and red 🚫 cursor)
+        item.draggable = false;
+        let downX = 0, downY = 0;
+        let isPointerDragging = false;
+
         item.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest('.deck-quick-actions, .deck-resize-edge, .apple-pill-track, .deck-np-btn, button, input, textarea')) {
+                return;
+            }
+
             downX = e.clientX;
             downY = e.clientY;
-            movedSignificantly = false;
-        });
-        item.addEventListener('mousemove', (e) => {
-            if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) {
-                movedSignificantly = true;
-            }
+            isPointerDragging = false;
+
+            const onMouseMove = (moveEvt) => {
+                const dx = moveEvt.clientX - downX;
+                const dy = moveEvt.clientY - downY;
+
+                if (!isPointerDragging && Math.hypot(dx, dy) > 6) {
+                    isPointerDragging = true;
+                    item.classList.add('is-drag-lifted');
+                    document.body.classList.add('is-deck-dragging-active');
+                }
+
+                if (isPointerDragging) {
+                    moveEvt.preventDefault();
+                    item.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.06)`;
+                    item.style.zIndex = '9999';
+
+                    item.style.pointerEvents = 'none';
+                    const elBelow = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
+                    item.style.pointerEvents = '';
+
+                    const target = elBelow ? elBelow.closest('.deck-btn, .deck-slot-empty') : null;
+                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                    if (target && target !== item) {
+                        target.classList.add('drag-over');
+                    }
+                }
+            };
+
+            const onMouseUp = (upEvt) => {
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+
+                if (isPointerDragging) {
+                    upEvt.preventDefault();
+                    upEvt.stopPropagation();
+
+                    item.classList.remove('is-drag-lifted');
+                    document.body.classList.remove('is-deck-dragging-active');
+                    item.style.transform = '';
+                    item.style.zIndex = '';
+
+                    item.style.pointerEvents = 'none';
+                    const elBelow = document.elementFromPoint(upEvt.clientX, upEvt.clientY);
+                    item.style.pointerEvents = '';
+
+                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+
+                    const target = elBelow ? elBelow.closest('.deck-btn, .deck-slot-empty') : null;
+                    if (target && target !== item) {
+                        if (target.classList.contains('deck-btn')) {
+                            const targetId = parseInt(target.getAttribute('data-id'));
+                            if (!isNaN(targetId) && targetId !== btn.id) {
+                                swapStreamDeckButtons(btn.id, targetId);
+                            }
+                        } else if (target.classList.contains('deck-slot-empty')) {
+                            const r = parseInt(target.getAttribute('data-row'));
+                            const c = parseInt(target.getAttribute('data-col'));
+                            if (!isNaN(r) && !isNaN(c)) {
+                                moveStreamDeckButtonToCell(btn.id, r, c);
+                            }
+                        }
+                    }
+                }
+            };
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
         });
 
         // Single click selects the card and fills the Live Inspector (no modal)
         item.addEventListener('click', (e) => {
-            if (movedSignificantly) return;
+            if (isPointerDragging || Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
             if (e.target.closest('.deck-np-btn, .deck-pomodoro-btn, .apple-pill-track, .deck-quick-actions, .deck-resize-edge')) return;
             if (document.body.classList.contains('mobile-mode')) {
                 if (btn.type === 'toggle' && btn.value === 'pomodoro') {
@@ -4188,55 +4258,20 @@ function renderStreamDeckButtons() {
             selectDeckButton(btn.id);
         });
 
+        // Double-click opens edit modal
         item.addEventListener('dblclick', (e) => {
+            if (isPointerDragging) return;
             if (e.target.closest('.deck-np-btn, .deck-pomodoro-btn, .apple-pill-track, .deck-quick-actions, .deck-resize-edge')) return;
             if (document.body.classList.contains('mobile-mode')) return;
-            // Advanced modal stays available for icon / installed-app extraction
             openEditButtonModal(btn.id);
         });
 
-        // Drag & Drop event handlers
-        item.addEventListener('dragstart', (e) => {
-            if (e.target.closest('.deck-quick-actions, .deck-resize-edge, input, button')) {
-                e.preventDefault();
-                return;
-            }
-            item.classList.add('dragging');
-            e.dataTransfer.setData('text/plain', btn.id.toString());
-            e.dataTransfer.effectAllowed = 'move';
-
-            // Create elevated 3D drag ghost that floats in the air
-            const rect = item.getBoundingClientRect();
-            const ghost = item.cloneNode(true);
-            ghost.classList.remove('dragging', 'selected');
-            ghost.classList.add('deck-drag-ghost-elevated');
-            ghost.style.position = 'fixed';
-            ghost.style.top = '-9999px';
-            ghost.style.left = '-9999px';
-            ghost.style.width = rect.width + 'px';
-            ghost.style.height = rect.height + 'px';
-            ghost.style.zIndex = '99999';
-            document.body.appendChild(ghost);
-
-            const offsetX = Math.min(Math.max(10, e.clientX - rect.left), rect.width - 10);
-            const offsetY = Math.min(Math.max(10, e.clientY - rect.top), rect.height - 10);
-            e.dataTransfer.setDragImage(ghost, offsetX, offsetY);
-            setTimeout(() => {
-                if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
-            }, 0);
-        });
-
-        item.addEventListener('dragend', () => {
-            item.classList.remove('dragging');
-            document.querySelectorAll('.deck-btn, .deck-slot-empty').forEach(el => el.classList.remove('drag-over'));
-        });
-
+        // Preset drops from modal onto this item
         item.addEventListener('dragover', (e) => {
             e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
+            e.dataTransfer.dropEffect = 'copy';
             item.classList.add('drag-over');
         });
-
         item.addEventListener('dragleave', (e) => {
             if (item.contains(e.relatedTarget)) return;
             item.classList.remove('drag-over');
@@ -4253,14 +4288,8 @@ function renderStreamDeckButtons() {
                 createWidgetFromPreset(presetKey, cell);
                 const pm = document.getElementById('widget-picker-modal');
                 if (pm) pm.classList.remove('active', 'modal-dragging-preset');
-                return;
-            }
-            const draggedId = parseInt(dataText);
-            if (!isNaN(draggedId) && draggedId !== btn.id) {
-                swapStreamDeckButtons(draggedId, btn.id);
             }
         });
-
         list.appendChild(item);
     });
 
@@ -4270,6 +4299,8 @@ function renderStreamDeckButtons() {
         emptySlot.className = 'deck-slot-empty';
         emptySlot.style.gridColumn = `${hole.c + 1} / span 1`;
         emptySlot.style.gridRow = `${hole.r + 1} / span 1`;
+        emptySlot.setAttribute('data-row', hole.r.toString());
+        emptySlot.setAttribute('data-col', hole.c.toString());
         emptySlot.innerHTML = `
             <div class="deck-slot-empty-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
