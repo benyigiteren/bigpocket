@@ -150,7 +150,9 @@ data class StreamDeckButtonInfo(
     /** Explicit bento row (0-based); `-1` means "let the packer pick the first free cell". */
     val gridRow: Int = -1,
     /** Explicit bento column (0-based); `-1` means "let the packer pick the first free cell". */
-    val gridCol: Int = -1
+    val gridCol: Int = -1,
+    val sliderStyle: String = "apple",
+    val sliderOrientation: String = "auto"
 )
 
 /**
@@ -359,7 +361,9 @@ private fun fetchStreamDeckConfig(
                             fontFamily = item.optString("font_family", "mono"),
                             clockFontSize = item.optInt("clock_font_size", 0),
                             gridRow = item.optInt("grid_row", -1),
-                            gridCol = item.optInt("grid_col", -1)
+                            gridCol = item.optInt("grid_col", -1),
+                            sliderStyle = item.optString("slider_style", "apple"),
+                            sliderOrientation = item.optString("slider_orientation", item.optString("orientation", "auto"))
                         ))
                     }
                     onSuccess(list, rows, cols, pagesList, activePage)
@@ -420,6 +424,8 @@ private fun saveStreamDeckConfig(
             bObj.put("clock_font_size", b.clockFontSize.toString())
             bObj.put("grid_row", b.gridRow)
             bObj.put("grid_col", b.gridCol)
+            bObj.put("slider_style", b.sliderStyle)
+            bObj.put("slider_orientation", b.sliderOrientation)
             buttonsArray.put(bObj)
         }
         configObj.put("stream_deck_buttons", buttonsArray)
@@ -1436,8 +1442,9 @@ fun MainScreen(
             var editRowSpan by remember(currentBtn) { mutableIntStateOf(currentBtn.rowSpan) }
             var editClockStyle by remember(currentBtn) { mutableStateOf(normalizeClockStyle(currentBtn.clockStyle)) }
             var editFontFamily by remember(currentBtn) { mutableStateOf(currentBtn.fontFamily) }
+            var editSliderStyle by remember(currentBtn) { mutableStateOf(currentBtn.sliderStyle.ifBlank { "apple" }) }
+            var editSliderOrientation by remember(currentBtn) { mutableStateOf(currentBtn.sliderOrientation.ifBlank { "auto" }) }
             var appSearchQuery by remember(currentBtn) { mutableStateOf("") }
-
             LaunchedEffect(streamDeckButtons) {
                 val updatedBtn = streamDeckButtons.find { it.id == currentBtn.id }
                 if (updatedBtn != null) {
@@ -1741,6 +1748,73 @@ fun MainScreen(
                                     }
                                 }
                             }
+                        } else if (editType == "volume_slider" || editType == "brightness_slider") {
+                            Text("Sürgü Tasarım Tarzı", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MinimalistPrimary)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val sliderStyles = listOf(
+                                    "apple" to "Apple Capsule",
+                                    "samsung" to "Samsung One UI",
+                                    "material" to "Material You",
+                                    "framer" to "Framer Minimal"
+                                )
+                                for ((sKey, sLabel) in sliderStyles) {
+                                    val isSel = editSliderStyle == sKey
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isSel) MinimalistPrimary else MinimalistSurfaceElevated)
+                                            .border(1.dp, if (isSel) MinimalistPrimary else MinimalistBorder, RoundedCornerShape(12.dp))
+                                            .clickable { editSliderStyle = sKey }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    ) {
+                                        Text(
+                                            sLabel,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isSel) MinimalistBackground else MinimalistPrimary
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Sürgü Yönü", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MinimalistPrimary)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val orientations = listOf(
+                                    "auto" to "Otomatik",
+                                    "horizontal" to "Yatay",
+                                    "vertical" to "Dikey"
+                                )
+                                for ((oKey, oLabel) in orientations) {
+                                    val isSel = editSliderOrientation == oKey
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isSel) MinimalistPrimary else MinimalistSurfaceElevated)
+                                            .border(1.dp, if (isSel) MinimalistPrimary else MinimalistBorder, RoundedCornerShape(12.dp))
+                                            .clickable { editSliderOrientation = oKey }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    ) {
+                                        Text(
+                                            oLabel,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isSel) MinimalistBackground else MinimalistPrimary
+                                        )
+                                    }
+                                }
+                            }
                         } else {
                             Text("Hazır Kısayollar", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MinimalistPrimary)
                             Row(
@@ -1887,7 +1961,9 @@ fun MainScreen(
                                         colSpan = editColSpan,
                                         rowSpan = editRowSpan,
                                         clockStyle = if (editType == "clock_widget") editClockStyle else currentBtn.clockStyle,
-                                        fontFamily = if (editType == "clock_widget") editFontFamily else currentBtn.fontFamily
+                                        fontFamily = if (editType == "clock_widget") editFontFamily else currentBtn.fontFamily,
+                                        sliderStyle = editSliderStyle,
+                                        sliderOrientation = editSliderOrientation
                                     )
                                 } else {
                                     it
@@ -2758,6 +2834,8 @@ fun AppleCapsuleSlider(
     label: String,
     accentColor: Color,
     palette: DeckPalette? = null,
+    sliderStyle: String = "apple",
+    sliderOrientation: String = "auto",
     onValueChange: (Float) -> Unit,
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -2792,14 +2870,24 @@ fun AppleCapsuleSlider(
         else -> Icons.Default.VolumeUp
     }
 
-    BoxWithConstraints(
-        modifier = modifier
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val isVertical = when (sliderOrientation.lowercase()) {
+            "vertical", "dikey" -> true
+            "horizontal", "yatay" -> false
+            else -> maxHeight > maxWidth * 1.15f
+        }
+
+        val touchModifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .pointerInput(isVertical) {
                 detectTapGestures(
                     onLongPress = { onLongClick?.invoke() },
                     onTap = { offset ->
-                        val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        val fraction = if (isVertical) {
+                            (1f - (offset.y / size.height.toFloat())).coerceIn(0f, 1f)
+                        } else {
+                            (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        }
                         val level = fraction * 100f
                         localValue = level
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -2807,7 +2895,7 @@ fun AppleCapsuleSlider(
                     }
                 )
             }
-            .pointerInput(Unit) {
+            .pointerInput(isVertical) {
                 detectDragGestures(
                     onDragStart = {
                         isDragging = true
@@ -2823,73 +2911,406 @@ fun AppleCapsuleSlider(
                     },
                     onDrag = { change, _ ->
                         change.consume()
-                        val fraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        val fraction = if (isVertical) {
+                            (1f - (change.position.y / size.height.toFloat())).coerceIn(0f, 1f)
+                        } else {
+                            (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        }
                         val level = fraction * 100f
                         localValue = level
                         scheduleCommit(level)
                     }
                 )
             }
-            .padding(14.dp)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Top Row: 32dp circular badge with icon on left, %85 on right
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(MinimalistSurfaceElevated),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = sliderIcon,
-                        contentDescription = safeLabel,
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+
+        Box(modifier = touchModifier.padding(14.dp)) {
+            when (sliderStyle.lowercase()) {
+                "samsung", "oneui" -> {
+                    // Samsung One UI 6 Volume Bar
+                    if (isVertical) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("%${clampedValue.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Box(
+                                modifier = Modifier
+                                    .width(42.dp)
+                                    .weight(1f)
+                                    .padding(vertical = 8.dp)
+                                    .clip(RoundedCornerShape(21.dp))
+                                    .background(Color.White.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(fillFraction)
+                                        .clip(RoundedCornerShape(21.dp))
+                                        .background(Color.White)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .padding(bottom = 10.dp)
+                                        .size(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = sliderIcon,
+                                        contentDescription = safeLabel,
+                                        tint = if (fillFraction > 0.25f) Color.Black else Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                            Text(safeLabel, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistSecondary, maxLines = 1)
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(safeLabel, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Text("%${clampedValue.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp)
+                                    .clip(RoundedCornerShape(19.dp))
+                                    .background(Color.White.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fillFraction)
+                                        .clip(RoundedCornerShape(19.dp))
+                                        .background(Color.White)
+                                )
+                                Icon(
+                                    imageVector = sliderIcon,
+                                    contentDescription = safeLabel,
+                                    tint = if (fillFraction > 0.15f) Color.Black else Color.White,
+                                    modifier = Modifier.padding(start = 12.dp).size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
-                Text(
-                    text = "%${clampedValue.toInt()}",
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color.White
-                )
-            }
-
-            // Middle: Label
-            Text(
-                text = safeLabel,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            // Bottom: Sleek horizontal capsule track matching PC Image 1
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(fillFraction)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White)
-                )
+                "material", "material_you" -> {
+                    // Google Android 14/15 Material You Bubbly Slider
+                    if (isVertical) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(54.dp)
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(27.dp))
+                                    .background(Color.White.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(fillFraction)
+                                        .clip(RoundedCornerShape(27.dp))
+                                        .background(Color.White)
+                                )
+                                Column(
+                                    modifier = Modifier.padding(bottom = 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        imageVector = sliderIcon,
+                                        contentDescription = safeLabel,
+                                        tint = if (fillFraction > 0.25f) Color.Black else Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        "%${clampedValue.toInt()}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (fillFraction > 0.35f) Color.Black else Color.White
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(safeLabel, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistSecondary, maxLines = 1)
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(safeLabel, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Text("%${clampedValue.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp)
+                                    .clip(RoundedCornerShape(23.dp))
+                                    .background(Color.White.copy(alpha = 0.10f)),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fillFraction)
+                                        .clip(RoundedCornerShape(23.dp))
+                                        .background(Color.White)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = sliderIcon,
+                                        contentDescription = safeLabel,
+                                        tint = if (fillFraction > 0.18f) Color.Black else Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                "framer", "minimal" -> {
+                    // Framer Minimal Precision Slider
+                    if (isVertical) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "%${clampedValue.toInt()}",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4ADE80)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .width(28.dp),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color.White.copy(alpha = 0.15f))
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight(fillFraction)
+                                        .width(3.dp),
+                                    contentAlignment = Alignment.TopCenter
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White)
+                                            .border(2.dp, Color(0xFF4ADE80), CircleShape)
+                                    )
+                                }
+                            }
+                            Text(
+                                safeLabel.uppercase(),
+                                fontSize = 9.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = MinimalistSecondary,
+                                maxLines = 1
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "// ${safeLabel.uppercase()}",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MinimalistSecondary
+                                )
+                                Text(
+                                    "%${clampedValue.toInt()}",
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF4ADE80)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(28.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(3.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color.White.copy(alpha = 0.15f))
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(fillFraction)
+                                        .height(3.dp),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White)
+                                            .border(2.dp, Color(0xFF4ADE80), CircleShape)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    // Default: Apple Control Center Capsule (1:1 PC Image 1)
+                    if (isVertical) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(52.dp)
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(26.dp))
+                                    .background(MinimalistSurfaceElevated),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(fillFraction)
+                                        .clip(RoundedCornerShape(26.dp))
+                                        .background(Color.White)
+                                )
+                                Column(
+                                    modifier = Modifier.fillMaxHeight().padding(vertical = 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Icon(
+                                        imageVector = sliderIcon,
+                                        contentDescription = safeLabel,
+                                        tint = if (fillFraction > 0.82f) Color.Black else Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "%${clampedValue.toInt()}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (fillFraction > 0.25f) Color.Black else Color.White
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = safeLabel,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MinimalistSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        // Horizontal Capsule (Exact 1:1 match with PC Image 1!)
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(MinimalistSurfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = sliderIcon,
+                                        contentDescription = safeLabel,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "%${clampedValue.toInt()}",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.White
+                                )
+                            }
+                            Text(
+                                text = safeLabel,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(10.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fillFraction)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(Color.White)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -3769,6 +4190,8 @@ fun ElgatoKeycapTile(
                 label = button.label.ifBlank { "Ana Ses" },
                 accentColor = palette.accent,
                 palette = palette,
+                sliderStyle = button.sliderStyle,
+                sliderOrientation = button.sliderOrientation,
                 onValueChange = onVolumeChange,
                 onLongClick = onLongPress
             )
@@ -3778,6 +4201,8 @@ fun ElgatoKeycapTile(
                 label = button.label.ifBlank { "Parlaklık" },
                 accentColor = palette.accent,
                 palette = palette,
+                sliderStyle = button.sliderStyle,
+                sliderOrientation = button.sliderOrientation,
                 onValueChange = { onBrightnessChange(it.toInt()) },
                 onLongClick = onLongPress
             )
