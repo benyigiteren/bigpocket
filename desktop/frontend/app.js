@@ -406,8 +406,8 @@ function fetchConfig() {
                 syncMatrixControlsUI();
                 renderPageTabs();
                 renderStreamDeckButtons();
+                refreshDeckStage();
                 const betaToggle = document.getElementById('settings-beta-channel-toggle');
-                if (betaToggle) betaToggle.checked = !!apiConfig.beta_channel;
             }
         })
         .catch(err => {
@@ -1156,6 +1156,18 @@ function fitDeckFrame() {
     const mockup = document.getElementById('deck-phone-mockup');
     const frame = document.getElementById('deck-hardware-frame');
     if (!stage || !mockup || !frame || !apiConfig) return;
+
+    if (document.body.classList.contains('mobile-mode')) {
+        frame.style.width = '100vw';
+        frame.style.height = '100vh';
+        frame.style.maxWidth = '100vw';
+        frame.style.maxHeight = '100vh';
+        frame.style.padding = '0';
+        frame.style.margin = '0';
+        frame.style.borderRadius = '0';
+        frame.style.border = 'none';
+        return;
+    }
 
     const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
     const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
@@ -5476,41 +5488,33 @@ function checkMobileMode() {
     const mode = urlParams.get('mode');
     if (mode) {
         document.body.classList.add('mobile-mode');
-        document.querySelector('.sidebar').style.display = 'none';
-        document.querySelector('.content-header').style.display = 'none';
-        document.querySelector('.main-content').style.marginLeft = '0';
-        document.querySelector('.main-content').style.padding = '0';
-        document.querySelector('.app-container').style.padding = '0';
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar) sidebar.style.display = 'none';
+        const contentHeader = document.querySelector('.content-header');
+        if (contentHeader) contentHeader.style.display = 'none';
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.style.marginLeft = '0';
+            mainContent.style.padding = '0';
+            mainContent.style.width = '100vw';
+            mainContent.style.height = '100vh';
+        }
+        const appContainer = document.querySelector('.app-container');
+        if (appContainer) {
+            appContainer.style.padding = '0';
+            appContainer.style.margin = '0';
+            appContainer.style.width = '100vw';
+            appContainer.style.height = '100vh';
+        }
         
         // Hide all tabs
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         
         const targetPanel = document.getElementById('panel-' + mode);
-        if(targetPanel) {
+        if (targetPanel) {
             targetPanel.classList.add('active');
             targetPanel.style.height = '100vh';
-            const bento = targetPanel.querySelector('.bento-grid');
-            if(bento) {
-                bento.style.height = '100%';
-                bento.style.margin = '0';
-                bento.style.padding = '10px';
-                bento.style.display = 'flex';
-                bento.style.flexDirection = 'column';
-            }
-            const cards = targetPanel.querySelectorAll('.card');
-            cards.forEach(c => {
-                const header = c.querySelector('.card-header');
-                if(header) header.style.display = 'none';
-                c.style.flex = '1';
-                c.style.margin = '0';
-                c.style.height = '100%';
-            });
-            const deckSettings = targetPanel.querySelector('.deck-settings-bar');
-            if(deckSettings) deckSettings.style.display = 'none';
-            const buttonsGrid = targetPanel.querySelector('.buttons-grid');
-            if(buttonsGrid) {
-                buttonsGrid.style.height = '100%';
-            }
+            targetPanel.style.width = '100vw';
         }
     }
 }

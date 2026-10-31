@@ -6187,11 +6187,12 @@ fun StreamDeckTab(
             }
         } else {
             var useHybridWebView by rememberSaveable { mutableStateOf(true) }
+            var hasWebViewError by remember { mutableStateOf(false) }
             val deckUrl = remember(ipAddress, password) {
                 "http://$ipAddress:8085/?mode=streamdeck&password=${android.net.Uri.encode(password)}"
             }
 
-            if (useHybridWebView) {
+            if (useHybridWebView && !hasWebViewError) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
                         factory = { ctx ->
@@ -6204,12 +6205,13 @@ fun StreamDeckTab(
                                 settings.apply {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
+                                    databaseEnabled = true
                                     useWideViewPort = true
                                     loadWithOverviewMode = true
                                     setSupportZoom(false)
                                     displayZoomControls = false
                                     mediaPlaybackRequiresUserGesture = false
-                                    cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
+                                    cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
                                 }
                                 webViewClient = object : android.webkit.WebViewClient() {
                                     override fun onReceivedError(
@@ -6218,7 +6220,8 @@ fun StreamDeckTab(
                                         description: String?,
                                         failingUrl: String?
                                     ) {
-                                        // Ignore or fallback
+                                        android.util.Log.e("StreamDeckWebView", "Error $errorCode: $description on $failingUrl")
+                                        hasWebViewError = true
                                     }
                                 }
                                 loadUrl(deckUrl)
