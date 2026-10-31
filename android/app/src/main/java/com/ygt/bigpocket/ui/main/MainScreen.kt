@@ -6,6 +6,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Environment
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
@@ -610,25 +613,83 @@ private fun deleteSharedFile(
     })
 }
 
-private fun downloadFileUsingManager(context: Context, ip: String, password: String, filename: String) {
+private fun downloadFileDirectly(
+    context: Context,
+    ip: String,
+    password: String,
+    filename: String,
+    onStart: () -> Unit = {},
+    onComplete: (File?) -> Unit = {}
+) {
+    onStart()
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            val url = "http://$ip:8085/download/${Uri.encode(filename)}?password=${Uri.encode(password)}"
+            val client = OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "İndirme başarısız: HTTP ${response.code}", Toast.LENGTH_SHORT).show()
+                    onComplete(null)
+                }
+                return@launch
+            }
+
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            val destFile = File(downloadsDir, filename)
+
+            response.body?.byteStream()?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(destFile.absolutePath), null, null)
+
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "✓ İndirildi: ${destFile.name}", Toast.LENGTH_SHORT).show()
+                onComplete(destFile)
+            }
+        } catch (e: Exception) {
+            Log.e("FileDownload", "Download failed", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "İndirme hatası: ${e.message}", Toast.LENGTH_SHORT).show()
+                onComplete(null)
+            }
+        }
+    }
+}
+
+private fun openDownloadedFile(context: Context, file: File) {
     try {
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-        val url = "http://$ip:8085/download/${Uri.encode(filename)}?password=${Uri.encode(password)}"
-        val uri = Uri.parse(url)
-        
-        val request = android.app.DownloadManager.Request(uri)
-            .setTitle(filename)
-            .setDescription("BigPocket'tan indiriliyor")
-            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, filename)
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true)
-            
-        downloadManager.enqueue(request)
-        Toast.makeText(context, "İndirme başlatıldı: $filename", Toast.LENGTH_SHORT).show()
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.updates",
+            file
+        )
+        val mime = context.contentResolver.getType(uri) ?: when (file.extension.lowercase()) {
+            "jpg", "jpeg", "png", "webp", "gif" -> "image/*"
+            "mp4", "mkv", "avi", "mov" -> "video/*"
+            "mp3", "wav", "ogg", "flac" -> "audio/*"
+            "pdf" -> "application/pdf"
+            "txt", "log", "json" -> "text/plain"
+            "apk" -> "application/vnd.android.package-archive"
+            else -> "*/*"
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
     } catch (e: Exception) {
-        Log.e("FileDownload", "Download failed", e)
-        Toast.makeText(context, "İndirme başlatılamadı: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "Dosya açılamadı: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -4346,9 +4407,7 @@ fun StreamDeckNowPlayingTile(
                 )
             }
     ) {
-        val totalHeight = maxHeight
-        val isWide = maxWidth > totalHeight * 1.35f
-        val compact = totalHeight < 96.dp
+        val compact = maxHeight < 96.dp
         val titleColor = if (hasCover) Color.White else MinimalistPrimary
         val artistColor = if (hasCover) Color.White.copy(alpha = 0.85f) else MinimalistSecondary
 
@@ -4359,160 +4418,76 @@ fun StreamDeckNowPlayingTile(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .scale(1.10f)
-                    .blur(10.dp)
+                    .scale(1.08f)
+                    .blur(5.dp)
             )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.42f))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.28f),
+                                Color.Black.copy(alpha = 0.72f)
+                            )
+                        )
+                    )
             )
         }
 
-        if (isWide) {
-            // Apple Control Center / Dynamic Island wide layout
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Row: Miniature thumbnail + "ŞİMDİ ÇALIYOR" badge
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Album squircle thumbnail
-                Box(
-                    modifier = Modifier
-                        .size((totalHeight - 24.dp).coerceIn(44.dp, 84.dp))
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (hasCover) {
-                        AsyncImage(
-                            model = coverUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
+                if (hasCover) {
+                    AsyncImage(
+                        model = coverUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             imageVector = Icons.Default.MusicNote,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
-
-                // Info + Controls column
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "ŞİMDİ ÇALIYOR",
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.08.sp,
-                            color = Color.White.copy(alpha = 0.70f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = title.ifBlank { "Medya yok" },
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = titleColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 8f)) else TextStyle.Default
-                        )
-                        Text(
-                            text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = artistColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 6f)) else TextStyle.Default
-                        )
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        DeckTransportButton(
-                            icon = Icons.Default.SkipPrevious,
-                            contentDescription = "Önceki Parça",
-                            palette = p
-                        ) { onAction("prevtrack") }
-                        DeckTransportButton(
-                            icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Oynat / Durdur",
-                            palette = p,
-                            emphasised = true
-                        ) { onAction("playpause") }
-                        DeckTransportButton(
-                            icon = Icons.Default.SkipNext,
-                            contentDescription = "Sonraki Parça",
-                            palette = p
-                        ) { onAction("nexttrack") }
-                    }
-                }
+                Text(
+                    text = "ŞİMDİ ÇALIYOR",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.08.sp,
+                    color = Color.White.copy(alpha = 0.70f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-        } else {
-            // Standard vertical / square layout
+
+            // Bottom Section: Title, Subtitle, and clustered Controls
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (hasCover) {
-                        AsyncImage(
-                            model = coverUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = "ŞİMDİ ÇALIYOR",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.08.sp,
-                        color = Color.White.copy(alpha = 0.70f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = title.ifBlank { "Medya yok" },
@@ -4535,9 +4510,10 @@ fun StreamDeckNowPlayingTile(
                         )
                     }
                 }
+
+                // Controls: tightly clustered with 10.dp gap (exactly as on PC!)
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     DeckTransportButton(
@@ -7427,6 +7403,9 @@ fun ToolsTab(
         }
 
         if (activeFlowTab == "flow") {
+            val downloadingMap = remember { mutableStateMapOf<String, Boolean>() }
+            val downloadedMap = remember { mutableStateMapOf<String, Boolean>() }
+            val downloadsDir: File = remember { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -7438,7 +7417,6 @@ fun ToolsTab(
                             .fillMaxWidth()
                             .weight(1f)
                             .padding(32.dp),
-                        contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Public, contentDescription = null, tint = MinimalistSecondary, modifier = Modifier.size(36.dp))
@@ -7534,11 +7512,53 @@ fun ToolsTab(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(msg.fileName, fontSize = 11.sp, color = MinimalistPrimary, maxLines = 1, modifier = Modifier.weight(1f))
-                                                IconButton(
-                                                    onClick = { downloadFileUsingManager(context, ipAddress, password, msg.fileName) },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(16.dp))
+                                                val isDownloading = downloadingMap[msg.fileName] == true
+                                                val localFile = remember(msg.fileName, downloadedMap[msg.fileName]) {
+                                                    val f = File(downloadsDir, msg.fileName)
+                                                    if (f.exists() && f.length() > 0) f else null
+                                                }
+                                                if (isDownloading) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(20.dp).padding(2.dp),
+                                                        color = Color(0xFF4ADE80),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                } else if (localFile != null) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = Color(0x2422C55E),
+                                                        modifier = Modifier.clickable {
+                                                            openDownloadedFile(context, localFile)
+                                                        }
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
+                                                            Text("Aç", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                                                        }
+                                                    }
+                                                } else {
+                                                    IconButton(
+                                                        onClick = {
+                                                            downloadFileDirectly(
+                                                                context = context,
+                                                                ip = ipAddress,
+                                                                password = password,
+                                                                filename = msg.fileName,
+                                                                onStart = { downloadingMap[msg.fileName] = true },
+                                                                onComplete = { saved ->
+                                                                    downloadingMap[msg.fileName] = false
+                                                                    if (saved != null) downloadedMap[msg.fileName] = true
+                                                                }
+                                                            )
+                                                        },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(16.dp))
+                                                    }
                                                 }
                                             }
                                         } else if (msg.type == "file" && msg.fileUrl.isNotEmpty()) {
@@ -7553,20 +7573,62 @@ fun ToolsTab(
                                                         Text(formatFileSize(msg.fileSize), fontSize = 10.5.sp, color = MinimalistSecondary)
                                                     }
                                                 }
-                                                IconButton(
-                                                    onClick = { downloadFileUsingManager(context, ipAddress, password, msg.fileName) },
-                                                    modifier = Modifier.size(30.dp)
-                                                ) {
-                                                    Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(18.dp))
+                                                val isDownloading = downloadingMap[msg.fileName] == true
+                                                val localFile = remember(msg.fileName, downloadedMap[msg.fileName]) {
+                                                    val f = File(downloadsDir, msg.fileName)
+                                                    if (f.exists() && f.length() > 0) f else null
+                                                }
+                                                if (isDownloading) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(22.dp).padding(2.dp),
+                                                        color = Color(0xFF4ADE80),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                } else if (localFile != null) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = Color(0x2422C55E),
+                                                        modifier = Modifier.clickable {
+                                                            openDownloadedFile(context, localFile)
+                                                        }
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
+                                                            Text("Aç", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                                                        }
+                                                    }
+                                                } else {
+                                                    IconButton(
+                                                        onClick = {
+                                                            downloadFileDirectly(
+                                                                context = context,
+                                                                ip = ipAddress,
+                                                                password = password,
+                                                                filename = msg.fileName,
+                                                                onStart = { downloadingMap[msg.fileName] = true },
+                                                                onComplete = { saved ->
+                                                                    downloadingMap[msg.fileName] = false
+                                                                    if (saved != null) downloadedMap[msg.fileName] = true
+                                                                }
+                                                            )
+                                                        },
+                                                        modifier = Modifier.size(30.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(18.dp))
+                                                    }
                                                 }
                                             }
                                         } else {
                                             Text(
                                                 text = msg.text,
-                                                 fontSize = 13.sp,
-                                                 color = MinimalistPrimary,
-                                                 lineHeight = 18.sp
-                                             )
+                                                fontSize = 13.sp,
+                                                color = MinimalistPrimary,
+                                                lineHeight = 18.sp
+                                            )
                                              Spacer(modifier = Modifier.height(4.dp))
                                              Surface(
                                                  shape = RoundedCornerShape(6.dp),
@@ -7647,12 +7709,12 @@ fun ToolsTab(
                          ) {
                              Icon(Icons.Default.Send, contentDescription = "Gönder", tint = MinimalistBackground, modifier = Modifier.size(18.dp))
                          }
-                     }
-                 }
-             }
-         } else {
-             Column(
-                 modifier = Modifier
+                    }
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
                      .fillMaxWidth()
                      .weight(1f)
                      .verticalScroll(rememberScrollState())
@@ -7929,21 +7991,61 @@ fun ToolsTab(
                                         )
                                     }
                                 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        // Download Button (Real Download trigger)
-                                        IconButton(
-                                            onClick = {
-                                                downloadFileUsingManager(context, ipAddress, password, file.name)
-                                            },
-                                            modifier = Modifier.size(36.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Download,
-                                                contentDescription = "İndir",
-                                                tint = MinimalistPrimary
-                                            )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        val downloadsDir = remember { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }
+                                        var isDownloadingThis by remember(file.name) { mutableStateOf(false) }
+                                        var isDownloadedThis by remember(file.name) {
+                                            mutableStateOf(File(downloadsDir, file.name).exists())
                                         }
 
+                                        if (isDownloadingThis) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp).padding(4.dp),
+                                                color = Color(0xFF4ADE80),
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else if (isDownloadedThis) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = Color(0x2422C55E),
+                                                modifier = Modifier.clickable {
+                                                    val f = File(downloadsDir, file.name)
+                                                    if (f.exists()) openDownloadedFile(context, f)
+                                                }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
+                                                    Text("Aç", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                                                }
+                                            }
+                                        } else {
+                                            IconButton(
+                                                onClick = {
+                                                    downloadFileDirectly(
+                                                        context = context,
+                                                        ip = ipAddress,
+                                                        password = password,
+                                                        filename = file.name,
+                                                        onStart = { isDownloadingThis = true },
+                                                        onComplete = { saved ->
+                                                            isDownloadingThis = false
+                                                            if (saved != null) isDownloadedThis = true
+                                                        }
+                                                    )
+                                                },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Download,
+                                                    contentDescription = "İndir",
+                                                    tint = MinimalistPrimary
+                                                )
+                                            }
+                                        }
                                         // Delete Button
                                         IconButton(
                                             onClick = {
@@ -7972,9 +8074,9 @@ fun ToolsTab(
                     }
                 }
             }
-            }
         }
     }
+}
 }
 }
 // ----------------- Helpers -----------------
