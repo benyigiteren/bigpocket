@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Component, Path as FsPath, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
@@ -516,6 +516,10 @@ pub struct AppState {
     pub shutdown: Notify,
     /// Latest JPEG frame from phone camera.
     pub camera_frame: Arc<tokio::sync::RwLock<Vec<u8>>>,
+    /// Configurable FPS for 2nd monitor stream (15, 30, 60).
+    pub screen_stream_fps: AtomicU32,
+    /// Configurable JPEG quality for 2nd monitor stream (40..95).
+    pub screen_stream_quality: AtomicU32,
 }
 
 impl AppState {
@@ -534,6 +538,8 @@ impl AppState {
             last_volume: StdMutex::new(50),
             shutdown: Notify::new(),
             camera_frame: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            screen_stream_fps: AtomicU32::new(30),
+            screen_stream_quality: AtomicU32::new(60),
         }
     }
 
@@ -889,6 +895,18 @@ async fn handle_control(
     match msg_type {
         "virtual_monitor_disable" => {
             set_virtual_monitor(false);
+        }
+        "set_screen_stream_config" => {
+            if let Some(fps) = as_i64(payload, "fps").or_else(|| as_f64(payload, "fps").map(|f| f as i64)) {
+                let clamped_fps = (fps as u32).clamp(10, 60);
+                state.screen_stream_fps.store(clamped_fps, Ordering::Relaxed);
+                tracing::info!("Screen stream FPS set to {clamped_fps}");
+            }
+            if let Some(q) = as_i64(payload, "quality").or_else(|| as_f64(payload, "quality").map(|f| f as i64)) {
+                let clamped_q = (q as u32).clamp(30, 95);
+                state.screen_stream_quality.store(clamped_q, Ordering::Relaxed);
+                tracing::info!("Screen stream quality set to {clamped_q}");
+            }
         }
         "mouse_move" => {
             let dx = as_f64(payload, "dx").unwrap_or(0.0) as i32;
@@ -2965,20 +2983,24 @@ pub fn start_screen_stream_server(state: Arc<AppState>) -> tokio::task::JoinHand
     })
 }
 
-async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, _state: Arc<AppState>) {
+async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, state: Arc<AppState>) {
     use tokio::io::AsyncWriteExt;
     let _ = socket.set_nodelay(true);
 
-    let mut interval = tokio::time::interval(Duration::from_millis(33)); // ~30 FPS
+    let mut last_fps = state.screen_stream_fps.load(Ordering::Relaxed).clamp(10, 60);
+    let mut interval = tokio::time::interval(Duration::from_millis((1000 / last_fps).max(16) as u64));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    // The stream is one-way (server -> client), so a byte read here means either
-    // an orderly shutdown (0 bytes) or noise. A peer that closes cleanly leaves
-    // its FIN behind and writes would still succeed, so without this probe the
-    // capture loop would keep encoding frames into a socket nobody reads.
     let mut probe = [0u8; 1];
 
     loop {
+        let current_fps = state.screen_stream_fps.load(Ordering::Relaxed).clamp(10, 60);
+        if current_fps != last_fps {
+            last_fps = current_fps;
+            interval = tokio::time::interval(Duration::from_millis((1000 / last_fps).max(16) as u64));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        }
+
         interval.tick().await;
 
         match socket.try_read(&mut probe) {
@@ -2988,13 +3010,15 @@ async fn handle_screen_stream_client(mut socket: tokio::net::TcpStream, _state: 
             Err(_) => break,
         }
 
+        let quality = state.screen_stream_quality.load(Ordering::Relaxed).clamp(30, 95) as u8;
+
         let capture_res = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
             let monitor = get_stream_monitor()?;
             let img = monitor.capture_image().ok()?;
             let rgb = image::DynamicImage::ImageRgba8(img).into_rgb8();
             let mut jpeg = Vec::with_capacity(64 * 1024);
             let mut cursor = std::io::Cursor::new(&mut jpeg);
-            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 60);
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
             encoder.encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8).ok()?;
             Some(jpeg)
         }).await;
@@ -3079,6 +3103,141 @@ pub fn start_camera_stream_server(state: Arc<AppState>) -> tokio::task::JoinHand
     })
 }
 
+#[cfg(windows)]
+#[repr(C)]
+struct WAVEFORMATEX {
+    w_format_tag: u16,
+    n_channels: u16,
+    n_samples_per_sec: u32,
+    n_avg_bytes_per_sec: u32,
+    n_block_align: u16,
+    w_bits_per_sample: u16,
+    cb_size: u16,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct WAVEHDR {
+    lp_data: *mut u8,
+    dw_buffer_length: u32,
+    dw_bytes_recorded: u32,
+    dw_user: usize,
+    dw_flags: u32,
+    dw_loops: u32,
+    lp_next: usize,
+    reserved: usize,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct WAVEOUTCAPSW {
+    w_mid: u16,
+    w_pid: u16,
+    v_driver_version: u32,
+    sz_pname: [u16; 32],
+    dw_formats: u32,
+    w_channels: u16,
+    w_reserved1: u16,
+    dw_support: u32,
+}
+
+#[cfg(windows)]
+#[link(name = "winmm")]
+extern "system" {
+    fn waveOutGetNumDevs() -> u32;
+    fn waveOutGetDevCapsW(uDeviceID: usize, pwoc: *mut WAVEOUTCAPSW, cbwoc: u32) -> u32;
+    fn waveOutOpen(
+        phwo: *mut *mut std::ffi::c_void,
+        uDeviceID: u32,
+        pwfx: *const WAVEFORMATEX,
+        dwCallback: usize,
+        dwInstance: usize,
+        fdwOpen: u32,
+    ) -> u32;
+    fn waveOutPrepareHeader(hwo: *mut std::ffi::c_void, pwh: *mut WAVEHDR, cbwh: u32) -> u32;
+    fn waveOutWrite(hwo: *mut std::ffi::c_void, pwh: *mut WAVEHDR, cbwh: u32) -> u32;
+    fn waveOutUnprepareHeader(hwo: *mut std::ffi::c_void, pwh: *mut WAVEHDR, cbwh: u32) -> u32;
+    fn waveOutClose(hwo: *mut std::ffi::c_void) -> u32;
+    fn waveOutReset(hwo: *mut std::ffi::c_void) -> u32;
+}
+
+#[cfg(windows)]
+fn find_cable_device_id() -> u32 {
+    let num = unsafe { waveOutGetNumDevs() };
+    for i in 0..num {
+        let mut caps = std::mem::MaybeUninit::<WAVEOUTCAPSW>::zeroed();
+        let ret = unsafe { waveOutGetDevCapsW(i as usize, caps.as_mut_ptr(), std::mem::size_of::<WAVEOUTCAPSW>() as u32) };
+        if ret == 0 {
+            let caps = unsafe { caps.assume_init() };
+            let name_len = caps.sz_pname.iter().position(|&c| c == 0).unwrap_or(caps.sz_pname.len());
+            let name = String::from_utf16_lossy(&caps.sz_pname[..name_len]).to_lowercase();
+            if name.contains("cable") || name.contains("vb-audio") || name.contains("virtual") {
+                tracing::info!("Found Virtual Mic output device: {name} (Device ID: {i})");
+                return i;
+            }
+        }
+    }
+    tracing::info!("VB-Cable not found, using default audio device");
+    0xFFFFFFFF // WAVE_MAPPER
+}
+
+#[cfg(windows)]
+fn play_pcm_to_vbcable(rx: tokio::sync::mpsc::Receiver<Vec<u8>>) {
+    std::thread::spawn(move || {
+        let dev_id = find_cable_device_id();
+        let wfx = WAVEFORMATEX {
+            w_format_tag: 1, // WAVE_FORMAT_PCM
+            n_channels: 1,
+            n_samples_per_sec: 44100,
+            n_avg_bytes_per_sec: 44100 * 2,
+            n_block_align: 2,
+            w_bits_per_sample: 16,
+            cb_size: 0,
+        };
+
+        let mut hwo: *mut std::ffi::c_void = std::ptr::null_mut();
+        let ret = unsafe { waveOutOpen(&mut hwo, dev_id, &wfx, 0, 0, 0) };
+        if ret != 0 || hwo.is_null() {
+            tracing::error!("waveOutOpen failed with code {ret}");
+            return;
+        }
+
+        let mut rx = rx;
+        while let Some(mut chunk) = rx.blocking_recv() {
+            if chunk.is_empty() {
+                break;
+            }
+            let mut hdr = WAVEHDR {
+                lp_data: chunk.as_mut_ptr(),
+                dw_buffer_length: chunk.len() as u32,
+                dw_bytes_recorded: 0,
+                dw_user: 0,
+                dw_flags: 0,
+                dw_loops: 0,
+                lp_next: 0,
+                reserved: 0,
+            };
+            unsafe {
+                if waveOutPrepareHeader(hwo, &mut hdr, std::mem::size_of::<WAVEHDR>() as u32) == 0 {
+                    waveOutWrite(hwo, &mut hdr, std::mem::size_of::<WAVEHDR>() as u32);
+                    let duration_ms = (chunk.len() as u64 * 1000) / (44100 * 2);
+                    std::thread::sleep(Duration::from_millis(duration_ms.max(1)));
+                    waveOutUnprepareHeader(hwo, &mut hdr, std::mem::size_of::<WAVEHDR>() as u32);
+                }
+            }
+        }
+
+        unsafe {
+            waveOutReset(hwo);
+            waveOutClose(hwo);
+        }
+        tracing::info!("Virtual mic audio stream closed.");
+    });
+}
+
+#[cfg(not(windows))]
+fn play_pcm_to_vbcable(_rx: tokio::sync::mpsc::Receiver<Vec<u8>>) {}
+
 /// TCP audio stream server on port 8084.
 pub fn start_audio_stream_server(_state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -3101,14 +3260,19 @@ pub fn start_audio_stream_server(_state: Arc<AppState>) -> tokio::task::JoinHand
             let _ = socket.set_nodelay(true);
             tracing::info!("Audio client connected from {peer}");
 
+            let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+            play_pcm_to_vbcable(rx);
+
             tokio::spawn(async move {
                 use tokio::io::AsyncReadExt;
                 let mut pcm_buf = [0u8; 4096];
                 loop {
                     match socket.read(&mut pcm_buf).await {
                         Ok(0) | Err(_) => break,
-                        Ok(_n) => {
-                            // Audio PCM received and socket kept alive
+                        Ok(n) => {
+                            if tx.send(pcm_buf[..n].to_vec()).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }

@@ -840,6 +840,7 @@ fun MainScreen(
 
     // Connection state
     var isConnected by remember { mutableStateOf(SocketManager.isConnected) }
+    var manualDisconnect by rememberSaveable { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var showQrScanner by remember { mutableStateOf(false) }
     var streamDeckButtons by remember { mutableStateOf<List<StreamDeckButtonInfo>>(emptyList()) }
@@ -1209,15 +1210,15 @@ fun MainScreen(
     }
 
     // Auto discovery: while disconnected, listen for BigPocket PCs on the LAN and connect automatically.
-    LaunchedEffect(isConnected) {
-        if (isConnected) return@LaunchedEffect
+    LaunchedEffect(isConnected, manualDisconnect) {
+        if (isConnected || manualDisconnect) return@LaunchedEffect
         val lastAttempt = mutableMapOf<String, Long>()
         var warnedPassword = false
         var warnedUntrusted = false
         com.ygt.bigpocket.services.PcDiscovery.discover(context)
             .catch { e -> Log.w("MainScreen", "Discovery unavailable", e) }
             .collect { pc ->
-            if (SocketManager.isConnected || SocketManager.isConnecting) return@collect
+            if (manualDisconnect || SocketManager.isConnected || SocketManager.isConnecting) return@collect
             val now = System.currentTimeMillis()
             if (now - (lastAttempt[pc.ip] ?: 0L) < 8000) return@collect
             lastAttempt[pc.ip] = now
@@ -1331,6 +1332,7 @@ fun MainScreen(
                             val ip = jsonObj.getString("ip")
                             val pw = jsonObj.optString("password", "")
                             if (ip.isNotEmpty()) {
+                                manualDisconnect = false
                                 ipAddress = ip
                                 password = pw
                                 prefs.edit().putString("ip_address", ip).putString("password", pw).apply()
@@ -1338,6 +1340,7 @@ fun MainScreen(
                                 SocketManager.connect(ip, pw)
                             }
                         } else {
+                            manualDisconnect = false
                             ipAddress = rawVal
                             prefs.edit().putString("ip_address", rawVal).apply()
                             trustIp(rawVal)
@@ -2081,8 +2084,10 @@ fun MainScreen(
                         onConnectClick = {
                             focusManager.clearFocus()
                             if (isConnected) {
+                                manualDisconnect = true
                                 SocketManager.disconnect()
                             } else {
+                                manualDisconnect = false
                                 // Manual connect = explicit user approval of this host.
                                 trustIp(ipAddress)
                                 SocketManager.connect(ipAddress, password)
@@ -3726,7 +3731,10 @@ fun ElgatoKeycapTile(
                 } else {
                     Modifier.pointerInput(button.id) {
                         detectTapGestures(
-                            onTap = { onPress() },
+                            onTap = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onPress()
+                            },
                             onLongPress = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onLongPress()
@@ -5609,6 +5617,7 @@ fun StreamDeckTab(
                     ipAddress = ipAddress,
                     password = password,
                     onPress = { btn ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         SocketManager.sendControl(JSONObject().apply {
                             put("type", "stream_deck_press")
                             put("button_id", btn.id)
@@ -6160,12 +6169,15 @@ fun MonitorTab(
     isMonitorFullscreen: Boolean,
     onToggleFullscreen: () -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("bigpocket_prefs", Context.MODE_PRIVATE) }
+    var streamQualityPreset by rememberSaveable { mutableStateOf(prefs.getString("screen_quality_preset", "balanced") ?: "balanced") }
+
     val latestFrame = ScreenReceiver.latestFrame
     var isControlSuspended by remember { mutableStateOf(false) }
     var rightClickMode by remember { mutableStateOf(false) }
     var fitInsideMode by remember { mutableStateOf(true) }
     var showKeyboardDialog by remember { mutableStateOf(false) }
-
     // The gesture `pointerInput` blocks are not restarted per frame, so the live frame size and
     // scaling mode are read through `rememberUpdatedState` instead of being captured stale.
     val currentFrame by rememberUpdatedState(latestFrame)
@@ -6217,6 +6229,16 @@ fun MonitorTab(
         }
 
         DisposableEffect(Unit) {
+            val (fps, quality) = when (streamQualityPreset) {
+                "performance" -> 60 to 75
+                "battery" -> 15 to 45
+                else -> 30 to 60
+            }
+            SocketManager.sendControl(JSONObject().apply {
+                put("type", "set_screen_stream_config")
+                put("fps", fps)
+                put("quality", quality)
+            })
             ScreenReceiver.start(ipAddress)
             onDispose {
                 ScreenReceiver.stop()
@@ -6404,6 +6426,60 @@ fun MonitorTab(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+
+                    // Monitor FPS & Quality Preset toggle
+                    FilterChip(
+                        selected = streamQualityPreset == "performance",
+                        onClick = {
+                            val next = when (streamQualityPreset) {
+                                "battery" -> "balanced"
+                                "balanced" -> "performance"
+                                else -> "battery"
+                            }
+                            streamQualityPreset = next
+                            prefs.edit().putString("screen_quality_preset", next).apply()
+                            val (fps, quality) = when (next) {
+                                "performance" -> 60 to 75
+                                "battery" -> 15 to 45
+                                else -> 30 to 60
+                            }
+                            SocketManager.sendControl(JSONObject().apply {
+                                put("type", "set_screen_stream_config")
+                                put("fps", fps)
+                                put("quality", quality)
+                            })
+                            val label = when (next) {
+                                "performance" -> "Ultra (60 FPS)"
+                                "battery" -> "Tasarruf (15 FPS)"
+                                else -> "Dengeli (30 FPS)"
+                            }
+                            Toast.makeText(context, "Ekran: $label", Toast.LENGTH_SHORT).show()
+                        },
+                        label = {
+                            Text(
+                                text = when (streamQualityPreset) {
+                                    "performance" -> "60 FPS"
+                                    "battery" -> "15 FPS"
+                                    else -> "30 FPS"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Speed,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MinimalistPrimary,
+                            selectedLabelColor = MinimalistPrimary,
+                            containerColor = MinimalistBorder,
+                            labelColor = MinimalistSecondary
+                        )
+                    )
                 }
             }
         }

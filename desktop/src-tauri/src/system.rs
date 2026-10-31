@@ -117,6 +117,7 @@ impl SystemMonitor {
         let cpu_temp = self.cpu_temperature(cpu);
         let (disk_percent, disk_free_gb, disk_total_gb) = self.disk_usage();
         let (net_down_kbps, net_up_kbps) = self.network_speed_kbps();
+        let media = detect_media_info();
 
         json!({
             "type": "system_stats",
@@ -130,6 +131,9 @@ impl SystemMonitor {
             "disk_total_gb": disk_total_gb,
             "net_down_kbps": net_down_kbps,
             "net_up_kbps": net_up_kbps,
+            "media_title": media.title,
+            "media_artist": media.artist,
+            "media_playing": media.is_playing,
         })
     }
 
@@ -562,4 +566,141 @@ mod tests {
         assert_eq!(key_from_name("camera"), None);
         assert_eq!(key_from_name(""), None);
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MediaInfo {
+    pub title: String,
+    pub artist: String,
+    pub is_playing: bool,
+}
+
+#[cfg(windows)]
+pub fn detect_media_info() -> MediaInfo {
+    use std::ffi::c_void;
+    type HWND = *mut c_void;
+    type BOOL = i32;
+    type LPARAM = isize;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(lpEnumFunc: unsafe extern "system" fn(HWND, LPARAM) -> BOOL, lParam: LPARAM) -> BOOL;
+        fn IsWindowVisible(hWnd: HWND) -> BOOL;
+        fn GetWindowTextLengthW(hWnd: HWND) -> i32;
+        fn GetWindowTextW(hWnd: HWND, lpString: *mut u16, nMaxCount: i32) -> i32;
+    }
+
+    struct WindowCollector {
+        titles: Vec<String>,
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        if IsWindowVisible(hwnd) != 0 {
+            let len = GetWindowTextLengthW(hwnd);
+            if len > 0 && len < 512 {
+                let mut buf = vec![0u16; (len + 1) as usize];
+                let read = GetWindowTextW(hwnd, buf.as_mut_ptr(), len + 1);
+                if read > 0 {
+                    let title = String::from_utf16_lossy(&buf[..read as usize]);
+                    let collector = &mut *(lparam as *mut WindowCollector);
+                    collector.titles.push(title);
+                }
+            }
+        }
+        1
+    }
+
+    let mut collector = WindowCollector { titles: Vec::new() };
+    unsafe {
+        EnumWindows(enum_proc, &mut collector as *mut _ as LPARAM);
+    }
+
+    for title in &collector.titles {
+        let t = title.trim();
+        let lower = t.to_lowercase();
+
+        // 1. Spotify
+        if lower == "spotify" || lower == "spotify free" || lower == "spotify premium" {
+            return MediaInfo {
+                title: "Spotify".to_string(),
+                artist: "Duraklatıldı".to_string(),
+                is_playing: false,
+            };
+        }
+        if lower.contains("spotify") && t.contains(" - ") {
+            let mut parts = t.splitn(2, " - ");
+            let artist = parts.next().unwrap_or("Spotify").trim().to_string();
+            let track = parts.next().unwrap_or("").trim().to_string();
+            return MediaInfo {
+                title: track,
+                artist,
+                is_playing: true,
+            };
+        }
+
+        // 2. YouTube in browser
+        if lower.contains("youtube") {
+            let mut cleaned = t.to_string();
+            for suffix in [" - Google Chrome", " - Brave", " - Microsoft Edge", " - Mozilla Firefox", " - Opera"] {
+                if cleaned.ends_with(suffix) {
+                    cleaned = cleaned[..cleaned.len() - suffix.len()].trim().to_string();
+                }
+            }
+            if cleaned.ends_with(" - YouTube") {
+                cleaned = cleaned[..cleaned.len() - " - YouTube".len()].trim().to_string();
+            }
+            if !cleaned.is_empty() && cleaned.to_lowercase() != "youtube" {
+                if cleaned.contains(" - ") {
+                    let mut parts = cleaned.splitn(2, " - ");
+                    let artist = parts.next().unwrap_or("YouTube").trim().to_string();
+                    let track = parts.next().unwrap_or("").trim().to_string();
+                    return MediaInfo {
+                        title: track,
+                        artist,
+                        is_playing: true,
+                    };
+                }
+                return MediaInfo {
+                    title: cleaned,
+                    artist: "YouTube".to_string(),
+                    is_playing: true,
+                };
+            }
+        }
+
+        // 3. VLC
+        if lower.contains("vlc media player") {
+            let cleaned = t.replace(" - VLC media player", "").trim().to_string();
+            if !cleaned.is_empty() {
+                return MediaInfo {
+                    title: cleaned,
+                    artist: "VLC Player".to_string(),
+                    is_playing: true,
+                };
+            }
+        }
+    }
+
+    // 4. Apple Music / Deezer / Tidal
+    for title in &collector.titles {
+        let t = title.trim();
+        let lower = t.to_lowercase();
+        if (lower.contains("apple music") || lower.contains("deezer") || lower.contains("tidal")) && t.contains(" - ") {
+            let mut parts = t.splitn(2, " - ");
+            let artist = parts.next().unwrap_or("").trim().to_string();
+            let track = parts.next().unwrap_or("").trim().to_string();
+            return MediaInfo {
+                title: track,
+                artist,
+                is_playing: true,
+            };
+        }
+    }
+
+    MediaInfo::default()
+}
+
+#[cfg(not(windows))]
+pub fn detect_media_info() -> MediaInfo {
+    MediaInfo::default()
 }
