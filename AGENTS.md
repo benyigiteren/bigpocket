@@ -34,15 +34,17 @@ Windows Defender ve diğer EDR/AV motorları Go ile yazılmış uygulamaları ko
 ---
 
 ## 3. Güncelleme ve Dağıtım (Release) Sistemi
+* **KULLANICI ONAYI OLMADAN ASLA RELEASE YAYINLANMAZ (KESİN KURAL!):**
+  - Geliştirici veya yapay zeka ajanı, **kullanıcı açıkça onay vermeden veya doğrudan "yayınla / release yap" talimatı vermeden ASLA** GitHub Releases üzerinden yeni sürüm oluşturamaz veya mevcut bir sürümün üzerine dosya/varlık (APK, EXE, ZIP) yükleyemez/güncelleyemez.
+  - Kod değişiklikleri yerelde derlenir, yerel olarak test edilir ve gerekirse git commit/push yapılabilir; ancak GitHub Releases'a herhangi bir dosya yükleme veya yeni release basma işlemi **kesinlikle kullanıcının açıkça "yayınla" dediği ana kadar bekletilmelidir**.
 * **Doğrudan APK/EXE İndirme:**
   - Uygulama içi güncellemeler GitHub Releases API üzerinden `tag_name` ve hazır derlenmiş varlıkları (`BigPocket.apk`, `bigpocket-windows.zip` / `Setup.exe`) çeker.
   - Cihaz üzerinde asla derleme yapılmaz; hafif HTTP indirme akışı kullanılır ve kaynak tüketimi minimumdur.
-* **Sürüm Güncelleme Prosedürü:**
+* **Sürüm Güncelleme Prosedürü (Kullanıcı Onayı Alındığında):**
   1. `desktop/updater.go` içindeki `AppVersion` güncellenir.
   2. `android/app/build.gradle.kts` içindeki `versionName` ve `versionCode` güncellenir.
   3. `CHANGELOG.md` dosyasına yeni sürüm ve notlar eklenir (kullanıcılar güncelleme ekranında bu notları görür).
-  4. Hazır derlenmiş dosyalar GitHub Releases'a yüklenir.
-
+  4. Kullanıcı açık onay verdiğinde hazır derlenmiş dosyalar GitHub Releases'a yüklenir.
 ---
 
 ## 4. Kod Düzenleme İlkeleri
