@@ -813,13 +813,6 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
         if !authenticated.load(Ordering::Relaxed) {
             if msg_type == "auth_login" {
                 let host = peer.ip().to_string();
-                if state.auth.is_blocked(&host) {
-                    let _ = out_tx.send(json!({
-                        "type": "auth_failed",
-                        "message": "Too many attempts. Try again later."
-                    }).to_string()).await;
-                    break;
-                }
                 let supplied = payload
                     .get("password")
                     .and_then(Value::as_str)
@@ -838,6 +831,13 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
                     }
                     state.broadcast(json!({"type": "client_connected"}));
                 } else {
+                    if state.auth.is_blocked(&host) {
+                        let _ = out_tx.send(json!({
+                            "type": "auth_failed",
+                            "message": "Too many attempts. Try again later."
+                        }).to_string()).await;
+                        break;
+                    }
                     state.auth.record_failure(&host);
                     let _ = out_tx.send(json!({
                         "type": "auth_failed",
@@ -2386,29 +2386,40 @@ fn is_admin() -> bool {
 
 /// Toggle the virtual (usbmmidd) monitor, mirroring `setVirtualMonitor`.
 pub fn set_virtual_monitor(enable: bool) {
-    let driver_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join("usbmmidd")))
-        .unwrap_or_else(|| PathBuf::from("usbmmidd"));
-    let installer = driver_dir.join("deviceinstaller64.exe");
-    if !installer.exists() {
-        tracing::warn!("usbmmidd driver not installed at {}", installer.display());
-        return;
-    }
-    let value = if enable { "1" } else { "0" };
-    let mut cmd = std::process::Command::new(&installer);
-    cmd.args(["enableidd", value]).current_dir(&driver_dir);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    match cmd.spawn() {
-        Ok(mut child) => {
-            let _ = child.wait();
+    tokio::task::spawn_blocking(move || {
+        let driver_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("usbmmidd")))
+            .unwrap_or_else(|| PathBuf::from("usbmmidd"));
+        let installer = driver_dir.join("deviceinstaller64.exe");
+        if !installer.exists() {
+            tracing::warn!("usbmmidd driver not installed at {}", installer.display());
+            return;
         }
-        Err(err) => tracing::warn!("failed to toggle virtual monitor: {err}"),
-    }
+        let value = if enable { "1" } else { "0" };
+        let mut cmd = std::process::Command::new(&installer);
+        cmd.args(["enableidd", value]).current_dir(&driver_dir);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        if let Err(err) = cmd.spawn() {
+            tracing::warn!("failed to spawn virtual monitor command: {err}");
+        }
+
+        if !enable {
+            // Also stop the driver service so Windows completely detaches the virtual display
+            let mut stop_cmd = std::process::Command::new(&installer);
+            stop_cmd.args(["stop", "usbmmidd"]).current_dir(&driver_dir);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                stop_cmd.creation_flags(0x0800_0000);
+            }
+            let _ = stop_cmd.spawn();
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
