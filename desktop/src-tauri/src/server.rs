@@ -4,7 +4,8 @@
 //! `setupHttpRoutes`, `system_info`), `desktop/security.go` (origin guard,
 //! constant-time password check with brute-force throttling, safe path
 //! resolution, authorized-IP registry) and `desktop/flow.go` (the `/api/flow*`
-//! routes). `desktop/updater.go`'s `/api/update/check` is implemented here too.
+//! routes). `desktop/updater.go`'s `/api/update/check`, `/api/update/progress`
+//! and `/api/update/install` are implemented here too.
 //!
 //! Everything the server needs lives in [`AppState`]; [`start_server`] binds
 //! `0.0.0.0:port` and serves until the returned handle is aborted or
@@ -60,6 +61,21 @@ const AUTH_BLOCK_DURATION: Duration = Duration::from_secs(5 * 60);
 const AUTHORIZED_IP_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 /// How long an unauthenticated WebSocket may stay open.
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Interval between the keepalive pings the server sends to every client.
+const WS_PING_INTERVAL: Duration = Duration::from_secs(15);
+/// Close a connection that has sent nothing for this long. The clients (OkHttp
+/// with `pingInterval(15s)`, browsers) answer the server ping automatically, so
+/// three missed pings mean the phone is gone even though the TCP socket never
+/// reported it.
+const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+/// How long the writer task may take to flush its close frame before it is
+/// cancelled. Without this bound a writer blocked on a vanished peer would keep
+/// the socket open forever (the `CLOSE_WAIT` accumulation).
+const WS_WRITER_DRAIN: Duration = Duration::from_secs(2);
+/// How long a telemetry sample may take before callers get the cached payload.
+/// `SystemMonitor::get_stats_payload` performs blocking Win32/WinRT calls —
+/// notably `detect_media_info` — which can stall on an unresponsive media app.
+const SYSTEM_STATS_TIMEOUT: Duration = Duration::from_secs(3);
 
 const POMODORO_WORK_MINUTES: u64 = 25;
 const POMODORO_BREAK_MINUTES: u64 = 5;
@@ -247,11 +263,152 @@ pub fn is_allowed_origin(headers: &HeaderMap) -> bool {
 // Authentication (constant-time password + brute-force throttling)
 // ---------------------------------------------------------------------------
 
+/// Most distinct peers whose failures are tracked at once. Bounds the
+/// brute-force bookkeeping so a LAN scan (or a NAT with many source ports) can
+/// never grow the map without limit.
+const AUTH_MAX_TRACKED_IPS: usize = 128;
+/// Most raw-media peers remembered as trusted at once.
+const AUTH_MAX_AUTHORIZED_IPS: usize = 256;
+
 #[derive(Default)]
 struct AuthFailEntry {
     count: u32,
     first_failure: Option<Instant>,
     blocked_until: Option<Instant>,
+}
+
+/// Whether `ip` is a local-network peer: loopback, RFC 1918 private, link-local,
+/// unspecified, RFC 6598 carrier-grade NAT (phone hotspots / USB tethering) or
+/// the IPv4-mapped form of any of those.
+///
+/// LAN peers are exempt from brute-force blocking. The phone that drives the
+/// desktop panel sits on one of these ranges, and a mistyped password (or a
+/// stale retry from the Android client) must never lock it out of its own PC:
+/// throttling a correct password is indistinguishable from a broken app.
+fn is_lan_peer(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [first, second, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || (first == 100 && (second & 0xc0) == 64)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_lan_peer(IpAddr::V4(mapped));
+            }
+            let segments = v6.segments();
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // fc00::/7 unique-local, fe80::/10 link-local.
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Drop entries whose failure window has elapsed, then the oldest ones until the
+/// map is back inside [`AUTH_MAX_TRACKED_IPS`].
+fn prune_failures(map: &mut HashMap<String, AuthFailEntry>) {
+    map.retain(|_, entry| {
+        entry
+            .first_failure
+            .map(|at| at.elapsed() <= AUTH_FAIL_WINDOW)
+            .unwrap_or(false)
+    });
+    while map.len() > AUTH_MAX_TRACKED_IPS {
+        let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, entry)| entry.first_failure)
+            .map(|(ip, _)| ip.clone())
+        else {
+            break;
+        };
+        map.remove(&oldest);
+    }
+}
+
+/// Drop trusted IPs whose TTL elapsed, then the oldest ones until the registry is
+/// back inside [`AUTH_MAX_AUTHORIZED_IPS`].
+fn prune_authorized(map: &mut HashMap<String, Instant>) {
+    map.retain(|_, at| at.elapsed() < AUTHORIZED_IP_TTL);
+    while map.len() > AUTH_MAX_AUTHORIZED_IPS {
+        let Some(oldest) = map.iter().min_by_key(|(_, at)| **at).map(|(ip, _)| ip.clone()) else {
+            break;
+        };
+        map.remove(&oldest);
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    fn ip(value: &str) -> IpAddr {
+        value.parse().expect("test IP literal")
+    }
+
+    #[test]
+    fn lan_peers_are_recognised() {
+        for value in [
+            "127.0.0.1",
+            "0.0.0.0",
+            "10.0.0.7",
+            "10.255.255.254",
+            "172.16.3.9",
+            "172.31.255.1",
+            "192.168.1.5",
+            "192.168.178.42",
+            "169.254.10.1",
+            "100.64.0.1",
+            "100.127.255.254",
+            "::1",
+            "fe80::1",
+            "fd00::1",
+            "::ffff:192.168.1.5",
+            "::ffff:10.1.2.3",
+        ] {
+            assert!(is_lan_peer(ip(value)), "{value} must count as a LAN peer");
+        }
+    }
+
+    #[test]
+    fn public_peers_are_not_lan() {
+        for value in ["8.8.8.8", "1.1.1.1", "192.169.1.1", "172.32.0.1", "100.128.0.1", "2001:db8::1"] {
+            assert!(!is_lan_peer(ip(value)), "{value} must not count as a LAN peer");
+        }
+    }
+
+    #[test]
+    fn public_peers_are_throttled_after_repeated_failures() {
+        let auth = AuthState::new();
+        let host = "203.0.113.9";
+        for _ in 0..AUTH_MAX_FAILURES {
+            auth.record_failure(host);
+        }
+        assert!(auth.is_blocked(host), "repeated failures must throttle a public peer");
+        auth.record_success(host);
+        assert!(!auth.is_blocked(host), "a correct password clears the failure history");
+    }
+
+    #[test]
+    fn failure_and_trust_maps_stay_bounded() {
+        let auth = AuthState::new();
+        for index in 0..(AUTH_MAX_TRACKED_IPS * 3) {
+            let host = format!("198.51.100.{index}");
+            auth.record_failure(&host);
+            auth.register_authorized_ip(&host);
+        }
+        let failures = auth.failures.lock().expect("failure map").len();
+        let authorized = auth.authorized.lock().expect("authorized map").len();
+        assert!(failures <= AUTH_MAX_TRACKED_IPS, "failure map grew to {failures}");
+        assert!(
+            authorized <= AUTH_MAX_AUTHORIZED_IPS,
+            "authorized registry grew to {authorized}"
+        );
+    }
 }
 
 /// Origin validation, password throttling and the authorized-IP registry.
@@ -274,43 +431,49 @@ impl AuthState {
         }
     }
 
+    /// Whether `ip` is currently throttled. Only ever consulted for peers that
+    /// are *not* on the local network (see [`is_lan_peer`]).
     fn is_blocked(&self, ip: &str) -> bool {
         let Ok(mut map) = self.failures.lock() else {
             return false;
         };
-        let Some(entry) = map.get_mut(ip) else {
-            return false;
-        };
-        if let Some(until) = entry.blocked_until {
-            if Instant::now() < until {
-                return true;
+        let blocked = map
+            .get(ip)
+            .and_then(|entry| entry.blocked_until)
+            .map(|until| Instant::now() < until)
+            .unwrap_or(false);
+        if !blocked {
+            if map.len() >= AUTH_MAX_TRACKED_IPS || map.contains_key(ip) {
+                prune_failures(&mut map);
             }
         }
-        if entry.first_failure.map(|t| t.elapsed() > AUTH_FAIL_WINDOW).unwrap_or(true) {
-            map.remove(ip);
-        }
-        false
+        blocked
     }
 
+    /// Count one failed password attempt from a non-LAN peer.
     fn record_failure(&self, ip: &str) {
         let Ok(mut map) = self.failures.lock() else {
             return;
         };
+        let now = Instant::now();
         let stale = map
             .get(ip)
             .and_then(|e| e.first_failure)
-            .map(|t| t.elapsed() > AUTH_FAIL_WINDOW)
+            .map(|t| now.duration_since(t) > AUTH_FAIL_WINDOW)
             .unwrap_or(true);
         if stale {
             map.insert(ip.to_string(), AuthFailEntry {
-                first_failure: Some(Instant::now()),
+                first_failure: Some(now),
                 ..Default::default()
             });
+            if map.len() > AUTH_MAX_TRACKED_IPS {
+                prune_failures(&mut map);
+            }
         }
         if let Some(entry) = map.get_mut(ip) {
             entry.count += 1;
             if entry.count >= AUTH_MAX_FAILURES {
-                entry.blocked_until = Some(Instant::now() + AUTH_BLOCK_DURATION);
+                entry.blocked_until = Some(now + AUTH_BLOCK_DURATION);
             }
         }
     }
@@ -322,6 +485,9 @@ impl AuthState {
     }
 
     /// Mark an IP as trusted for the raw media TCP ports (camera/audio/screen).
+    ///
+    /// The registry is pruned on every insert (TTL plus [`AUTH_MAX_AUTHORIZED_IPS`]),
+    /// so a long-running panel on a busy network cannot accumulate stale peers.
     pub fn register_authorized_ip(&self, ip: &str) {
         let ip = ip.trim().trim_matches(|c| c == '[' || c == ']');
         if ip.is_empty() {
@@ -329,6 +495,7 @@ impl AuthState {
         }
         if let Ok(mut map) = self.authorized.lock() {
             map.insert(ip.to_string(), Instant::now());
+            prune_authorized(&mut map);
         }
     }
 
@@ -340,9 +507,10 @@ impl AuthState {
         if config::load_config().password.is_empty() {
             return true;
         }
-        let Ok(map) = self.authorized.lock() else {
+        let Ok(mut map) = self.authorized.lock() else {
             return false;
         };
+        prune_authorized(&mut map);
         map.get(ip)
             .map(|at| at.elapsed() < AUTHORIZED_IP_TTL)
             .unwrap_or(false)
@@ -411,6 +579,12 @@ fn percent_decode(input: &str) -> String {
 }
 
 /// Full HTTP authorization check (origin + loopback/LAN password + throttling).
+///
+/// Order matters: the brute-force block is only consulted for peers outside the
+/// local network. A LAN client (phone on the same Wi-Fi/hotspot/USB tether) is
+/// therefore never locked out — the correct password always gets in, no matter
+/// how many typos or stale retries preceded it. Only peers reached across a
+/// public address (a forwarded port) are subject to the failure block.
 fn is_authorized(state: &AppState, headers: &HeaderMap, uri: &Uri, peer: SocketAddr) -> bool {
     if !is_allowed_origin(headers) {
         return false;
@@ -421,7 +595,9 @@ fn is_authorized(state: &AppState, headers: &HeaderMap, uri: &Uri, peer: SocketA
         return true;
     }
     let host = ip.to_string();
-    if state.auth.is_blocked(&host) {
+    let lan_peer = is_lan_peer(ip);
+    if !lan_peer && state.auth.is_blocked(&host) {
+        tracing::warn!("authentication blocked for {host} after repeated failures");
         return false;
     }
     let cfg = config::load_config();
@@ -437,7 +613,12 @@ fn is_authorized(state: &AppState, headers: &HeaderMap, uri: &Uri, peer: SocketA
         state.auth.register_authorized_ip(&host);
         return true;
     }
-    state.auth.record_failure(&host);
+    if !lan_peer {
+        // LAN peers are never throttled, so their typos are not counted either;
+        // counting them would only fill the bounded failure map.
+        state.auth.record_failure(&host);
+    }
+    tracing::debug!("rejected password attempt from {host}");
     false
 }
 
@@ -502,8 +683,16 @@ pub struct AppState {
     pub clients: AtomicUsize,
     /// Origin validation, password throttling and authorized stream IPs.
     pub auth: AuthState,
-    /// System telemetry provider.
-    pub screen: AsyncMutex<SystemMonitor>,
+    /// System telemetry provider. Behind a `std` mutex because sampling runs on
+    /// the blocking pool (see [`system_stats`]); holding an async lock across the
+    /// blocking `get_stats_payload` call is what used to wedge the stats ticker.
+    pub screen: Arc<StdMutex<SystemMonitor>>,
+    /// Last telemetry payload that was sampled successfully, replayed while a
+    /// fresh sample is still running (or when it times out).
+    stats_cache: StdMutex<Option<Value>>,
+    /// `true` while a blocking telemetry sample is in flight; keeps a wedged
+    /// sample from queueing more blocking work on every tick.
+    stats_sampling: AtomicBool,
     /// Lazily created mouse/keyboard controller.
     pub input: AsyncMutex<Option<InputController>>,
     /// Pomodoro focus timer state.
@@ -531,7 +720,9 @@ impl AppState {
             shared_dir: get_shared_dir(),
             clients: AtomicUsize::new(0),
             auth: AuthState::new(),
-            screen: AsyncMutex::new(SystemMonitor::new()),
+            screen: Arc::new(StdMutex::new(SystemMonitor::new())),
+            stats_cache: StdMutex::new(None),
+            stats_sampling: AtomicBool::new(false),
             input: AsyncMutex::new(None),
             pomodoro: StdMutex::new(Pomodoro::new()),
             last_volume: StdMutex::new(50),
@@ -556,6 +747,16 @@ impl AppState {
     /// Number of connected WebSocket clients.
     pub fn client_count(&self) -> usize {
         self.clients.load(Ordering::Relaxed)
+    }
+
+    /// Telemetry to serve while a fresh sample is in flight: the last payload
+    /// that sampled successfully, or an all-zero one before the first lands.
+    fn cached_stats(&self) -> Value {
+        self.stats_cache
+            .lock()
+            .ok()
+            .and_then(|cached| cached.clone())
+            .unwrap_or_else(zeroed_stats)
     }
 
     /// Mark an IP as trusted for the raw media TCP ports.
@@ -611,6 +812,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(api_autostart_get).post(api_autostart_post),
         )
         .route("/api/uninstall", post(api_uninstall_post))
+        .route("/api/update/install", post(update_install))
         .route("/api/clear_cache", post(api_clear_cache_post))
         .route("/palette/action", post(palette_action))
         .route("/upload_icon", post(upload_icon_handler))
@@ -623,6 +825,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/video_feed", get(video_feed_handler))
         .route("/camera_frame", get(camera_frame_handler))
         .route("/api/update/check", get(update_check))
+        .route("/api/update/progress", get(update_progress))
+        .route("/api/version", get(api_version))
         .route("/api/qr", get(api_qr))
         .route("/api/media/cover", get(media_cover_handler))
         .route("/api/show_window", get(api_show_window).post(api_show_window))
@@ -727,8 +931,51 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(state, socket, peer))
 }
 
+/// Owns the per-connection writer task. Dropping the guard cancels the task, so
+/// a connection that unwinds or is aborted never leaves an orphan writer holding
+/// the socket sink — the reason sockets used to pile up in `CLOSE_WAIT`.
+struct WriterTask(tokio::task::JoinHandle<()>);
+
+impl WriterTask {
+    /// Give the writer a grace period to drain its queue and flush its close
+    /// frame, then cancel it. A writer blocked inside `send`/`close` on a peer
+    /// that already vanished never returns on its own.
+    async fn shutdown(mut self, grace: Duration) {
+        if tokio::time::timeout(grace, &mut self.0).await.is_err() {
+            self.0.abort();
+            let _ = (&mut self.0).await;
+        }
+    }
+}
+
+impl Drop for WriterTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Keeps [`AppState::clients`] exact even if the connection handler returns
+/// early or unwinds, and disables the virtual monitor when the last client
+/// leaves.
+struct ClientGuard(Arc<AppState>);
+
+impl ClientGuard {
+    fn register(state: Arc<AppState>) -> Self {
+        state.clients.fetch_add(1, Ordering::Relaxed);
+        Self(state)
+    }
+}
+
+impl Drop for ClientGuard {
+    fn drop(&mut self) {
+        if self.0.clients.fetch_sub(1, Ordering::Relaxed) <= 1 {
+            set_virtual_monitor(false);
+        }
+    }
+}
+
 async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr) {
-    state.clients.fetch_add(1, Ordering::Relaxed);
+    let _clients = ClientGuard::register(Arc::clone(&state));
     let (mut sink, mut stream) = socket.split();
     let (out_tx, mut out_rx) = mpsc::channel::<String>(256);
     let authenticated = Arc::new(AtomicBool::new(false));
@@ -743,8 +990,13 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
 
     let bcast_rx = state.ws_tx.subscribe();
     let authed_writer = authenticated.clone();
-    let writer = tokio::spawn(async move {
+    let writer = WriterTask(tokio::spawn(async move {
         let mut bcast_rx = bcast_rx;
+        let mut keepalive = tokio::time::interval(WS_PING_INTERVAL);
+        // A slow tick must not be replayed in a burst.
+        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // The first tick is immediate; skip it so we do not ping on upgrade.
+        keepalive.tick().await;
         loop {
             tokio::select! {
                 outgoing = out_rx.recv() => match outgoing {
@@ -764,10 +1016,18 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
+                // Keepalive: also surfaces half-open sockets whose peer never
+                // sent a FIN. Answering pongs arrive as ordinary inbound frames.
+                _ = keepalive.tick() => {
+                    if sink.send(Message::Ping(Vec::new())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
-        let _ = sink.close().await;
-    });
+        // Bounded so a dead peer cannot keep this task — and the socket — alive.
+        let _ = tokio::time::timeout(WS_WRITER_DRAIN, sink.close()).await;
+    }));
 
     if needs_auth {
         let _ = out_tx.send(json!({"type": "auth_required"}).to_string()).await;
@@ -789,8 +1049,17 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
         let incoming = tokio::select! {
             incoming = stream.next() => incoming,
             _ = &mut deadline, if !authenticated.load(Ordering::Relaxed) => break,
+            // Idle watchdog: a client that stopped answering the writer's pings
+            // is gone (Wi-Fi drop, airplane mode, killed app) even if its TCP
+            // stack never told us. The timer restarts every iteration, so any
+            // inbound frame — including the Pong — counts as liveness.
+            _ = tokio::time::sleep(WS_IDLE_TIMEOUT) => {
+                tracing::debug!("websocket client {peer} idle for {WS_IDLE_TIMEOUT:?}; closing");
+                break;
+            }
         };
         let Some(incoming) = incoming else {
+            // EOF: the peer closed the TCP connection (or the stream errored).
             break;
         };
         let Ok(message) = incoming else {
@@ -798,7 +1067,11 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
         };
         let text = match message {
             Message::Text(text) => text,
+            // The writer answers the close frame; falling through to the
+            // teardown below makes sure the socket is actually released.
             Message::Close(_) => break,
+            // Ping is ponged automatically while the stream is polled; Pong and
+            // binary frames carry no control payload we handle here.
             _ => continue,
         };
         let Ok(payload) = serde_json::from_str::<Value>(&text) else {
@@ -831,14 +1104,19 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
                     }
                     state.broadcast(json!({"type": "client_connected"}));
                 } else {
-                    if state.auth.is_blocked(&host) {
-                        let _ = out_tx.send(json!({
-                            "type": "auth_failed",
-                            "message": "Too many attempts. Try again later."
-                        }).to_string()).await;
-                        break;
+                    // LAN peers are never throttled (see `is_lan_peer`): the phone
+                    // must always be told that the password was wrong — never that
+                    // it is banned — and its typos must not feed the failure map.
+                    if !is_lan_peer(peer.ip()) {
+                        if state.auth.is_blocked(&host) {
+                            let _ = out_tx.send(json!({
+                                "type": "auth_failed",
+                                "message": "Too many attempts. Try again later."
+                            }).to_string()).await;
+                            break;
+                        }
+                        state.auth.record_failure(&host);
                     }
-                    state.auth.record_failure(&host);
                     let _ = out_tx.send(json!({
                         "type": "auth_failed",
                         "message": "Wrong password"
@@ -855,12 +1133,13 @@ async fn handle_socket(state: Arc<AppState>, socket: WebSocket, peer: SocketAddr
     if authenticated.load(Ordering::Relaxed) {
         state.broadcast(json!({"type": "client_disconnected"}));
     }
+    // Closing the queue lets the writer flush what is pending and send the close
+    // frame; `shutdown` then cancels the writer if the peer is unresponsive, so
+    // the sink (and the TCP socket behind it) is always released. The client
+    // count is restored by `_clients` when this function returns.
     drop(out_tx);
-    let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
-    let prev = state.clients.fetch_sub(1, Ordering::Relaxed);
-    if prev <= 1 {
-        set_virtual_monitor(false);
-    }
+    drop(stream);
+    writer.shutdown(WS_WRITER_DRAIN).await;
 }
 
 /// Run a controller action against the lazily created [`InputController`].
@@ -885,9 +1164,89 @@ where
     }
 }
 
+/// Telemetry payload served before the first sample completes (and whenever a
+/// sample is still running). Mirrors [`SystemMonitor::get_stats_payload`] so
+/// clients keep parsing the same shape.
+fn zeroed_stats() -> Value {
+    json!({
+        "type": "system_stats",
+        "cpu": 0,
+        "cpu_temp": 0,
+        "ram": 0,
+        "ram_used_gb": 0.0,
+        "ram_total_gb": 0.0,
+        "disk_percent": 0,
+        "disk_free_gb": 0.0,
+        "disk_total_gb": 0.0,
+        "net_down_kbps": 0,
+        "net_up_kbps": 0,
+        "media_title": "",
+        "media_artist": "",
+        "media_playing": false,
+        "media_is_live": false,
+        "media_cover": "",
+        "media_pos_sec": 0,
+        "media_dur_sec": 0,
+    })
+}
+
+/// Clear the in-flight flag even if the sample panics, so one bad sample cannot
+/// freeze telemetry for the rest of the process lifetime.
+struct SamplingGuard(Arc<AppState>);
+
+impl Drop for SamplingGuard {
+    fn drop(&mut self) {
+        self.0.stats_sampling.store(false, Ordering::Release);
+    }
+}
+
+/// Sample system telemetry without ever blocking the caller.
+///
+/// [`SystemMonitor::get_stats_payload`] performs blocking work (`sysinfo`
+/// refresh plus `detect_media_info`, which pumps WinRT/COM and can stall for as
+/// long as the media app misbehaves), so it runs on the blocking pool behind
+/// [`SYSTEM_STATS_TIMEOUT`]. At most one sample runs at a time: while it is in
+/// flight — including after a timeout, when the wedged sample is still alive —
+/// callers immediately get [`AppState::cached_stats`] instead of queueing behind
+/// it. That is what keeps the stats ticker and the control handlers responsive.
 async fn system_stats(state: &Arc<AppState>) -> Value {
-    let mut monitor = state.screen.lock().await;
-    monitor.get_stats_payload()
+    if state
+        .stats_sampling
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return state.cached_stats();
+    }
+
+    let worker = Arc::clone(state);
+    let monitor = Arc::clone(&state.screen);
+    let sample = tokio::task::spawn_blocking(move || {
+        let _guard = SamplingGuard(Arc::clone(&worker));
+        let payload = {
+            let mut monitor = monitor
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            monitor.get_stats_payload()
+        };
+        if let Ok(mut cached) = worker.stats_cache.lock() {
+            *cached = Some(payload.clone());
+        }
+        payload
+    });
+
+    match tokio::time::timeout(SYSTEM_STATS_TIMEOUT, sample).await {
+        Ok(Ok(payload)) => payload,
+        Ok(Err(err)) => {
+            tracing::error!("telemetry sampling task failed: {err}");
+            state.cached_stats()
+        }
+        Err(_) => {
+            tracing::warn!(
+                "telemetry sample exceeded {SYSTEM_STATS_TIMEOUT:?}; serving the last payload"
+            );
+            state.cached_stats()
+        }
+    }
 }
 
 fn as_f64(payload: &Value, key: &str) -> Option<f64> {
@@ -1910,12 +2269,24 @@ async fn system_info() -> Response {
 
 async fn update_check(Query(query): Query<HashMap<String, String>>) -> Response {
     let force = query.get("force").map(|v| v == "1").unwrap_or(false);
-    let is_beta = match query.get("beta").map(String::as_str) {
+    Json(check_for_update(force, beta_requested(&query)).await).into_response()
+}
+
+/// The channel the caller asked for: an explicit `beta` flag, otherwise the
+/// stored setting.
+fn beta_requested(query: &HashMap<String, String>) -> bool {
+    match query.get("beta").map(String::as_str) {
         Some("1") | Some("true") => true,
         Some("0") | Some("false") => false,
         _ => config::load_config().beta_channel,
-    };
-    Json(check_for_update(force, is_beta).await).into_response()
+    }
+}
+
+/// Whether pre-releases may satisfy a check: the user opted into the beta
+/// channel, or the running build is itself a pre-release (so `1.5.2-beta` is
+/// never told it is up to date merely because it is newer than the last stable).
+fn beta_channel_effective(requested: bool) -> bool {
+    requested || APP_VERSION.contains("beta")
 }
 
 // ---------------------------------------------------------------------------
@@ -1951,12 +2322,15 @@ fn update_info_json(
 }
 
 async fn check_for_update(force: bool, is_beta: bool) -> Value {
-    // Cached for 30 minutes unless the caller forces a refresh (mirrors Go).
+    let check_beta = beta_channel_effective(is_beta);
+    // Cached for 30 minutes unless the caller forces a refresh (mirrors Go). The
+    // entry records the channel that produced it, so toggling "beta updates" is
+    // never answered from the other channel's snapshot.
     static CACHE: StdMutex<Option<(Instant, bool, Value)>> = StdMutex::new(None);
     if !force {
         if let Ok(guard) = CACHE.lock() {
             if let Some((at, cached_beta, value)) = guard.as_ref() {
-                if *cached_beta == is_beta && at.elapsed() < Duration::from_secs(30 * 60) {
+                if *cached_beta == check_beta && at.elapsed() < Duration::from_secs(30 * 60) {
                     return value.clone();
                 }
             }
@@ -1964,11 +2338,18 @@ async fn check_for_update(force: bool, is_beta: bool) -> Value {
     }
 
     let current_version = APP_VERSION.trim_start_matches('v');
-    let check_beta = is_beta || APP_VERSION.contains("beta");
-    let target = format!("https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=10");
 
-    let body = match http_get(&target).await {
-        Ok(body) => body,
+    // A beta user (opt-in or pre-release build) scans further back: pre-release
+    // and stable tags interleave in the feed, so a single page can hide the
+    // newest build. Stable users still see the ten most recent releases and the
+    // pre-releases are filtered out below.
+    let releases = if check_beta {
+        fetch_releases(30).await
+    } else {
+        fetch_releases(10).await
+    };
+    let releases = match releases {
+        Ok(releases) => releases,
         Err(err) => {
             return update_info_json(
                 current_version, "", false, String::new(), String::new(), String::new(),
@@ -1976,65 +2357,147 @@ async fn check_for_update(force: bool, is_beta: bool) -> Value {
             )
         }
     };
-    let parsed: Value = match serde_json::from_str(&body) {
-        Ok(value) => value,
-        Err(err) => {
-            return update_info_json(
-                current_version, "", false, String::new(), String::new(), String::new(),
-                String::new(), String::new(), err.to_string(),
-            )
-        }
-    };
 
-    let all_releases: Vec<Value> = parsed.as_array().cloned().unwrap_or_else(|| vec![parsed]);
-    let candidates: Vec<Value> = all_releases
-        .into_iter()
-        .filter(|rel| check_beta || !rel.get("prerelease").and_then(Value::as_bool).unwrap_or(false))
-        .collect();
-    if candidates.is_empty() {
-        return update_info_json(
-            current_version, "", false, String::new(), String::new(), String::new(),
-            String::new(), String::new(), "No releases found".to_string(),
-        );
-    }
-
-    let best = candidates
-        .iter()
-        .filter_map(|release| release.get("tag_name").and_then(Value::as_str).map(|tag| (tag, release)))
-        .max_by(|a, b| compare_versions(a.0, b.0).cmp(&0))
-        .map(|(_, release)| release);
-
-    let Some(best) = best else {
+    let Some(candidate) = select_update_candidate(&releases, check_beta) else {
         return update_info_json(
             current_version, "", false, String::new(), String::new(), String::new(),
             String::new(), String::new(), "No releases found".to_string(),
         );
     };
 
-    let latest_version = best
-        .get("tag_name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim_start_matches('v')
-        .to_string();
-    let download_url = resolve_release_download_url(best);
-    let available = compare_versions(&latest_version, APP_VERSION) > 0 && !download_url.is_empty();
+    // `select_update_candidate` only returns releases that carry a resolvable
+    // desktop asset, so a newer Android- or Linux-only release can no longer
+    // hide the update underneath it.
+    let available = compare_versions(&candidate.version, APP_VERSION) > 0;
 
     let value = update_info_json(
         current_version,
-        &latest_version,
+        &candidate.version,
         available,
-        best.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-        best.get("body").and_then(Value::as_str).unwrap_or("").to_string(),
-        best.get("html_url").and_then(Value::as_str).unwrap_or("").to_string(),
-        best.get("published_at").and_then(Value::as_str).unwrap_or("").to_string(),
-        download_url,
+        candidate.title,
+        candidate.notes,
+        candidate.html_url,
+        candidate.published_at,
+        candidate.asset_url,
         String::new(),
     );
+    // Only successful checks are cached: a rate-limited or offline check must
+    // not answer "up to date" for the next 30 minutes.
     if let Ok(mut guard) = CACHE.lock() {
-        *guard = Some((Instant::now(), is_beta, value.clone()));
+        *guard = Some((Instant::now(), check_beta, value.clone()));
     }
     value
+}
+
+/// One release that can actually be installed: its version, the text the UI
+/// shows and the desktop asset the updater would download.
+struct UpdateCandidate {
+    version: String,
+    title: String,
+    notes: String,
+    html_url: String,
+    published_at: String,
+    asset_url: String,
+    asset_name: String,
+    asset_size: i64,
+}
+
+/// The releases published by [`GITHUB_REPO`], newest first. GitHub answers
+/// errors (rate limit, unknown repository) with a single object instead of a
+/// list; that is turned into an error so the UI can say why the check failed
+/// instead of claiming the app is up to date.
+async fn fetch_releases(per_page: usize) -> Result<Vec<Value>, String> {
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases?per_page={per_page}");
+    let body = http_get(&url).await?;
+    let parsed: Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    if let Some(message) = parsed.get("message").and_then(Value::as_str) {
+        return Err(format!("GitHub API: {message}"));
+    }
+    Ok(match parsed {
+        Value::Array(releases) => releases,
+        // Tolerate the single-object shape a `/releases/latest` response has.
+        single => vec![single],
+    })
+}
+
+/// Highest-versioned release that ships a usable desktop asset. Pre-releases are
+/// skipped unless `include_prerelease`; drafts are never offered.
+///
+/// The asset is resolved *before* the maximum is taken on purpose: a newer
+/// release that only carries the Android APK (or the Linux/macOS builds) must
+/// not suppress the Windows update underneath it.
+fn select_update_candidate(releases: &[Value], include_prerelease: bool) -> Option<UpdateCandidate> {
+    let mut best: Option<UpdateCandidate> = None;
+    for release in releases {
+        if release.get("draft").and_then(Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        if !include_prerelease
+            && release
+                .get("prerelease")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(version) = release
+            .get("tag_name")
+            .and_then(Value::as_str)
+            .map(tag_to_version)
+        else {
+            continue;
+        };
+        if version.is_empty() {
+            continue;
+        }
+        let Some((asset_url, asset_name, asset_size)) = resolve_release_asset(release) else {
+            continue;
+        };
+        let newer = best
+            .as_ref()
+            .map(|current| compare_versions(&version, &current.version) > 0)
+            .unwrap_or(true);
+        if newer {
+            best = Some(UpdateCandidate {
+                version,
+                title: release
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                notes: release
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                html_url: release
+                    .get("html_url")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                published_at: release
+                    .get("published_at")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                asset_url,
+                asset_name,
+                asset_size,
+            });
+        }
+    }
+    best
+}
+
+/// `v1.5.2-beta` → `1.5.2-beta`. Exactly one leading marker is dropped, so a
+/// malformed tag is not silently rewritten.
+fn tag_to_version(tag: &str) -> String {
+    let tag = tag.trim();
+    let stripped = tag
+        .strip_prefix('v')
+        .or_else(|| tag.strip_prefix('V'))
+        .unwrap_or(tag);
+    stripped.to_string()
 }
 
 /// Fetch a URL over HTTPS. The updater shells out to `curl`, which ships with
@@ -2070,48 +2533,66 @@ async fn http_get(url: &str) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|err| err.to_string())
 }
 
-fn resolve_release_download_url(release: &Value) -> String {
-    let Some(assets) = release.get("assets").and_then(Value::as_array) else {
-        return String::new();
-    };
-    let url_of = |asset: &Value| {
-        asset
+/// Pick the desktop asset a release should be installed from, most preferred
+/// first: a Windows installer (`*setup*`/`*installer*`/`*windows*.exe`, then any
+/// `.msi`), any other `.exe`, then a Windows `.zip`.
+///
+/// Payloads meant for another platform — `BigPocket.apk`, `.dmg`, `.deb`,
+/// `.tar.gz`, `bigpocket-linux`, `bigpocket-macos` — are never returned, so the
+/// phone build is never offered to the desktop updater.
+fn resolve_release_asset(release: &Value) -> Option<(String, String, i64)> {
+    let assets = release.get("assets").and_then(Value::as_array)?;
+    let mut best: Option<(u8, String, String, i64)> = None;
+    for asset in assets {
+        let name = asset.get("name").and_then(Value::as_str).unwrap_or("");
+        let url = asset
             .get("browser_download_url")
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string()
-    };
-    let name_of = |asset: &Value| {
-        asset
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_ascii_lowercase()
-    };
-
-    for asset in assets {
-        let name = name_of(asset);
-        if name.ends_with(".exe")
-            && (name.contains("windows") || name.contains("setup") || name.contains("installer"))
+            .unwrap_or("");
+        if name.is_empty() || url.is_empty() {
+            continue;
+        }
+        let lower = name.to_ascii_lowercase();
+        if is_foreign_payload(&lower) {
+            continue;
+        }
+        let rank = if lower.ends_with(".exe")
+            && (lower.contains("windows") || lower.contains("setup") || lower.contains("installer"))
         {
-            return url_of(asset);
+            0
+        } else if lower.ends_with(".msi") {
+            1
+        } else if lower.ends_with(".exe") {
+            2
+        } else if lower.ends_with(".zip") {
+            3
+        } else {
+            continue;
+        };
+        let size = asset.get("size").and_then(Value::as_i64).unwrap_or(0);
+        if best
+            .as_ref()
+            .map(|(best_rank, ..)| rank < *best_rank)
+            .unwrap_or(true)
+        {
+            best = Some((rank, url.to_string(), name.to_string(), size));
         }
     }
-    for asset in assets {
-        let name = name_of(asset);
-        if name.ends_with(".zip") && name.contains("win") {
-            return url_of(asset);
-        }
-    }
-    for asset in assets {
-        if name_of(asset).ends_with(".exe") {
-            return url_of(asset);
-        }
-    }
-    String::new()
+    best.map(|(_, url, name, size)| (url, name, size))
 }
 
-/// SemVer comparison: 1 when `a > b`, -1 when `a < b`, 0 when equal.
+/// Names of assets that belong to a platform other than this desktop build.
+fn is_foreign_payload(lower_name: &str) -> bool {
+    const FOREIGN: [&str; 8] = [
+        "android", "linux", "macos", "darwin", "ios", ".apk", ".dmg", ".deb",
+    ];
+    FOREIGN.iter().any(|marker| lower_name.contains(marker))
+}
+
+/// SemVer precedence: 1 when `a > b`, -1 when `a < b`, 0 when equal.
+///
+/// Build metadata (`+sha`) is ignored and a release outranks its own
+/// pre-releases, so `1.5.2 > 1.5.2-beta` and `1.5.2-beta > 1.5.0-beta`.
 fn compare_versions(a: &str, b: &str) -> i32 {
     let (nums_a, pre_a) = parse_semver(a);
     let (nums_b, pre_b) = parse_semver(b);
@@ -2120,29 +2601,357 @@ fn compare_versions(a: &str, b: &str) -> i32 {
             return if nums_a[i] > nums_b[i] { 1 } else { -1 };
         }
     }
-    match (pre_a.is_empty(), pre_b.is_empty()) {
-        (true, false) => 1,
-        (false, true) => -1,
-        (true, true) => 0,
-        (false, false) => match pre_a.cmp(&pre_b) {
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-            std::cmp::Ordering::Less => -1,
-        },
+    compare_prerelease(&pre_a, &pre_b)
+}
+
+/// Pre-release precedence per <https://semver.org/#spec-item-11>:
+/// an empty pre-release is the higher one (`1.5.2` > `1.5.2-beta`); otherwise
+/// identifiers are compared one by one, numerically when both are numeric
+/// (`beta.2` < `beta.10`), in ASCII order otherwise, with numeric identifiers
+/// ranking below alphanumeric ones, and a shorter list that prefixes a longer
+/// one ranking lower (`alpha` < `alpha.1`).
+fn compare_prerelease(a: &str, b: &str) -> i32 {
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => return 0,
+        (true, false) => return 1,
+        (false, true) => return -1,
+        (false, false) => {}
+    }
+    let mut left = a.split('.');
+    let mut right = b.split('.');
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return 0,
+            (None, Some(_)) => return -1,
+            (Some(_), None) => return 1,
+            (Some(x), Some(y)) => {
+                let ordering = match (x.parse::<u64>(), y.parse::<u64>()) {
+                    (Ok(x), Ok(y)) => x.cmp(&y),
+                    (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                    (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                    (Err(_), Err(_)) => x.cmp(y),
+                };
+                if ordering != std::cmp::Ordering::Equal {
+                    return if ordering == std::cmp::Ordering::Greater {
+                        1
+                    } else {
+                        -1
+                    };
+                }
+            }
+        }
     }
 }
 
+/// Split `v1.5.2-beta+build.7` into `[1, 5, 2]` and `beta`.
 fn parse_semver(version: &str) -> ([i64; 3], String) {
-    let trimmed = version.trim().trim_start_matches('v');
+    let trimmed = version.trim();
+    let trimmed = trimmed
+        .strip_prefix('v')
+        .or_else(|| trimmed.strip_prefix('V'))
+        .unwrap_or(trimmed);
+    // Build metadata never takes part in precedence.
+    let trimmed = trimmed.split('+').next().unwrap_or(trimmed);
     let (numeric, pre) = match trimmed.split_once('-') {
-        Some((n, p)) => (n, p.to_string()),
+        Some((numeric, pre)) => (numeric, pre.trim().to_string()),
         None => (trimmed, String::new()),
     };
     let mut nums = [0i64; 3];
     for (slot, part) in nums.iter_mut().zip(numeric.split('.').take(3)) {
-        *slot = part.parse().unwrap_or(0);
+        *slot = parse_version_component(part);
     }
     (nums, pre)
+}
+
+/// One dotted version component. An over-long component saturates instead of
+/// collapsing to `0`, which would make `1.5.99999999999999999999` look older
+/// than `1.5.2`.
+fn parse_version_component(part: &str) -> i64 {
+    let digits: String = part
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        return 0;
+    }
+    digits.parse::<i64>().unwrap_or(i64::MAX)
+}
+
+// ---------------------------------------------------------------------------
+// In-app updater (download + launch)
+// ---------------------------------------------------------------------------
+
+/// `(state, percent, message)` of the update that is currently running. `state`
+/// is `idle`, `downloading`, `installing` or `error`, and the web UI polls it
+/// through `/api/update/progress` until the installer takes over.
+static UPDATE_PROGRESS: StdMutex<(String, u8, String)> =
+    StdMutex::new((String::new(), 0u8, String::new()));
+/// Set while a download/install runs, so a double click on "Güncelle" cannot
+/// start two downloads into the same temporary file.
+static UPDATE_BUSY: AtomicBool = AtomicBool::new(false);
+
+fn set_update_progress(state: &str, percent: u8, message: &str) {
+    if let Ok(mut guard) = UPDATE_PROGRESS.lock() {
+        *guard = (state.to_string(), percent.min(100), message.to_string());
+    }
+}
+
+/// `GET /api/version` — how the web UI detects that the server is back after an
+/// update restarted the application.
+async fn api_version() -> Response {
+    Json(json!({"success": true, "version": APP_VERSION})).into_response()
+}
+
+/// `GET /api/update/progress` — idle until `/api/update/install` starts one.
+async fn update_progress() -> Response {
+    let (state, percent, message) = UPDATE_PROGRESS
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|poisoned| poisoned.into_inner().clone());
+    let state = if state.is_empty() { "idle" } else { state.as_str() };
+    Json(json!({
+        "success": true,
+        "state": state,
+        "percent": percent,
+        "message": message,
+    }))
+    .into_response()
+}
+
+/// `POST /api/update/install` — download the newest installable release asset
+/// and hand it to the OS. The transfer runs in the background and publishes its
+/// progress into [`UPDATE_PROGRESS`], so this returns immediately.
+async fn update_install(Query(query): Query<HashMap<String, String>>) -> Response {
+    if UPDATE_BUSY.swap(true, Ordering::SeqCst) {
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"success": false, "error": "Güncelleme zaten indiriliyor."}),
+        );
+    }
+    let is_beta = beta_requested(&query);
+    set_update_progress("downloading", 0, "");
+    tokio::spawn(async move {
+        let result = download_and_launch_update(is_beta).await;
+        // The guard covers a single download/launch. It is released either way,
+        // so a cancelled installer leaves the user able to try again instead of
+        // being answered "already downloading" forever.
+        UPDATE_BUSY.store(false, Ordering::SeqCst);
+        match result {
+            Ok(message) => set_update_progress("installing", 100, &message),
+            Err(err) => set_update_progress("error", 0, &err),
+        }
+    });
+    json_response(StatusCode::OK, json!({"success": true}))
+}
+
+/// Resolve the newest installable release, download it into the temp folder and
+/// launch it. Returns the message shown once the installer is up.
+async fn download_and_launch_update(is_beta: bool) -> Result<String, String> {
+    let check_beta = beta_channel_effective(is_beta);
+    // A fresh fetch on purpose: a release published minutes ago must not be
+    // hidden by the 30-minute check cache.
+    let releases = fetch_releases(if check_beta { 30 } else { 10 }).await?;
+    let candidate = select_update_candidate(&releases, check_beta)
+        .ok_or_else(|| "Uygun bir güncelleme paketi bulunamadı.".to_string())?;
+    // A stale page could still ask to install after the app was updated.
+    if compare_versions(&candidate.version, APP_VERSION) <= 0 {
+        return Err(format!(
+            "Zaten en güncel sürümdesiniz ({}).",
+            candidate.version
+        ));
+    }
+
+    let dir = std::env::temp_dir().join("bigpocket-update");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|err| format!("Geçici klasör oluşturulamadı: {err}"))?;
+    let dest = dir.join(sanitize_file_name(&candidate.asset_name));
+
+    download_to_file(&candidate.asset_url, &dest, candidate.asset_size).await?;
+    set_update_progress("installing", 100, "");
+    launch_update_asset(&dest)?;
+    Ok(format!(
+        "{} kurulumu başlatıldı: {}",
+        candidate.version,
+        dest.display()
+    ))
+}
+
+/// Stream `url` to `dest` with `curl`, publishing a percentage while it runs.
+/// `expected` is the size the API reported for the asset and is only used for
+/// that percentage and for detecting a truncated download.
+async fn download_to_file(url: &str, dest: &FsPath, expected: i64) -> Result<(), String> {
+    let _ = tokio::fs::remove_file(dest).await;
+    let mut cmd = tokio::process::Command::new("curl");
+    cmd.args([
+        "-sS",
+        "-L",
+        "--fail",
+        "--max-time",
+        "900",
+        "-A",
+        "BigPocket-Updater",
+        "-o",
+    ]);
+    cmd.arg(dest);
+    cmd.arg(url);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| format!("curl başlatılamadı: {err}"))?;
+    // Drain stderr on its own task: curl writes to it only on failure, but a
+    // full pipe would wedge the transfer if nobody read it.
+    let stderr_task = child.stderr.take().map(|mut pipe| {
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut text = String::new();
+            let _ = pipe.read_to_string(&mut text).await;
+            text
+        })
+    });
+
+    // curl writes the file itself (`-o`), so progress is read back from its size
+    // and a retried/redirected transfer can never corrupt a streamed body.
+    let status = loop {
+        if expected > 0 {
+            if let Ok(meta) = tokio::fs::metadata(dest).await {
+                let percent = (meta.len().saturating_mul(100) / expected as u64).min(100) as u8;
+                set_update_progress("downloading", percent, "");
+            }
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => tokio::time::sleep(Duration::from_millis(200)).await,
+            Err(err) => {
+                let _ = tokio::fs::remove_file(dest).await;
+                return Err(format!("İndirme izlenemedi: {err}"));
+            }
+        }
+    };
+
+    let detail = match stderr_task {
+        Some(task) => task.await.unwrap_or_default(),
+        None => String::new(),
+    };
+    let written = tokio::fs::metadata(dest)
+        .await
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    if !status.success() {
+        let _ = tokio::fs::remove_file(dest).await;
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            format!("İndirme başarısız (curl {status}).")
+        } else {
+            format!("İndirme başarısız: {detail}")
+        });
+    }
+    if written == 0 {
+        let _ = tokio::fs::remove_file(dest).await;
+        return Err("İndirilen dosya boş.".to_string());
+    }
+    if expected > 0 && written < expected as u64 {
+        let _ = tokio::fs::remove_file(dest).await;
+        return Err(format!(
+            "İndirme eksik kaldı ({written}/{} bayt).",
+            expected
+        ));
+    }
+    Ok(())
+}
+
+/// Keep only the last path component of a release-supplied file name: the name
+/// is remote input and must not be able to escape the temporary folder.
+fn sanitize_file_name(name: &str) -> String {
+    let base = name
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(name)
+        .trim();
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !matches!(c, '\0' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        "bigpocket-update.bin".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Hand the downloaded asset to the OS.
+///
+/// Installers (`*setup*`/`*installer*`/`*windows*`.exe`, `.msi`) and portable
+/// executables are launched through the shell, which lets their own manifest
+/// raise the UAC prompt. An archive is revealed in the file manager instead of
+/// being unpacked: a running executable cannot replace itself, so that last
+/// step has to stay with the user.
+#[cfg(windows)]
+fn launch_update_asset(path: &FsPath) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if name.ends_with(".zip") {
+        let _ = spawn_detached(&format!("explorer /select,\"{}\"", path.display()));
+        return Err(format!(
+            "Bu sürüm arşiv olarak yayınlandı; güncellemeyi klasörden elle kurun: {}",
+            path.display()
+        ));
+    }
+    if name.ends_with(".msi") {
+        return spawn_detached(&format!("msiexec /i \"{}\"", path.display()))
+            .map_err(|err| format!("Kurulum başlatılamadı: {err}"));
+    }
+    spawn_detached(&format!("\"{}\"", path.display()))
+        .map_err(|err| format!("Kurulum başlatılamadı: {err}"))
+}
+
+/// Linux/macOS: packages and archives open through the desktop opener, a bare
+/// binary (AppImage) gets the execute bit and is started directly.
+#[cfg(not(windows))]
+fn launch_update_asset(path: &FsPath) -> Result<(), String> {
+    use std::process::Command;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    if name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        let _ = Command::new(opener).arg(path).spawn();
+        return Err(format!(
+            "Bu sürüm arşiv olarak yayınlandı; güncellemeyi elle kurun: {}",
+            path.display()
+        ));
+    }
+    if name.ends_with(".dmg") || name.ends_with(".deb") || name.ends_with(".rpm") {
+        Command::new(opener)
+            .arg(path)
+            .spawn()
+            .map_err(|err| format!("Paket açılamadı: {err}"))?;
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
+    }
+    Command::new(path)
+        .spawn()
+        .map_err(|err| format!("Güncelleme başlatılamadı: {err}"))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -2191,39 +3000,92 @@ fn content_type_for(name: &str) -> &'static str {
     }
 }
 
-fn spawn_detached(command: &str) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let trimmed = command.trim();
-        let lower = trimmed.to_ascii_lowercase();
-        if lower.starts_with("http://") || lower.starts_with("https://") {
-            // Hand the URL straight to the shell's default handler. `cmd /c
-            // start "" <url>` would re-parse it and split on `&`, `^` or `%`.
-            return open_url(trimmed);
-        }
-        let mut process = std::process::Command::new("cmd");
-        process.args(["/C", command]);
-        process.creation_flags(CREATE_NO_WINDOW).spawn().map(|_| ())
-    }
-    #[cfg(not(windows))]
-    {
-        let lower = command.trim().to_ascii_lowercase();
-        if lower.starts_with("http://") || lower.starts_with("https://") {
-            let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-            std::process::Command::new(opener).arg(command).spawn().map(|_| ())
-        } else {
-            std::process::Command::new("sh").arg("-c").arg(command).spawn().map(|_| ())
-        }
-    }
+/// Whether `value` is an http(s) URL.
+fn is_url(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
 }
 
-/// Opens `url` with the Windows shell's default handler (`ShellExecuteW`).
+/// Split `command` into `(program, arguments)` when it can be launched without a
+/// shell, or `None` when it needs shell interpretation.
 ///
-/// No command line is involved, so the URL reaches the browser verbatim.
+/// Everything that reaches [`spawn_detached`] today is a plain program launch
+/// (`taskmgr.exe`, `control.exe mmsys.cpl sounds`) or a phone-issued command;
+/// only genuinely shell-shaped strings (pipes, redirection, `&&`, `%VAR%`
+/// expansion) fall back to `cmd /C`. Not creating a shell process for the common
+/// case is what keeps the child-process profile boring for AV/EDR heuristics
+/// (AGENTS.md §2).
+fn split_simple_command(command: &str) -> Option<(&str, &str)> {
+    const SHELL_METACHARACTERS: &[char] = &[
+        '|', '&', ';', '<', '>', '^', '%', '!', '`', '"', '\'', '$', '(', ')', '\n', '\r',
+    ];
+    if command.contains(SHELL_METACHARACTERS) {
+        return None;
+    }
+    let mut parts = command.splitn(2, char::is_whitespace);
+    let program = parts.next()?.trim();
+    if program.is_empty() {
+        return None;
+    }
+    Some((program, parts.next().unwrap_or("").trim()))
+}
+
 #[cfg(windows)]
-fn open_url(url: &str) -> std::io::Result<()> {
+fn spawn_detached(command: &str) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    // URLs go straight to the shell's default handler: `cmd /c start "" <url>`
+    // would re-parse them and split on `&`, `^` or `%`.
+    if is_url(trimmed) {
+        return open_url(trimmed);
+    }
+    if let Some((program, arguments)) = split_simple_command(trimmed) {
+        let parameters = (!arguments.is_empty()).then_some(arguments);
+        match shell_execute(program, parameters) {
+            Ok(()) => return Ok(()),
+            // ShellExecuteW could not resolve the target (shell builtins such as
+            // `start` only exist inside cmd.exe); fall through to the interpreter.
+            Err(err) => tracing::debug!("direct launch of {program:?} failed ({err}); using cmd"),
+        }
+    }
+    std::process::Command::new("cmd")
+        .args(["/C", trimmed])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(not(windows))]
+fn spawn_detached(command: &str) -> std::io::Result<()> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if is_url(trimmed) {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        return std::process::Command::new(opener).arg(trimmed).spawn().map(|_| ());
+    }
+    if let Some((program, arguments)) = split_simple_command(trimmed) {
+        match std::process::Command::new(program)
+            .args(arguments.split_ascii_whitespace())
+            .spawn()
+        {
+            Ok(_) => return Ok(()),
+            Err(err) => tracing::debug!("direct launch of {program:?} failed ({err}); using sh"),
+        }
+    }
+    std::process::Command::new("sh").arg("-c").arg(trimmed).spawn().map(|_| ())
+}
+
+/// Launches `target` (with optional `arguments`) through the Windows shell
+/// (`ShellExecuteW`), with no command interpreter in between.
+#[cfg(windows)]
+fn shell_execute(target: &str, arguments: Option<&str>) -> std::io::Result<()> {
     use std::ffi::{c_void, OsStr};
     use std::iter::once;
     use std::os::windows::ffi::OsStrExt;
@@ -2246,14 +3108,19 @@ fn open_url(url: &str) -> std::io::Result<()> {
         OsStr::new(value).encode_wide().chain(once(0)).collect()
     };
     let operation = wide("open");
-    let file = wide(url);
+    let file = wide(target);
+    let parameters = arguments.map(wide);
+    let parameters_ptr = match parameters.as_ref() {
+        Some(value) => value.as_ptr(),
+        None => std::ptr::null(),
+    };
     // ShellExecuteW returns a value greater than 32 on success.
     let result = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
             operation.as_ptr(),
             file.as_ptr(),
-            std::ptr::null(),
+            parameters_ptr,
             std::ptr::null(),
             SW_SHOWNORMAL,
         )
@@ -2265,6 +3132,14 @@ fn open_url(url: &str) -> std::io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Opens `url` with the Windows shell's default handler (`ShellExecuteW`).
+///
+/// No command line is involved, so the URL reaches the browser verbatim.
+#[cfg(windows)]
+fn open_url(url: &str) -> std::io::Result<()> {
+    shell_execute(url, None)
 }
 
 /// Capture display 0 to `SharedFiles/ekran_<stamp>.png`, returning (name, size).
@@ -2384,42 +3259,365 @@ fn is_admin() -> bool {
     false
 }
 
-/// Toggle the virtual (usbmmidd) monitor, mirroring `setVirtualMonitor`.
-pub fn set_virtual_monitor(enable: bool) {
-    tokio::task::spawn_blocking(move || {
-        let driver_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.join("usbmmidd")))
-            .unwrap_or_else(|| PathBuf::from("usbmmidd"));
-        let installer = driver_dir.join("deviceinstaller64.exe");
-        if !installer.exists() {
-            tracing::warn!("usbmmidd driver not installed at {}", installer.display());
-            return;
+// ---------------------------------------------------------------------------
+// Virtual (usbmmidd) display driver
+// ---------------------------------------------------------------------------
+
+/// Per-command cap for `deviceinstaller*.exe` enable/disable/stop calls.
+///
+/// The DevCon-style installer normally finishes in well under a second; the cap
+/// only exists so a wedged process can never pin a server thread forever.
+const DRIVER_CMD_TIMEOUT: Duration = Duration::from_secs(10);
+/// Cap for `install`, which legitimately stages driver files and is slower.
+const DRIVER_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long the indirect display gets to leave the desktop after `enableidd 0`
+/// before the detach is retried or reported as failed.
+const VIRTUAL_DETACH_WAIT: Duration = Duration::from_secs(4);
+
+/// Serializes `deviceinstaller*.exe` invocations. Overlapping enable/disable/
+/// stop sequences are what leave a half torn-down adapter behind as a ghost
+/// display in Windows Display Settings.
+static DRIVER_COMMAND_LOCK: StdMutex<()> = StdMutex::new(());
+
+/// `deviceinstaller` file names, the one matching the running architecture first.
+fn driver_installer_names() -> [&'static str; 2] {
+    if cfg!(target_pointer_width = "64") {
+        ["deviceinstaller64.exe", "deviceinstaller.exe"]
+    } else {
+        ["deviceinstaller.exe", "deviceinstaller64.exe"]
+    }
+}
+
+/// Absolute path of the usbmmidd `deviceinstaller` shipped with the app.
+fn driver_installer_path() -> Option<PathBuf> {
+    let dir = get_driver_dir();
+    driver_installer_names()
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+}
+
+/// Outcome of one bounded `deviceinstaller` invocation.
+enum DriverRun {
+    /// The installer exited with this status code.
+    Exited(i32),
+    /// The installer was killed after the given time budget.
+    TimedOut { seconds: u64 },
+    /// The process could not be spawned at all.
+    SpawnFailed(String),
+}
+
+impl DriverRun {
+    fn is_success(&self) -> bool {
+        matches!(self, DriverRun::Exited(0))
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            DriverRun::Exited(0) => "ok".to_string(),
+            DriverRun::Exited(code) => format!("exit code {code}"),
+            DriverRun::TimedOut { seconds } => format!("killed after {seconds}s"),
+            DriverRun::SpawnFailed(err) => format!("could not start: {err}"),
         }
-        let value = if enable { "1" } else { "0" };
-        let mut cmd = std::process::Command::new(&installer);
-        cmd.args(["enableidd", value]).current_dir(&driver_dir);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000);
+    }
+}
+
+/// Runs `deviceinstaller <args>` in `dir`, waiting at most `timeout` and killing
+/// the process when it overruns.
+///
+/// Never blocks longer than `timeout`, so it is safe on the blocking pool (it is
+/// only ever called from there) and in shutdown paths.
+fn run_driver_command(
+    installer: &FsPath,
+    dir: &FsPath,
+    args: &[&str],
+    timeout: Duration,
+) -> DriverRun {
+    let mut cmd = std::process::Command::new(installer);
+    cmd.args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // `CREATE_NO_WINDOW`: the installer is a GUI-subsystem binary.
+        cmd.creation_flags(0x0800_0000);
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(err) => return DriverRun::SpawnFailed(err.to_string()),
+    };
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return DriverRun::Exited(status.code().unwrap_or(-1)),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    // Reap the killed process so no handle/zombie is left behind.
+                    let _ = child.wait();
+                    return DriverRun::TimedOut {
+                        seconds: timeout.as_secs(),
+                    };
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(err) => return DriverRun::SpawnFailed(err.to_string()),
         }
-        if let Err(err) = cmd.spawn() {
-            tracing::warn!("failed to spawn virtual monitor command: {err}");
+    }
+}
+
+/// Strings the usbmmidd/IDD driver uses for its adapter, device node and monitor.
+const VIRTUAL_DISPLAY_MARKERS: [&str; 3] = ["usbmmidd", "usb mobile monitor", "amyuni"];
+
+fn looks_like_virtual_display(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    VIRTUAL_DISPLAY_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+/// What Win32 reports about the usbmmidd indirect display.
+#[derive(Default)]
+struct VirtualDisplayInfo {
+    /// The driver's device node exists in the system, attached or not.
+    installed: bool,
+    /// Windows currently has the display attached to the desktop.
+    attached: bool,
+}
+
+/// Enumerates display adapters and their monitors through `EnumDisplayDevicesW`.
+///
+/// The adapter list keeps *detached* adapters (the classic ghost entries), so a
+/// display only counts as attached when its `DISPLAY_DEVICE_ATTACHED_TO_DESKTOP`
+/// bit is set.
+#[cfg(windows)]
+fn virtual_display_info() -> VirtualDisplayInfo {
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct DISPLAY_DEVICEW {
+        cb: u32,
+        DeviceName: [u16; 32],
+        DeviceString: [u16; 128],
+        StateFlags: u32,
+        DeviceID: [u16; 128],
+        DeviceKey: [u16; 128],
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumDisplayDevicesW(
+            lpDevice: *const u16,
+            iDevNum: u32,
+            lpDisplayDevice: *mut DISPLAY_DEVICEW,
+            dwFlags: u32,
+        ) -> i32;
+    }
+
+    /// `DISPLAY_DEVICE_ATTACHED_TO_DESKTOP`.
+    const ATTACHED_TO_DESKTOP: u32 = 0x0000_0001;
+
+    fn to_string(buf: &[u16]) -> String {
+        let end = buf.iter().position(|&ch| ch == 0).unwrap_or(buf.len());
+        String::from_utf16_lossy(&buf[..end])
+    }
+
+    fn empty_entry() -> DISPLAY_DEVICEW {
+        DISPLAY_DEVICEW {
+            cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            DeviceName: [0; 32],
+            DeviceString: [0; 128],
+            StateFlags: 0,
+            DeviceID: [0; 128],
+            DeviceKey: [0; 128],
+        }
+    }
+
+    let mut info = VirtualDisplayInfo::default();
+    let mut adapter_index = 0u32;
+    loop {
+        let mut adapter = empty_entry();
+        let enumerated = unsafe {
+            EnumDisplayDevicesW(std::ptr::null(), adapter_index, &mut adapter, 0)
+        };
+        if enumerated == 0 {
+            break;
+        }
+        adapter_index += 1;
+
+        let adapter_name = to_string(&adapter.DeviceName);
+        let mut matched = looks_like_virtual_display(&to_string(&adapter.DeviceString))
+            || looks_like_virtual_display(&to_string(&adapter.DeviceID));
+        let mut attached = adapter.StateFlags & ATTACHED_TO_DESKTOP != 0;
+
+        // A root-enumerated indirect display also exposes a child *monitor*
+        // device whose description comes from the driver's EDID.
+        let mut monitor = empty_entry();
+        let device: Vec<u16> = adapter_name.encode_utf16().chain(std::iter::once(0)).collect();
+        if unsafe { EnumDisplayDevicesW(device.as_ptr(), 0, &mut monitor, 0) } != 0 {
+            if looks_like_virtual_display(&to_string(&monitor.DeviceString))
+                || looks_like_virtual_display(&to_string(&monitor.DeviceID))
+            {
+                matched = true;
+                // The monitor's own attachment bit is the authoritative one.
+                attached = monitor.StateFlags & ATTACHED_TO_DESKTOP != 0;
+            }
         }
 
-        if !enable {
-            // Also stop the driver service so Windows completely detaches the virtual display
-            let mut stop_cmd = std::process::Command::new(&installer);
-            stop_cmd.args(["stop", "usbmmidd"]).current_dir(&driver_dir);
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                stop_cmd.creation_flags(0x0800_0000);
-            }
-            let _ = stop_cmd.spawn();
+        if matched {
+            info.installed = true;
+            info.attached |= attached;
         }
+    }
+
+    info
+}
+
+#[cfg(not(windows))]
+fn virtual_display_info() -> VirtualDisplayInfo {
+    VirtualDisplayInfo::default()
+}
+
+/// Whether the usbmmidd virtual display is attached to the desktop right now.
+///
+/// Two independent signals are combined because either alone can miss it: the
+/// Win32 adapter list still lists a detached IDD adapter, and xcap's
+/// `friendly_name` is unavailable on some systems. Both are accurate about the
+/// *current* desktop, which is what the toggle needs.
+fn virtual_monitor_active() -> bool {
+    if virtual_display_info().attached {
+        return true;
+    }
+    xcap::Monitor::all()
+        .map(|monitors| {
+            monitors.iter().any(|monitor| {
+                looks_like_virtual_display(&monitor.friendly_name().unwrap_or_default())
+                    || looks_like_virtual_display(&monitor.name().unwrap_or_default())
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Waits up to [`VIRTUAL_DETACH_WAIT`] for the virtual display to leave the desktop.
+fn wait_for_virtual_detach() -> bool {
+    let deadline = Instant::now() + VIRTUAL_DETACH_WAIT;
+    loop {
+        if !virtual_monitor_active() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// Drives `deviceinstaller*.exe` to toggle the virtual monitor.
+///
+/// Every invocation is bounded by [`run_driver_command`] and serialized by
+/// [`DRIVER_COMMAND_LOCK`], so the sequence can neither hang nor interleave.
+fn apply_virtual_monitor(enable: bool) -> Result<(), String> {
+    let _guard = DRIVER_COMMAND_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if !enable && !virtual_display_info().installed && !virtual_monitor_active() {
+        // Driver was never installed (or is already gone): nothing to tear down.
+        tracing::debug!("virtual monitor already off; usbmmidd device not present");
+        return Ok(());
+    }
+
+    let installer = driver_installer_path().ok_or_else(|| {
+        format!(
+            "usbmmidd deviceinstaller not found in {}",
+            get_driver_dir().display()
+        )
+    })?;
+    let dir = installer.parent().unwrap_or(FsPath::new(".")).to_path_buf();
+
+    if enable {
+        // A previous disable ran `stop usbmmidd`, which leaves the device node
+        // disabled; re-enable it before arming the IDD again. Enabling an
+        // already-enabled device is a no-op.
+        let _ = run_driver_command(
+            &installer,
+            &dir,
+            &["enable", "usbmmidd"],
+            DRIVER_CMD_TIMEOUT,
+        );
+        let run = run_driver_command(&installer, &dir, &["enableidd", "1"], DRIVER_CMD_TIMEOUT);
+        if run.is_success() {
+            tracing::info!("virtual monitor enabled");
+            return Ok(());
+        }
+        return Err(format!("enableidd 1 failed ({})", run.describe()));
+    }
+
+    // 1) Ask the IDD to drop its monitor: this is what removes the display from
+    //    Windows Display Settings.
+    let detach = run_driver_command(&installer, &dir, &["enableidd", "0"], DRIVER_CMD_TIMEOUT);
+    if !detach.is_success() {
+        tracing::warn!("enableidd 0 failed ({})", detach.describe());
+    }
+    // 2) Stop the device node so nothing is left half attached. Needs elevation;
+    //    a failure is not fatal because step 1 already detached the monitor.
+    let stop = run_driver_command(&installer, &dir, &["stop", "usbmmidd"], DRIVER_CMD_TIMEOUT);
+    if !stop.is_success() {
+        tracing::warn!("stop usbmmidd failed ({})", stop.describe());
+    }
+    // 3) Verify the desktop really lost the display. Windows needs a moment to
+    //    tear the monitor down, and a leftover here is exactly the ghost display
+    //    users see. Retry the detach once when it survives.
+    if wait_for_virtual_detach() {
+        tracing::info!("virtual monitor disabled");
+        return Ok(());
+    }
+    let retry = run_driver_command(&installer, &dir, &["enableidd", "0"], DRIVER_CMD_TIMEOUT);
+    if wait_for_virtual_detach() {
+        tracing::info!("virtual monitor disabled (retry)");
+        return Ok(());
+    }
+    Err(format!(
+        "virtual monitor still attached (enableidd 0: {}, stop: {}, retry: {})",
+        detach.describe(),
+        stop.describe(),
+        retry.describe()
+    ))
+}
+
+/// [`apply_virtual_monitor`] with the failure logged instead of returned.
+fn apply_virtual_monitor_logged(enable: bool) -> Result<(), String> {
+    match apply_virtual_monitor(enable) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let action = if enable { "enable" } else { "disable" };
+            tracing::warn!("failed to {action} virtual monitor: {err}");
+            Err(err)
+        }
+    }
+}
+
+/// Toggle the virtual (usbmmidd) monitor without blocking the caller.
+///
+/// The `deviceinstaller*.exe` sequence runs on the blocking pool (never on an
+/// async worker) and waits with a hard per-command timeout, so a hung installer
+/// can neither stall an HTTP/WebSocket handler nor wedge a server thread.
+pub fn set_virtual_monitor(enable: bool) {
+    tokio::task::spawn_blocking(move || {
+        let _ = apply_virtual_monitor_logged(enable);
     });
+}
+
+/// Blocking counterpart used where the process is about to exit (tray "Çıkış",
+/// `main.rs`): `set_virtual_monitor`'s detached task would be killed by
+/// `std::process::exit` before it could detach the display, which is how an
+/// abandoned virtual screen survived an app shutdown.
+pub fn set_virtual_monitor_blocking(enable: bool) {
+    let _ = apply_virtual_monitor_logged(enable);
 }
 
 // ---------------------------------------------------------------------------
@@ -2765,26 +3963,115 @@ fn volume_set(_percent: u8) {}
 fn volume_set_mute(_mute: bool) {}
 
 // ---------------------------------------------------------------------------
-// Display brightness (DDC/CI, laptop WMI, gamma-ramp fallback)
+// Display brightness (DDC/CI, laptop ACPI-video IOCTL, gamma-ramp fallback)
 // ---------------------------------------------------------------------------
 
+/// Internal-panel brightness through the ACPI video IOCTL on `\\.\LCD`.
+///
+/// Replaces the earlier `powershell -Command "(Get-WmiObject ...)"` fallback:
+/// the phone's brightness slider streams values, so that spawned a hidden
+/// PowerShell process on every tick — the child-process pattern AV/EDR
+/// heuristics flag first (AGENTS.md §2.1). The in-process `DeviceIoControl` path
+/// needs no child process at all.
 #[cfg(windows)]
-fn set_brightness_wmi(level: u8) -> bool {
-    use std::os::windows::process::CommandExt;
-    let script = format!("(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue).WmiSetBrightness(1, {level})");
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &script])
-        .creation_flags(0x0800_0000)
-        .output();
-    if let Ok(out) = output {
-        return out.status.success();
+fn set_brightness_lcd(level: u8) -> bool {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateFileW(
+            file_name: *const u16,
+            desired_access: u32,
+            share_mode: u32,
+            security_attributes: *mut c_void,
+            creation_disposition: u32,
+            flags_and_attributes: u32,
+            template_file: Handle,
+        ) -> Handle;
+        fn DeviceIoControl(
+            device: Handle,
+            io_control_code: u32,
+            in_buffer: *mut c_void,
+            in_buffer_size: u32,
+            out_buffer: *mut c_void,
+            out_buffer_size: u32,
+            bytes_returned: *mut u32,
+            overlapped: *mut c_void,
+        ) -> i32;
+        fn CloseHandle(object: Handle) -> i32;
     }
-    false
+
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const OPEN_EXISTING: u32 = 3;
+    const INVALID_HANDLE_VALUE: isize = -1;
+    // CTL_CODE(FILE_DEVICE_VIDEO, 0x110/0x112, METHOD_BUFFERED, FILE_ANY_ACCESS).
+    const IOCTL_VIDEO_QUERY_SUPPORTED_BRIGHTNESS: u32 = 0x0023_0440;
+    const IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS: u32 = 0x0023_0448;
+
+    let device: Vec<u16> = "\\\\.\\LCD\0".encode_utf16().collect();
+    unsafe {
+        let handle = CreateFileW(
+            device.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        );
+        if handle.is_null() || handle as isize == INVALID_HANDLE_VALUE {
+            return false;
+        }
+
+        // The driver answers with the brightness levels it accepts, as a
+        // zero-terminated list of WORDs.
+        let mut supported = [0u16; 256];
+        let mut returned: u32 = 0;
+        let queried = DeviceIoControl(
+            handle,
+            IOCTL_VIDEO_QUERY_SUPPORTED_BRIGHTNESS,
+            std::ptr::null_mut(),
+            0,
+            supported.as_mut_ptr().cast::<c_void>(),
+            std::mem::size_of_val(&supported) as u32,
+            &mut returned,
+            std::ptr::null_mut(),
+        ) != 0;
+        let reported = (returned as usize / std::mem::size_of::<u16>()).min(supported.len());
+        let count = if queried && reported > 0 {
+            reported
+        } else {
+            supported.iter().take_while(|value| **value != 0).count()
+        };
+        if !queried || count == 0 {
+            CloseHandle(handle);
+            return false;
+        }
+
+        // Map the percentage onto the panel's own scale, then send a
+        // DISPLAY_BRIGHTNESS carrying that level for both AC and DC.
+        let index = level.min(100) as usize * (count - 1) / 100;
+        let mut brightness = [supported[index] as u8; 2];
+        let applied = DeviceIoControl(
+            handle,
+            IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS,
+            brightness.as_mut_ptr().cast::<c_void>(),
+            brightness.len() as u32,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+        ) != 0;
+        CloseHandle(handle);
+        applied
+    }
 }
 
 #[cfg(windows)]
 fn set_display_brightness(level: u8) -> bool {
-    set_brightness_ddc(level) || set_brightness_wmi(level) || set_brightness_gamma(level)
+    set_brightness_ddc(level) || set_brightness_lcd(level) || set_brightness_gamma(level)
 }
 
 #[cfg(windows)]
@@ -3282,6 +4569,8 @@ pub fn start_server(state: Arc<AppState>, port: u16) -> tokio::task::JoinHandle<
 fn spawn_stats_ticker(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(2));
+        // A slow sample must not be replayed as a burst of stale broadcasts.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
             if state.client_count() == 0 {
@@ -3732,9 +5021,16 @@ async fn palette_action(
             json_response(StatusCode::OK, json!({"success": true, "message": "Ekran kilitlendi."}))
         }
         "monitor_toggle" => {
-            let active = xcap::Monitor::all().map(|m| m.len() > 1).unwrap_or(false);
+            // Detect *the* usbmmidd display instead of guessing from the total
+            // monitor count: a multi-monitor PC without the virtual display
+            // would otherwise look "already on" and the toggle would never
+            // enable it.
+            let active = virtual_monitor_active();
             set_virtual_monitor(!active);
-            json_response(StatusCode::OK, json!({"success": true, "message": "Monitör durumu değiştirildi."}))
+            json_response(StatusCode::OK, json!({
+                "success": true,
+                "message": if active { "Sanal monitör kapatılıyor." } else { "Sanal monitör açılıyor." }
+            }))
         }
         "screenshot" => {
             match capture_primary_display_png() {
@@ -4234,15 +5530,24 @@ fn runas_elevated(installer: &std::path::Path, args: &str, dir: &std::path::Path
     res > 32
 }
 
+/// Directory containing the usbmmidd driver bundle.
+///
+/// Covers both layouts the app ships in: `usbmmidd/` next to the executable
+/// (installed copies) and a few levels above it (a cargo target dir in dev),
+/// plus the fixed locations the Go installer uses.
 fn get_driver_dir() -> PathBuf {
     let mut candidates = Vec::new();
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            candidates.push(parent.join("usbmmidd"));
-            candidates.push(parent.join("..").join("usbmmidd"));
-            candidates.push(parent.join("..").join("..").join("usbmmidd"));
-            candidates.push(parent.join("..").join("..").join("..").join("usbmmidd"));
+            // Installed: `<install dir>/usbmmidd`. Dev: the exe lives in
+            // `target/<profile>/`, so the bundle is 1-4 levels up.
+            let mut dir = Some(parent.to_path_buf());
+            for _ in 0..5 {
+                let Some(current) = dir else { break };
+                candidates.push(current.join("usbmmidd"));
+                dir = current.parent().map(FsPath::to_path_buf);
+            }
         }
     }
 
@@ -4252,14 +5557,18 @@ fn get_driver_dir() -> PathBuf {
     if let Ok(progfiles) = std::env::var("ProgramFiles") {
         candidates.push(PathBuf::from(progfiles).join(r"BigPocket\usbmmidd"));
     }
+    if let Ok(progfiles86) = std::env::var("ProgramFiles(x86)") {
+        candidates.push(PathBuf::from(progfiles86).join(r"BigPocket\usbmmidd"));
+    }
 
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("usbmmidd"));
         candidates.push(cwd.join("desktop").join("usbmmidd"));
     }
 
+    let names = driver_installer_names();
     for c in candidates {
-        if c.join("deviceinstaller64.exe").exists() {
+        if names.iter().any(|name| c.join(name).exists()) {
             return c;
         }
     }
@@ -4268,54 +5577,70 @@ fn get_driver_dir() -> PathBuf {
 }
 
 async fn driver_status() -> Response {
-    let monitors = xcap::Monitor::all().map(|m| m.len()).unwrap_or(1);
-    let driver_dir = get_driver_dir();
-    let driver_exists = driver_dir.join("deviceinstaller64.exe").exists();
+    let monitors = xcap::Monitor::all().map(|m| m.len()).unwrap_or(0);
+    let virtual_active = virtual_monitor_active();
+    let virtual_info = virtual_display_info();
     json_response(StatusCode::OK, json!({
         "success": true,
-        "admin": true,
+        "admin": is_admin(),
         "monitors": monitors,
-        "driver_exists": driver_exists,
+        "virtual_monitor_active": virtual_active,
+        "virtual_monitor_installed": virtual_info.installed || virtual_active,
+        "driver_exists": driver_installer_path().is_some(),
         "platform": std::env::consts::OS
     }))
 }
 
+#[cfg_attr(not(windows), allow(unused_variables))]
 async fn driver_install() -> Response {
-    let driver_dir = get_driver_dir();
-    let installer = driver_dir.join("deviceinstaller64.exe");
-    if !installer.exists() {
+    let Some(installer) = driver_installer_path() else {
         return json_response(StatusCode::OK, json!({
             "success": false,
-            "message": format!("Sürücü kurulum dosyası (deviceinstaller64.exe) bulunamadı: {}", driver_dir.display())
+            "message": format!("Sürücü kurulum dosyası (deviceinstaller*) bulunamadı: {}", get_driver_dir().display())
         }));
-    }
+    };
+    let dir = installer
+        .parent()
+        .unwrap_or(FsPath::new("."))
+        .to_path_buf();
 
     #[cfg(windows)]
     {
         if is_admin() {
-            use std::os::windows::process::CommandExt;
-            let output = std::process::Command::new(&installer)
-                .args(["install", "usbmmidd.inf", "usbmmidd"])
-                .current_dir(&driver_dir)
-                .creation_flags(0x08000000)
-                .output();
-            match output {
-                Ok(o) if o.status.success() => json_response(StatusCode::OK, json!({
+            // Driver staging is slow and must never run on an async worker, nor
+            // wait unbounded on a wedged installer.
+            let run = tokio::task::spawn_blocking(move || {
+                run_driver_command(
+                    &installer,
+                    &dir,
+                    &["install", "usbmmidd.inf", "usbmmidd"],
+                    DRIVER_INSTALL_TIMEOUT,
+                )
+            })
+            .await;
+            match run {
+                Ok(run) if run.is_success() => json_response(StatusCode::OK, json!({
                     "success": true,
                     "message": "Sürücü başarıyla yüklendi."
                 })),
-                Ok(o) => json_response(StatusCode::OK, json!({
+                Ok(run) => json_response(StatusCode::OK, json!({
                     "success": false,
-                    "message": format!("Kurulum hatası: {}", String::from_utf8_lossy(&o.stderr))
+                    "message": format!("Kurulum hatası: {}", run.describe())
                 })),
-                Err(e) => json_response(StatusCode::OK, json!({
+                Err(err) => json_response(StatusCode::OK, json!({
                     "success": false,
-                    "message": format!("Çalıştırma hatası: {e}")
+                    "message": format!("Çalıştırma hatası: {err}")
                 })),
             }
         } else {
-            let ok = runas_elevated(&installer, "install usbmmidd.inf usbmmidd", &driver_dir);
-            if ok {
+            // `ShellExecuteW(..., "runas", ...)` blocks while the UAC prompt is
+            // up, so it runs off the async worker as well.
+            let elevated = tokio::task::spawn_blocking(move || {
+                runas_elevated(&installer, "install usbmmidd.inf usbmmidd", &dir)
+            })
+            .await
+            .unwrap_or(false);
+            if elevated {
                 tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
                 json_response(StatusCode::OK, json!({
                     "success": true,
@@ -4350,6 +5675,12 @@ async fn driver_install() -> Response {
 
 async fn driver_enable(Json(payload): Json<serde_json::Value>) -> Response {
     let enable = payload.get("enable").and_then(|v| v.as_bool()).unwrap_or(true);
+    if driver_installer_path().is_none() {
+        return json_response(StatusCode::OK, json!({
+            "success": false,
+            "message": format!("Sanal ekran sürücüsü kurulu değil: {}", get_driver_dir().display())
+        }));
+    }
     set_virtual_monitor(enable);
     json_response(StatusCode::OK, json!({
         "success": true,

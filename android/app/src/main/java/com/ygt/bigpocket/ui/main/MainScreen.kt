@@ -3,6 +3,8 @@ package com.ygt.bigpocket.ui.main
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -54,6 +56,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -74,6 +78,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +89,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import android.content.pm.ActivityInfo
 import com.ygt.bigpocket.theme.*
 import android.view.View
@@ -101,11 +107,14 @@ import com.ygt.bigpocket.update.UpdatePrompt
 import com.ygt.bigpocket.update.UpdateDialog
 import com.ygt.bigpocket.update.UpdateManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.catch
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -117,6 +126,7 @@ import androidx.compose.foundation.shape.CircleShape
 import java.util.Calendar
 import java.util.concurrent.Executors
 import kotlin.math.hypot
+import kotlin.math.abs
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -127,6 +137,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ygt.bigpocket.services.BigPocketService
 import com.ygt.bigpocket.services.ShareInbox
+import android.content.ContextWrapper
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import okio.Buffer
 import okio.BufferedSink
 import okio.source
@@ -622,83 +635,256 @@ private fun deleteSharedFile(
     })
 }
 
+/** One live transfer per [downloadKey]; the UI cancels it through [cancelDownload]. */
+private val activeDownloads = java.util.concurrent.ConcurrentHashMap<String, Call>()
+private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+private const val DOWNLOAD_PROGRESS_STEP = 256 * 1024L
+
+/** Runs [block] on the main thread; safe to call from a download worker after the UI is gone. */
+private fun onMainThread(block: () -> Unit) {
+    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) block() else mainHandler.post(block)
+}
+
+/**
+ * Downloads land in the app-private external files dir (`Android/data/<pkg>/files/Download`).
+ * The public `Download/` folder is not writable on API 30+ without `MANAGE_EXTERNAL_STORAGE`, so
+ * the previous target made every transfer fail with `EACCES`. The private dir needs no runtime
+ * permission and is exposed to viewer apps through the `*.updates` FileProvider
+ * (see `res/xml/update_paths.xml`).
+ */
+private fun downloadsDirectory(context: Context): File =
+    context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        ?: File(context.filesDir, "downloads")
+
+/** Releases before the app-private folder existed downloaded here; kept readable so they open. */
+@Suppress("DEPRECATION")
+private fun legacyDownloadsDirectory(): File =
+    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+
+/** Drops any directory component so a `file_name` from the PC cannot escape the download dir. */
+private fun safeDownloadName(raw: String): String {
+    val base = raw.replace('\\', '/').substringAfterLast('/').trim().trimStart('.')
+    return if (base.isEmpty()) "download" else base
+}
+
+/** The on-disk copy of [name] from the current or a previous release, or `null` if absent. */
+private fun findDownloadedFile(context: Context, name: String): File? {
+    val safeName = safeDownloadName(name)
+    val current = File(downloadsDirectory(context), safeName)
+    if (current.isFile && current.length() > 0) return current
+    val legacy = File(legacyDownloadsDirectory(), safeName)
+    if (legacy.isFile && legacy.length() > 0) return legacy
+    return null
+}
+
+/** Aborts the transfer registered under [downloadKey]; its callback then reports `null`. */
+private fun cancelDownload(downloadKey: String) {
+    activeDownloads.remove(downloadKey)?.cancel()
+}
+
+/**
+ * Streams `GET /download/<filename>` to the download folder. [onProgress] and [onComplete] are
+ * invoked on the main thread; a user cancellation reports `null` without an error toast.
+ */
 private fun downloadFileDirectly(
     context: Context,
     ip: String,
     password: String,
     filename: String,
+    downloadKey: String = filename,
     onStart: () -> Unit = {},
+    onProgress: (downloaded: Long, total: Long) -> Unit = { _, _ -> },
     onComplete: (File?) -> Unit = {}
 ) {
+    val safeName = safeDownloadName(filename)
+    // A second tap must replace the running transfer instead of stacking another one.
+    cancelDownload(downloadKey)
     onStart()
-    CoroutineScope(Dispatchers.IO).launch {
+
+    val client = OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+    val call = client.newCall(
+        Request.Builder()
+            .url("http://$ip:8085/download/${Uri.encode(safeName)}?password=${Uri.encode(password)}")
+            .build()
+    )
+    activeDownloads[downloadKey] = call
+
+    downloadScope.launch {
+        val dir = downloadsDirectory(context)
+        if (!dir.exists()) dir.mkdirs()
+        val destFile = File(dir, safeName)
+        // Written next to the target and renamed on success, so a killed transfer never leaves a
+        // truncated file that the UI would happily offer to open.
+        val partFile = File(dir, "$safeName.part")
+        // A newer transfer for the same key would own the map entry; this one then reports nothing.
+        fun isSuperseded() = activeDownloads[downloadKey] !== call
         try {
-            val url = "http://$ip:8085/download/${Uri.encode(filename)}?password=${Uri.encode(password)}"
-            val client = OkHttpClient.Builder()
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-            val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "İndirme başarısız: HTTP ${response.code}", Toast.LENGTH_SHORT).show()
-                    onComplete(null)
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    if (!isSuperseded()) onMainThread {
+                        Toast.makeText(context, "İndirme başarısız: HTTP ${response.code}", Toast.LENGTH_SHORT).show()
+                        onComplete(null)
+                    }
+                    return@use
                 }
-                return@launch
-            }
-
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
-            val destFile = File(downloadsDir, filename)
-
-            response.body?.byteStream()?.use { input ->
-                destFile.outputStream().use { output ->
-                    input.copyTo(output)
+                val body = response.body ?: throw java.io.IOException("Sunucu boş yanıt döndü")
+                val total = body.contentLength()
+                partFile.delete()
+                var lastReported = 0L
+                body.byteStream().use { input ->
+                    partFile.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var downloaded = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            if (downloaded - lastReported >= DOWNLOAD_PROGRESS_STEP) {
+                                lastReported = downloaded
+                                onMainThread { onProgress(downloaded, total) }
+                            }
+                        }
+                    }
                 }
-            }
-
-            android.media.MediaScannerConnection.scanFile(context, arrayOf(destFile.absolutePath), null, null)
-
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "✓ İndirildi: ${destFile.name}", Toast.LENGTH_SHORT).show()
-                onComplete(destFile)
+                if (!partFile.renameTo(destFile)) {
+                    // Some filesystems refuse an overwriting rename; replace the target explicitly.
+                    destFile.delete()
+                    if (!partFile.renameTo(destFile)) throw java.io.IOException("Dosya kaydedilemedi")
+                }
+                if (!isSuperseded()) onMainThread {
+                    onProgress(destFile.length(), if (total > 0) total else destFile.length())
+                    Toast.makeText(context, "✓ İndirildi: $safeName", Toast.LENGTH_SHORT).show()
+                    onComplete(destFile)
+                }
             }
         } catch (e: Exception) {
-            Log.e("FileDownload", "Download failed", e)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "İndirme hatası: ${e.message}", Toast.LENGTH_SHORT).show()
+            partFile.delete()
+            val cancelled = call.isCanceled()
+            if (cancelled) {
+                Log.d("FileDownload", "Download of $safeName cancelled")
+            } else {
+                Log.e("FileDownload", "Download of $safeName failed", e)
+            }
+            // A superseded transfer stays silent: the replacement owns the bubble's state.
+            if (!isSuperseded()) onMainThread {
+                Toast.makeText(
+                    context,
+                    if (cancelled) "İndirme iptal edildi: $safeName" else "İndirme hatası: ${e.message ?: "bilinmeyen hata"}",
+                    Toast.LENGTH_SHORT
+                ).show()
                 onComplete(null)
             }
+        } finally {
+            activeDownloads.remove(downloadKey, call)
         }
     }
 }
 
-private fun openDownloadedFile(context: Context, file: File) {
-    try {
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.updates",
-            file
-        )
-        val mime = context.contentResolver.getType(uri) ?: when (file.extension.lowercase()) {
-            "jpg", "jpeg", "png", "webp", "gif" -> "image/*"
-            "mp4", "mkv", "avi", "mov" -> "video/*"
-            "mp3", "wav", "ogg", "flac" -> "audio/*"
-            "pdf" -> "application/pdf"
-            "txt", "log", "json" -> "text/plain"
-            "apk" -> "application/vnd.android.package-archive"
-            else -> "*/*"
-        }
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mime)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
+/** Best MIME type for [file]: the FileProvider's answer, then the extension, then any/any. */
+private fun resolveMimeType(context: Context, uri: Uri, file: File): String {
+    val fromProvider = try {
+        context.contentResolver.getType(uri)
     } catch (e: Exception) {
-        Toast.makeText(context, "Dosya açılamadı: ${e.message}", Toast.LENGTH_SHORT).show()
+        null
+    }
+    if (!fromProvider.isNullOrBlank() && fromProvider != "application/octet-stream") return fromProvider
+
+    val ext = file.extension.lowercase()
+    val fromExtension = try {
+        android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    } catch (e: Exception) {
+        null
+    }
+    if (!fromExtension.isNullOrBlank()) return fromExtension
+
+    return when (ext) {
+        "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif" -> "image/*"
+        "mp4", "mkv", "avi", "mov", "webm", "3gp" -> "video/*"
+        "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus" -> "audio/*"
+        "pdf" -> "application/pdf"
+        "txt", "log", "json", "csv", "md", "xml" -> "text/plain"
+        "apk" -> "application/vnd.android.package-archive"
+        "zip" -> "application/zip"
+        "rar" -> "application/vnd.rar"
+        "7z" -> "application/x-7z-compressed"
+        "doc", "docx" -> "application/msword"
+        "xls", "xlsx" -> "application/vnd.ms-excel"
+        "ppt", "pptx" -> "application/vnd.ms-powerpoint"
+        else -> "*/*"
+    }
+}
+
+/** Opens a downloaded file with the system viewer, granting it read access through FileProvider. */
+private fun openDownloadedFile(context: Context, file: File) {
+    if (!file.isFile || file.length() == 0L) {
+        Toast.makeText(context, "Dosya bulunamadı: ${file.name}", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val uri = try {
+        FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
+    } catch (e: IllegalArgumentException) {
+        // Thrown when no <paths> entry covers the file; without a URI there is nothing to grant.
+        Log.e("FileProvider", "No configured root contains ${file.absolutePath}", e)
+        Toast.makeText(context, "Dosya paylaşılamıyor: ${file.name}", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, resolveMimeType(context, uri, file))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // The granting app must place the URI in ClipData as well, otherwise several OEM
+        // resolvers drop the read grant while handing the intent to the viewer.
+        clipData = ClipData.newRawUri(file.name, uri)
+    }
+    val chooser = Intent.createChooser(viewIntent, "Aç").apply {
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    try {
+        context.startActivity(chooser)
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "Bu dosyayı açabilecek bir uygulama yok.", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "Dosya açılamadı: ${e.message ?: "bilinmeyen hata"}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Writes [text] to the system clipboard; returns `false` for empty input or a failed write. */
+private fun copyToSystemClipboard(context: Context, text: String): Boolean {
+    if (text.isEmpty()) return false
+    return try {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            ?: return false
+        clipboard.setPrimaryClip(ClipData.newPlainText("BigPocket", text))
+        true
+    } catch (e: Exception) {
+        Log.e("Clipboard", "Could not write to the clipboard", e)
+        false
+    }
+}
+
+/** Text of the current clipboard, or `""` when it is empty, a URI clip, or unreadable. */
+private fun readSystemClipboardText(context: Context): String {
+    return try {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            ?: return ""
+        val clip = clipboard.primaryClip ?: return ""
+        if (clip.itemCount <= 0) return ""
+        val item = clip.getItemAt(0) ?: return ""
+        val direct = item.text?.toString()
+        if (!direct.isNullOrEmpty()) return direct
+        // The phone may hold an image/URI clip; coerceToText renders a readable representation.
+        item.coerceToText(context)?.toString().orEmpty()
+    } catch (e: Exception) {
+        Log.e("Clipboard", "Could not read the clipboard", e)
+        ""
     }
 }
 
@@ -906,15 +1092,33 @@ fun MainScreen(
         }
     }
 
-    // Keep screen awake (FLAG_KEEP_SCREEN_ON)
-    DisposableEffect(keepScreenOn) {
-        val window = (context as? Activity)?.window
-        if (keepScreenOn) {
-            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } else {
-            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    // Keep screen awake (FLAG_KEEP_SCREEN_ON). The flag belongs to the window, so it is applied on
+    // every ON_RESUME and cleared on ON_PAUSE/leave: a stale "force screen on" then can never
+    // survive a backgrounded app or an activity rebuild (theme switch, "don't keep activities").
+    DisposableEffect(keepScreenOn, lifecycleOwner) {
+        val window = context.findActivity()?.window
+        fun applyScreenFlag() {
+            window ?: return
+            if (keepScreenOn) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
         }
+
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> applyScreenFlag()
+                Lifecycle.Event.ON_PAUSE -> window?.clearFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                )
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        applyScreenFlag()
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
@@ -1038,11 +1242,29 @@ fun MainScreen(
         }
     }
 
-    // Listen for WebSocket connection changes
+    // Listen for WebSocket connection changes. SocketManager delivers these on the main thread,
+    // so the flag is written synchronously and the UI flips in the same frame as the drop/connect.
     DisposableEffect(Unit) {
+        // A rejected password reaches the listener twice (the auth_failed frame and the close that
+        // follows it); only the first one should raise a toast.
+        var authRejectNotified = false
         SocketManager.connectionStateListener = { connected ->
+            isConnected = connected
+            if (connected) authRejectNotified = false
+            if (!connected && SocketManager.isUserDisconnected) {
+                // The notification action can drop the link while the app is backgrounded; keep the
+                // UI (and auto-discovery) from immediately resurrecting it.
+                manualDisconnect = true
+            }
+            if (!connected && SocketManager.isAuthRejected && !authRejectNotified) {
+                authRejectNotified = true
+                Toast.makeText(
+                    context,
+                    "Bağlantı reddedildi — şifre yanlış veya çok fazla deneme.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
             coroutineScope.launch(Dispatchers.Main) {
-                isConnected = connected
                 if (!connected) {
                     isMicStreaming = false
                     isCamStreaming = false
@@ -1065,15 +1287,17 @@ fun MainScreen(
         }
         
         SocketManager.clipboardListener = { text ->
-            coroutineScope.launch(Dispatchers.Main) {
-                clipboardText = text
-                try {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("BigPocket Sync", text)
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(context, "Pano bilgisayarla eşitlendi!", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Log.e("MainScreen", "Clipboard sync error", e)
+            // An empty payload must not wipe the phone clipboard, and `text` is nullable for
+            // callers that forward a JSON null.
+            if (!text.isNullOrEmpty()) {
+                coroutineScope.launch(Dispatchers.Main) {
+                    clipboardText = text
+                    val copied = copyToSystemClipboard(context, text)
+                    Toast.makeText(
+                        context,
+                        if (copied) "Pano bilgisayarla eşitlendi!" else "Pano alındı, kopyalanamadı.",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         }
@@ -1300,6 +1524,10 @@ fun MainScreen(
             .catch { e -> Log.w("MainScreen", "Discovery unavailable", e) }
             .collect { pc ->
             if (manualDisconnect || SocketManager.isConnected || SocketManager.isConnecting) return@collect
+            // A password the PC already rejected, a deliberate disconnect, or a backoff that is
+            // already retrying this very host must not be restarted by a broadcast packet.
+            if (SocketManager.isAuthRejected || SocketManager.isUserDisconnected) return@collect
+            if (SocketManager.isRetryingFor(pc.ip)) return@collect
             val now = System.currentTimeMillis()
             if (now - (lastAttempt[pc.ip] ?: 0L) < 8000) return@collect
             lastAttempt[pc.ip] = now
@@ -2475,18 +2703,21 @@ fun MainScreen(
                         isConnected = isConnected,
                         clipboardText = clipboardText,
                         onSendClipboard = {
-                            try {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
-                                if (text.isNotEmpty()) {
+                            // The clipboard can legitimately hold no item, a null-text item or a
+                            // non-text (URI) clip; readSystemClipboardText never throws for those.
+                            val text = readSystemClipboardText(context)
+                            when {
+                                text.isEmpty() ->
+                                    Toast.makeText(context, "Pano boş — gönderilecek metin yok.", Toast.LENGTH_SHORT).show()
+                                !isConnected ->
+                                    Toast.makeText(context, "Bilgisayar bağlı değil.", Toast.LENGTH_SHORT).show()
+                                else -> {
                                     SocketManager.sendControl(JSONObject().apply {
                                         put("type", "clipboard_sync")
                                         put("text", text)
                                     })
                                     Toast.makeText(context, "Pano PC'ye gönderildi!", Toast.LENGTH_SHORT).show()
                                 }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Pano kopyalanamadı.", Toast.LENGTH_SHORT).show()
                             }
                         },
                         uploadStatus = uploadStatus,
@@ -2909,10 +3140,94 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
     }
 }
 
+/** Inset between the card edge and the drawn slider track; also the gesture coordinate origin. */
+private val SliderTrackInset = 14.dp
+
+/** Drag updates inside one window are coalesced into a single WebSocket commit. */
+private const val SliderCommitWindowMillis = 150L
+
+/** Percentage step that produces one haptic pulse while dragging. */
+private const val SliderHapticStepPercent = 5f
+
+/** How the first pointer events of a slider touch resolved. */
+private enum class SliderIntent { Tap, Drag, LongPress, Yield }
+
+/**
+ * Fraction of the track that must be filled before content whose centre sits [extentDp] dp from
+ * the track origin is covered by the fill — i.e. before it can switch to the dark tint. Derived
+ * from the measured pill instead of a hardcoded constant so the same style stays readable in a
+ * 1×1 cell and in a wide 2×1 cell.
+ */
+private fun sliderCoverageFraction(extentDp: Float, trackDp: Float): Float =
+    (extentDp / trackDp.coerceAtLeast(24f)).coerceIn(0.06f, 0.92f)
+
+/**
+ * Per-instance bookkeeping for one [AppleCapsuleSlider] gesture: the commit coalescing window that
+ * keeps a drag from flooding the WebSocket, and the haptic tick bucket. Deliberately plain
+ * (non-observable) state — both fields are written on every drag frame and must never schedule a
+ * recomposition.
+ */
+private class SliderCommitController(private val scope: CoroutineScope) {
+    private var windowJob: Job? = null
+    private var pending: Float? = null
+    private var tickBucket = Int.MIN_VALUE
+
+    /**
+     * Leading-edge dispatch for instant feedback, then at most one trailing dispatch per
+     * [SliderCommitWindowMillis] window so a long drag ends on its newest value without sending one
+     * message per frame.
+     */
+    fun submit(level: Float, dispatch: (Float) -> Unit) {
+        pending = level
+        if (windowJob != null) return
+        dispatch(level)
+        pending = null
+        windowJob = scope.launch {
+            delay(SliderCommitWindowMillis)
+            windowJob = null
+            pending?.let {
+                pending = null
+                dispatch(it)
+            }
+        }
+    }
+
+    /** Drops the coalesced value and dispatches [level] straight away (tap or drag end). */
+    fun flush(level: Float, dispatch: (Float) -> Unit) {
+        discard()
+        dispatch(level)
+    }
+
+    /** Drops the coalesced value without dispatching (cancelled gesture). */
+    fun discard() {
+        windowJob?.cancel()
+        windowJob = null
+        pending = null
+    }
+
+    /** Arms the haptic ticks for a new drag. */
+    fun startBurst() {
+        tickBucket = Int.MIN_VALUE
+    }
+
+    /** True at most once per [SliderHapticStepPercent] percent, so a drag pulses instead of buzzing. */
+    fun consumeTick(level: Float): Boolean {
+        val bucket = (level / SliderHapticStepPercent).toInt()
+        if (bucket == tickBucket) return false
+        tickBucket = bucket
+        return true
+    }
+}
+
 /**
  * Template 5 — capsule slider (volume / brightness): soft tonal fill on the flat card surface,
  * round accent badge with the label on the left and the live percentage on the right.
  * Adapts between the horizontal and vertical pill from the cell aspect ratio.
+ *
+ * Gestures are resolved by one detector so a card cell (which also wants long-press drag to
+ * re-order) and the deck page pager (horizontal swipe) never fight the slider for a pointer:
+ * a quick tap or an axis-aligned drag belongs to the slider, everything else — including a long
+ * press — is left to the parent.
  */
 @Composable
 fun AppleCapsuleSlider(
@@ -2929,27 +3244,26 @@ fun AppleCapsuleSlider(
 ) {
     val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
+    val commitController = remember { SliderCommitController(coroutineScope) }
+    // The gesture loop below lives for as long as the pointer is down, so the callbacks are read
+    // through `rememberUpdatedState` instead of being captured (they would otherwise be the
+    // instances from whenever the pointerInput block was last restarted).
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+    val latestOnLongClick by rememberUpdatedState(onLongClick)
+
     val isBrightness = type == "brightness"
     val safeLabel = if (label.isNotBlank()) label else if (isBrightness) "Parlaklık" else "Ana Ses"
 
-    var debounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var localValue by remember(value) { mutableFloatStateOf(value) }
+    // Finger position of an in-flight drag. The committed value keeps arriving through `value`, but
+    // the thumb has to follow the finger until the gesture ends, so while dragging the local copy
+    // wins over the incoming value. It is deliberately not keyed on `value`: a commit landing
+    // mid-drag must not yank the thumb back to the last sent level.
+    var dragValue by remember { mutableFloatStateOf(value) }
     var isDragging by remember { mutableStateOf(false) }
 
-    val clampedValue = (if (isDragging) localValue else value).coerceIn(0f, 100f)
+    val clampedValue = (if (isDragging) dragValue else value).coerceIn(0f, 100f)
     val fillFraction = clampedValue / 100f
 
-    val commitNow: (Float) -> Unit = { target ->
-        debounceJob?.cancel()
-        onValueChange(target)
-    }
-    val scheduleCommit: (Float) -> Unit = { target ->
-        debounceJob?.cancel()
-        debounceJob = coroutineScope.launch {
-            kotlinx.coroutines.delay(300L)
-            onValueChange(target)
-        }
-    }
     val sliderIcon = when {
         isBrightness -> Icons.Default.LightMode
         clampedValue == 0f -> Icons.Default.VolumeMute
@@ -2964,53 +3278,129 @@ fun AppleCapsuleSlider(
             else -> maxHeight > maxWidth * 1.15f
         }
 
+        // Fill fraction at which the badge of each style is covered by the fill and may switch to
+        // the dark tint. See [sliderCoverageFraction]: the extents are the distance of the badge
+        // centre from the track origin plus the layout chrome (card inset, label rows, pill
+        // padding) the badge shares the axis with.
+        val samsungVerticalCoverage = sliderCoverageFraction(22f, maxHeight.value - 75f)
+        val materialVerticalIconCoverage = sliderCoverageFraction(34f, maxHeight.value - 47f)
+        val materialVerticalTextCoverage = sliderCoverageFraction(18f, maxHeight.value - 47f)
+        val samsungHorizontalCoverage = sliderCoverageFraction(21f, maxWidth.value - 28f)
+        val materialHorizontalCoverage = sliderCoverageFraction(24f, maxWidth.value - 28f)
+        val appleVerticalTrack = (maxHeight.value - 49f).coerceAtLeast(24f)
+        val appleVerticalIconCoverage = (1f - sliderCoverageFraction(21f, appleVerticalTrack)).coerceIn(0.5f, 0.95f)
+        val appleVerticalTextCoverage = sliderCoverageFraction(19f, appleVerticalTrack)
+
+        // A vertical pill shares the cell with the percentage and label rows, so in a short cell the
+        // chrome has to shrink instead of overflowing the capsule and clipping the badge.
+        val compactVertical = maxHeight < 132.dp
+
         val touchModifier = Modifier
             .fillMaxSize()
             .pointerInput(isVertical) {
-                detectTapGestures(
-                    onLongPress = { onLongClick?.invoke() },
-                    onTap = { offset ->
-                        val fraction = if (isVertical) {
-                            (1f - (offset.y / size.height.toFloat())).coerceIn(0f, 1f)
-                        } else {
-                            (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        }
-                        val level = fraction * 100f
-                        localValue = level
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        commitNow(level)
+                val touchSlop = viewConfiguration.touchSlop
+                val longPressTimeout = viewConfiguration.longPressTimeoutMillis
+                val inset = SliderTrackInset.toPx()
+
+                // Track geometry is the drawn capsule, which is inset from the touch target, and is
+                // guarded against a degenerate box so a collapsed cell can never yield NaN.
+                fun levelAt(position: Offset): Float {
+                    val fraction = if (isVertical) {
+                        val track = size.height - inset * 2f
+                        if (track <= 1f) 0f else 1f - (position.y - inset) / track
+                    } else {
+                        val track = size.width - inset * 2f
+                        if (track <= 1f) 0f else (position.x - inset) / track
                     }
-                )
-            }
-            .pointerInput(isVertical) {
-                detectDragGestures(
-                    onDragStart = {
-                        isDragging = true
-                        debounceJob?.cancel()
-                    },
-                    onDragEnd = {
-                        isDragging = false
-                        commitNow(localValue)
-                    },
-                    onDragCancel = {
-                        isDragging = false
-                        localValue = value
-                    },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        val fraction = if (isVertical) {
-                            (1f - (change.position.y / size.height.toFloat())).coerceIn(0f, 1f)
-                        } else {
-                            (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                    return fraction.coerceIn(0f, 1f) * 100f
+                }
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    // A consumer above the slider (the edit-mode card overlay, a parent gesture)
+                    // already owns this pointer — stay out of its way instead of claiming a tap.
+                    if (down.isConsumed) return@awaitEachGesture
+                    var lastChange = down
+
+                    // Nothing is owned yet. Resolve to a tap, an axis-aligned drag, a long press,
+                    // or yield to whoever consumes the pointer first (page pager, card long-press
+                    // drag, an edit-mode overlay).
+                    val intent = withTimeoutOrNull<SliderIntent>(longPressTimeout) {
+                        while (true) {
+                            val change = awaitPointerEvent()
+                                .changes.firstOrNull { it.id == down.id }
+                                ?: return@withTimeoutOrNull SliderIntent.Yield
+                            lastChange = change
+                            if (change.isConsumed) return@withTimeoutOrNull SliderIntent.Yield
+                            if (!change.pressed) return@withTimeoutOrNull SliderIntent.Tap
+                            val delta = change.position - down.position
+                            val along = if (isVertical) abs(delta.y) else abs(delta.x)
+                            val across = if (isVertical) abs(delta.x) else abs(delta.y)
+                            if (along >= touchSlop && along >= across) {
+                                return@withTimeoutOrNull SliderIntent.Drag
+                            }
                         }
-                        val level = fraction * 100f
-                        localValue = level
-                        scheduleCommit(level)
+                        @Suppress("UNREACHABLE_CODE")
+                        SliderIntent.Yield
                     }
-                )
+
+                    when (intent ?: SliderIntent.LongPress) {
+                        SliderIntent.Tap -> {
+                            // A tap on the track moves the level there and is committed at once —
+                            // there is nothing to debounce for a single value.
+                            lastChange.consume()
+                            val level = levelAt(lastChange.position)
+                            dragValue = level
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            commitController.flush(level, latestOnValueChange)
+                        }
+                        SliderIntent.Drag -> {
+                            isDragging = true
+                            commitController.startBurst()
+                            try {
+                                var level = levelAt(lastChange.position)
+                                dragValue = level
+                                lastChange.consume()
+                                if (commitController.consumeTick(level)) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                commitController.submit(level, latestOnValueChange)
+                                while (true) {
+                                    val change = awaitPointerEvent()
+                                        .changes.firstOrNull { it.id == down.id } ?: break
+                                    // Owning the pointer keeps the parent card from starting a
+                                    // re-order drag halfway through a volume change.
+                                    change.consume()
+                                    level = levelAt(change.position)
+                                    dragValue = level
+                                    // The release is flushed below, so it is not also submitted.
+                                    if (!change.pressed) break
+                                    if (commitController.consumeTick(level)) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    commitController.submit(level, latestOnValueChange)
+                                }
+                                // Released position wins over any value still queued in the window.
+                                commitController.flush(dragValue, latestOnValueChange)
+                            } finally {
+                                isDragging = false
+                                commitController.discard()
+                            }
+                        }
+                        SliderIntent.LongPress -> {
+                            // A long press is not the slider's gesture: it arms edit mode and lets
+                            // the Bento cell pick the pointer up for re-ordering, so the stream is
+                            // left unconsumed. Doing nothing when nobody listens for it also keeps
+                            // the cell drag working on slider cards. No haptic of our own either —
+                            // the deck punches one for the action it is about to take.
+                            latestOnLongClick?.invoke()
+                        }
+                        SliderIntent.Yield -> Unit
+                    }
+                }
             }
 
-        Box(modifier = touchModifier.padding(14.dp)) {
+        Box(modifier = touchModifier.padding(SliderTrackInset)) {
             when (sliderStyle.lowercase()) {
                 "samsung", "oneui" -> {
                     // Samsung One UI 6 Volume Bar
@@ -3020,12 +3410,12 @@ fun AppleCapsuleSlider(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("%${clampedValue.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("%${clampedValue.toInt()}", fontSize = if (compactVertical) 11.sp else 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Box(
                                 modifier = Modifier
-                                    .width(42.dp)
+                                    .width(if (compactVertical) 34.dp else 42.dp)
                                     .weight(1f)
-                                    .padding(vertical = 8.dp)
+                                    .padding(vertical = if (compactVertical) 4.dp else 8.dp)
                                     .clip(RoundedCornerShape(21.dp))
                                     .background(Color.White.copy(alpha = 0.10f)),
                                 contentAlignment = Alignment.BottomCenter
@@ -3039,19 +3429,19 @@ fun AppleCapsuleSlider(
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .padding(bottom = 10.dp)
-                                        .size(24.dp),
+                                        .padding(bottom = if (compactVertical) 5.dp else 10.dp)
+                                        .size(if (compactVertical) 16.dp else 24.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = sliderIcon,
                                         contentDescription = safeLabel,
-                                        tint = if (fillFraction > 0.25f) Color.Black else Color.White,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = if (fillFraction > samsungVerticalCoverage) Color.Black else Color.White,
+                                        modifier = Modifier.size(if (compactVertical) 11.dp else 16.dp)
                                     )
                                 }
                             }
-                            Text(safeLabel, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistSecondary, maxLines = 1)
+                            Text(safeLabel, fontSize = if (compactVertical) 10.sp else 11.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistSecondary, maxLines = 1)
                         }
                     } else {
                         Column(
@@ -3084,7 +3474,7 @@ fun AppleCapsuleSlider(
                                 Icon(
                                     imageVector = sliderIcon,
                                     contentDescription = safeLabel,
-                                    tint = if (fillFraction > 0.15f) Color.Black else Color.White,
+                                    tint = if (fillFraction > samsungHorizontalCoverage) Color.Black else Color.White,
                                     modifier = Modifier.padding(start = 12.dp).size(18.dp)
                                 )
                             }
@@ -3101,7 +3491,7 @@ fun AppleCapsuleSlider(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .width(54.dp)
+                                    .width(if (compactVertical) 44.dp else 54.dp)
                                     .weight(1f)
                                     .clip(RoundedCornerShape(27.dp))
                                     .background(Color.White.copy(alpha = 0.10f)),
@@ -3115,25 +3505,25 @@ fun AppleCapsuleSlider(
                                         .background(Color.White)
                                 )
                                 Column(
-                                    modifier = Modifier.padding(bottom = 12.dp),
+                                    modifier = Modifier.padding(bottom = if (compactVertical) 6.dp else 12.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Icon(
                                         imageVector = sliderIcon,
                                         contentDescription = safeLabel,
-                                        tint = if (fillFraction > 0.25f) Color.Black else Color.White,
-                                        modifier = Modifier.size(18.dp)
+                                        tint = if (fillFraction > materialVerticalIconCoverage) Color.Black else Color.White,
+                                        modifier = Modifier.size(if (compactVertical) 14.dp else 18.dp)
                                     )
                                     Text(
                                         "%${clampedValue.toInt()}",
-                                        fontSize = 10.sp,
+                                        fontSize = if (compactVertical) 9.sp else 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (fillFraction > 0.35f) Color.Black else Color.White
+                                        color = if (fillFraction > materialVerticalTextCoverage) Color.Black else Color.White
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(safeLabel, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistSecondary, maxLines = 1)
+                            Spacer(modifier = Modifier.height(if (compactVertical) 2.dp else 4.dp))
+                            Text(safeLabel, fontSize = if (compactVertical) 10.sp else 11.5.sp, fontWeight = FontWeight.SemiBold, color = MinimalistSecondary, maxLines = 1)
                         }
                     } else {
                         Column(
@@ -3171,7 +3561,7 @@ fun AppleCapsuleSlider(
                                     Icon(
                                         imageVector = sliderIcon,
                                         contentDescription = safeLabel,
-                                        tint = if (fillFraction > 0.18f) Color.Black else Color.White,
+                                        tint = if (fillFraction > materialHorizontalCoverage) Color.Black else Color.White,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -3197,7 +3587,8 @@ fun AppleCapsuleSlider(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .width(28.dp),
+                                    .width(28.dp)
+                                    .padding(vertical = if (compactVertical) 4.dp else 8.dp),
                                 contentAlignment = Alignment.BottomCenter
                             ) {
                                 Box(
@@ -3297,7 +3688,7 @@ fun AppleCapsuleSlider(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .width(52.dp)
+                                    .width(if (compactVertical) 40.dp else 52.dp)
                                     .weight(1f)
                                     .clip(RoundedCornerShape(26.dp))
                                     .background(MinimalistSurfaceElevated),
@@ -3311,28 +3702,28 @@ fun AppleCapsuleSlider(
                                         .background(Color.White)
                                 )
                                 Column(
-                                    modifier = Modifier.fillMaxHeight().padding(vertical = 12.dp),
+                                    modifier = Modifier.fillMaxHeight().padding(vertical = if (compactVertical) 4.dp else 12.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Icon(
                                         imageVector = sliderIcon,
                                         contentDescription = safeLabel,
-                                        tint = if (fillFraction > 0.82f) Color.Black else Color.White,
-                                        modifier = Modifier.size(18.dp)
+                                        tint = if (fillFraction > appleVerticalIconCoverage) Color.Black else Color.White,
+                                        modifier = Modifier.size(if (compactVertical) 14.dp else 18.dp)
                                     )
                                     Text(
                                         text = "%${clampedValue.toInt()}",
-                                        fontSize = 12.sp,
+                                        fontSize = if (compactVertical) 10.sp else 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (fillFraction > 0.25f) Color.Black else Color.White
+                                        color = if (fillFraction > appleVerticalTextCoverage) Color.Black else Color.White
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(if (compactVertical) 2.dp else 6.dp))
                             Text(
                                 text = safeLabel,
-                                fontSize = 11.5.sp,
+                                fontSize = if (compactVertical) 10.sp else 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MinimalistSecondary,
                                 maxLines = 1,
@@ -4875,6 +5266,15 @@ fun StreamDeckNowPlayingTile(
         if (coverUrl.startsWith("/")) "http://$ipAddress:8085$coverUrl" else coverUrl
     }
     val hasCover = fullCoverUrl.isNotBlank()
+    // `media_pos_sec` only lands once a second, so driving the track straight from the sample makes
+    // both the bar and the elapsed-time readout visibly stutter; a single linear tween keeps them
+    // smooth and keeps the time label in lockstep with the filled width.
+    val measuredFraction = if (durSec > 0) (posSec.toFloat() / durSec.toFloat()).coerceIn(0f, 1f) else 0f
+    val progressFraction by animateFloatAsState(
+        targetValue = measuredFraction,
+        animationSpec = tween(durationMillis = 1000, easing = LinearEasing),
+        label = "npProgress"
+    )
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -4890,9 +5290,65 @@ fun StreamDeckNowPlayingTile(
                 )
             }
     ) {
-        val compact = maxHeight < 96.dp
+        // ---- Constraints-driven metrics ------------------------------------------------------
+        // This tile is dropped into any bento cell, including a 2×1 slot that is only ~76 dp tall
+        // on 20:9 phones in landscape, which used to clip the control row. Every dimension below
+        // is derived from the measured cell, the vertical budget is verified against it, and the
+        // surplus is only handed to `SpaceBetween` once the mandatory rows are known to fit.
+        val cellH = if (maxHeight.value.isFinite()) maxHeight.value else 110f
+        val cellW = if (maxWidth.value.isFinite()) maxWidth.value else 160f
+        // Rendered sp = `value / fontScale`, i.e. exactly `value` dp on screen whatever the system
+        // font scale is. A grid cell cannot grow, so honouring a 2× font scale here would overflow
+        // the tile (illegible clipped text) instead of merely rendering small text.
+        val fontScale = LocalDensity.current.fontScale.takeIf { it > 0f } ?: 1f
+        fun fitSp(value: Float): TextUnit = (value / fontScale).sp
+
+        val lineFactor = 1.3f
+        val padH = (cellW * 0.075f).coerceIn(6f, 12f)
+        val padV = (cellH * 0.065f).coerceIn(3.5f, 9f)
+        val thumb = (cellH * 0.20f).coerceIn(12f, 22f)
+        val badgeFont = (cellH * 0.085f).coerceIn(6.5f, 9.5f)
+        val titleFont = (cellH * 0.125f).coerceIn(9.5f, 13f)
+        val artistFont = (cellH * 0.095f).coerceIn(7.5f, 10.5f)
+        val timeFont = (cellH * 0.08f).coerceIn(6.5f, 8.5f)
+        val liveFont = (cellH * 0.082f).coerceIn(6.5f, 9f)
+        val barHeight = (cellH * 0.028f).coerceIn(2f, 3.5f)
+        val bigDiameter = (cellH * 0.25f).coerceIn(18f, 28f)
+        val smallDiameter = (cellH * 0.21f).coerceIn(16f, 24f)
+        val buttonGap = (cellH * 0.065f).coerceIn(4f, 8f)
+        val rowGap = (cellH * 0.035f).coerceIn(2f, 5f)
+        val iconGap = (cellH * 0.06f).coerceIn(4f, 7f)
+
+        val topRowH = maxOf(thumb, badgeFont * lineFactor)
+        val titleRowH = titleFont * lineFactor
+        val artistRowH = artistFont * lineFactor
+        val statusRowH = when {
+            isLive -> liveFont * lineFactor + 4f
+            durSec > 0 -> barHeight + 3f + timeFont * lineFactor
+            else -> 0f
+        }
+        // Mandatory rows: cover thumb + label, track title, playback status, transport row.
+        val baseH = padV * 2f + topRowH + titleRowH + statusRowH + bigDiameter + rowGap * 3f
+        val richH = baseH + artistRowH + rowGap
+        // The artist line is the only genuinely optional row (desktop drops it in `is-compact`).
+        val showArtist = richH <= cellH
+        // Last-resort uniform squeeze: even a degenerate cell can never overflow the column.
+        val scale = (cellH / if (showArtist) richH else baseH).coerceAtMost(1f)
+        // Horizontal budget: the packer can demote the card to a 1-column slot, so the transport row
+        // gets its own squeeze instead of spilling past the right edge of a narrow cell.
+        val innerW = cellW - padH * scale * 2f
+        val buttonRowW = smallDiameter * 2f + bigDiameter + buttonGap * 2f
+        val buttonScale = if (buttonRowW > 0f) minOf(scale, innerW / buttonRowW) else scale
+        // Two `0:00` monospace labels share the bottom line; shrink them rather than let the pair
+        // collide in a 1-column slot.
+        val timeNeeded = timeFont * 7.4f
+        val timeScale = if (timeNeeded > innerW) innerW / timeNeeded else 1f
+
         val titleColor = if (hasCover) Color.White else MinimalistPrimary
         val artistColor = if (hasCover) Color.White.copy(alpha = 0.85f) else MinimalistSecondary
+        val textShadow = if (hasCover) {
+            TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.9f), blurRadius = 8f))
+        } else TextStyle.Default
 
         if (hasCover) {
             AsyncImage(
@@ -4901,7 +5357,20 @@ fun StreamDeckNowPlayingTile(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(5.dp)
+                    // Slight overscan hides the translucent fringe `blur` leaves at layer edges,
+                    // and `Unbounded` keeps the corners covered instead of fading them to zero.
+                    .graphicsLayer {
+                        scaleX = 1.08f
+                        scaleY = 1.08f
+                    }
+                    .blur(radius = (6f * scale).dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+            )
+            // Flat scrim (1:1 with the desktop `.deck-media__cover-overlay`) plus a bottom-weighted
+            // gradient so the white body text keeps >= 4.5:1 contrast over any artwork.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.42f))
             )
             Box(
                 modifier = Modifier
@@ -4909,8 +5378,8 @@ fun StreamDeckNowPlayingTile(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color.Black.copy(alpha = 0.28f),
-                                Color.Black.copy(alpha = 0.72f)
+                                Color.Black.copy(alpha = 0.10f),
+                                Color.Black.copy(alpha = 0.55f)
                             )
                         )
                     )
@@ -4920,28 +5389,30 @@ fun StreamDeckNowPlayingTile(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .padding(horizontal = (padH * scale).dp, vertical = (padV * scale).dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Top Row: Miniature thumbnail + "ŞİMDİ ÇALIYOR" badge
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                horizontalArrangement = Arrangement.spacedBy((iconGap * scale).dp)
             ) {
+                val thumbDp = (thumb * scale).dp
                 if (hasCover) {
                     AsyncImage(
                         model = fullCoverUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(22.dp)
+                            .size(thumbDp)
                             .clip(RoundedCornerShape(6.dp))
                             .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(22.dp)
+                            .size(thumbDp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
@@ -4950,86 +5421,98 @@ fun StreamDeckNowPlayingTile(
                             imageVector = Icons.Default.MusicNote,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(thumbDp * 0.55f)
                         )
                     }
                 }
                 Text(
                     text = "ŞİMDİ ÇALIYOR",
-                    fontSize = 9.5.sp,
+                    fontSize = fitSp(badgeFont * scale),
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.08.sp,
-                    color = Color.White.copy(alpha = 0.70f),
+                    color = Color.White.copy(alpha = 0.72f),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    style = textShadow,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
             }
 
-            // Bottom Section: Title, Subtitle, and clustered Controls
+            // Bottom Section: Title, subtitle, playback status and clustered controls.
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy((rowGap * scale).dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = title.ifBlank { "Medya yok" },
-                        fontSize = 13.sp,
+                        fontSize = fitSp(titleFont * scale),
                         fontWeight = FontWeight.Bold,
                         color = titleColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 8f)) else TextStyle.Default
+                        style = textShadow
                     )
-                    if (!compact) {
+                    if (showArtist) {
                         Text(
                             text = artist.ifBlank { if (isPlaying) "PC'de çalıyor" else "Duraklatıldı" },
-                            fontSize = 10.5.sp,
+                            fontSize = fitSp(artistFont * scale),
                             fontWeight = FontWeight.Medium,
                             color = artistColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            style = if (hasCover) TextStyle(shadow = Shadow(color = Color.Black.copy(alpha = 0.75f), blurRadius = 6f)) else TextStyle.Default
+                            style = textShadow
                         )
                     }
                 }
-                val progressFraction = if (durSec > 0) (posSec.toFloat() / durSec.toFloat()).coerceIn(0f, 1f) else 0f
                 val formatMediaTime: (Int) -> String = { s ->
-                    val m = s / 60
-                    val sec = s % 60
-                    String.format(java.util.Locale.US, "%d:%02d", m, sec)
+                    val sec = s.coerceAtLeast(0)
+                    String.format(java.util.Locale.US, "%d:%02d", sec / 60, sec % 60)
                 }
                 if (isLive) {
+                    // 🔴 CANLI YAYIN badge with the pulsing dot from the desktop `livePulse` keyframes.
+                    val pulse = rememberInfiniteTransition(label = "npLivePulse")
+                    val dotAlpha by pulse.animateFloat(
+                        initialValue = 0.45f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(durationMillis = 1100), RepeatMode.Reverse),
+                        label = "npLiveDot"
+                    )
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(99.dp))
                             .background(Color(0x28EF4444))
                             .border(1.dp, Color(0x66EF4444), RoundedCornerShape(99.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                            .padding(horizontal = (7f * scale).dp, vertical = (1.5f * scale).dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy((4f * scale).dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(5.dp)
+                                .size((5f * scale).coerceAtLeast(3.5f).dp)
+                                .graphicsLayer { alpha = dotAlpha }
                                 .clip(CircleShape)
                                 .background(Color(0xFFEF4444))
                         )
                         Text(
                             text = "CANLI YAYIN",
-                            fontSize = 8.5.sp,
+                            fontSize = fitSp(liveFont * scale),
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.06.sp,
-                            color = Color(0xFFEF4444)
+                            color = Color(0xFFEF4444),
+                            maxLines = 1
                         )
                     }
                 } else if (durSec > 0) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = (1f * scale).dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(3.dp)
+                                .height((barHeight * scale).coerceAtLeast(2f).dp)
                                 .clip(RoundedCornerShape(1.5.dp))
                                 .background(Color.White.copy(alpha = 0.16f))
                         ) {
@@ -5037,49 +5520,67 @@ fun StreamDeckNowPlayingTile(
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .fillMaxWidth(progressFraction)
+                                    // Soft white bloom, matching the desktop track's box-shadow.
+                                    .shadow(1.dp, CircleShape, ambientColor = Color.White, spotColor = Color.White)
                                     .clip(RoundedCornerShape(1.5.dp))
                                     .background(Color.White)
                             )
                         }
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 1.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = (1f * scale).dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            // Elapsed time rides the animated fraction so it counts up in step with
+                            // the bar instead of snapping once per received sample.
                             Text(
-                                text = formatMediaTime(posSec),
-                                fontSize = 8.5.sp,
+                                text = formatMediaTime((progressFraction * durSec).toInt()),
+                                fontSize = fitSp(timeFont * scale * timeScale),
                                 fontFamily = FontFamily.Monospace,
-                                color = Color.White.copy(alpha = 0.65f)
+                                color = Color.White.copy(alpha = 0.70f),
+                                maxLines = 1,
+                                style = textShadow
                             )
                             Text(
                                 text = formatMediaTime(durSec),
-                                fontSize = 8.5.sp,
+                                fontSize = fitSp(timeFont * scale * timeScale),
                                 fontFamily = FontFamily.Monospace,
-                                color = Color.White.copy(alpha = 0.65f)
+                                color = Color.White.copy(alpha = 0.70f),
+                                maxLines = 1,
+                                style = textShadow
                             )
                         }
                     }
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy((buttonGap * buttonScale).dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val smallDp = (smallDiameter * buttonScale).dp
+                    val bigDp = (bigDiameter * buttonScale).dp
                     DeckTransportButton(
                         icon = Icons.Default.SkipPrevious,
                         contentDescription = "Önceki Parça",
-                        palette = p
+                        palette = p,
+                        diameter = smallDp,
+                        iconSize = smallDp * 0.5f
                     ) { onAction("prevtrack") }
                     DeckTransportButton(
                         icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = "Oynat / Durdur",
                         palette = p,
-                        emphasised = true
+                        emphasised = true,
+                        diameter = bigDp,
+                        iconSize = bigDp * 0.52f
                     ) { onAction("playpause") }
                     DeckTransportButton(
                         icon = Icons.Default.SkipNext,
                         contentDescription = "Sonraki Parça",
-                        palette = p
+                        palette = p,
+                        diameter = smallDp,
+                        iconSize = smallDp * 0.5f
                     ) { onAction("nexttrack") }
                 }
             }
@@ -5094,12 +5595,14 @@ private fun DeckTransportButton(
     contentDescription: String,
     palette: DeckPalette,
     emphasised: Boolean = false,
+    diameter: Dp = if (emphasised) 28.dp else 24.dp,
+    iconSize: Dp = if (emphasised) 15.dp else 12.dp,
     onClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
     Box(
         modifier = Modifier
-            .size(if (emphasised) 28.dp else 24.dp)
+            .size(diameter)
             .clip(CircleShape)
             .background(if (emphasised) Color.White else Color.White.copy(alpha = 0.12f))
             .then(
@@ -5115,7 +5618,7 @@ private fun DeckTransportButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = if (emphasised) Color.Black else Color.White,
-            modifier = Modifier.size(if (emphasised) 15.dp else 12.dp)
+            modifier = Modifier.size(iconSize)
         )
     }
 }
@@ -7763,6 +8266,106 @@ fun MediaTab(
     }
 }
 
+/** Stable per-bubble key: the message id, or a content-derived fallback for a malformed row. */
+private fun flowItemKey(msg: FlowMessageItem): String =
+    msg.id.ifBlank { "${msg.timestamp}:${msg.sender}:${msg.type}:${msg.fileName}" }
+
+/**
+ * Download / progress / cancel / "Aç" control of one Flow attachment.
+ *
+ * All three states are keyed by [FlowMessageItem.id] in the caller's snapshot maps, so a bubble
+ * only reacts to its own transfer: starting one download no longer spins every bubble that shares
+ * a file name, and completing one only turns that bubble's button into "Aç".
+ */
+@Composable
+private fun FlowAttachmentActions(
+    context: Context,
+    ipAddress: String,
+    password: String,
+    msg: FlowMessageItem,
+    downloadingMap: MutableMap<String, Boolean>,
+    progressMap: MutableMap<String, Pair<Long, Long>>,
+    downloadedMap: MutableMap<String, Boolean>,
+    iconSize: Dp,
+    controlSize: Dp
+) {
+    val itemKey = remember(msg.id, msg.timestamp, msg.fileName) { flowItemKey(msg) }
+    val localName = remember(msg.id, msg.fileName, msg.fileUrl) {
+        safeDownloadName(msg.fileName.ifBlank { msg.fileUrl.substringAfterLast('/').substringBefore('?') })
+    }
+    val isDownloading = downloadingMap[itemKey] == true
+    // `downloadedMap[itemKey]` is part of the key so a finished transfer re-checks the disk.
+    val localFile = remember(itemKey, localName, downloadedMap[itemKey]) {
+        findDownloadedFile(context, localName)
+    }
+
+    when {
+        isDownloading -> {
+            val progress = progressMap[itemKey]
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(controlSize).padding(4.dp),
+                    color = Color(0xFF4ADE80),
+                    strokeWidth = 2.dp
+                )
+                if (progress != null) {
+                    val (done, total) = progress
+                    Text(
+                        text = if (total > 0) "${done * 100 / total}%" else formatFileSize(done),
+                        fontSize = 10.sp,
+                        color = MinimalistSecondary
+                    )
+                }
+                IconButton(onClick = { cancelDownload(itemKey) }, modifier = Modifier.size(controlSize)) {
+                    Icon(Icons.Default.Close, contentDescription = "İndirmeyi iptal et", tint = StatusRedText, modifier = Modifier.size(iconSize))
+                }
+            }
+        }
+
+        localFile != null -> {
+            val file = localFile
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0x2422C55E),
+                modifier = Modifier.clickable { openDownloadedFile(context, file) }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
+                    Text("Aç", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                }
+            }
+        }
+
+        else -> IconButton(
+            onClick = {
+                downloadFileDirectly(
+                    context = context,
+                    ip = ipAddress,
+                    password = password,
+                    filename = localName,
+                    downloadKey = itemKey,
+                    onStart = {
+                        downloadingMap[itemKey] = true
+                        downloadedMap[itemKey] = false
+                    },
+                    onProgress = { done, total -> progressMap[itemKey] = done to total },
+                    onComplete = { saved ->
+                        downloadingMap[itemKey] = false
+                        if (saved != null) downloadedMap[itemKey] = true
+                    }
+                )
+            },
+            modifier = Modifier.size(controlSize)
+        ) {
+            Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(iconSize))
+        }
+    }
+}
+
 @Composable
 fun ToolsTab(
     isConnected: Boolean,
@@ -7948,9 +8551,11 @@ fun ToolsTab(
         }
 
         if (activeFlowTab == "flow") {
+            // Per-message download state, keyed by FlowMessageItem.id: two drops that happen to
+            // share a file name must not fight over one spinner / "Aç" button.
             val downloadingMap = remember { mutableStateMapOf<String, Boolean>() }
+            val progressMap = remember { mutableStateMapOf<String, Pair<Long, Long>>() }
             val downloadedMap = remember { mutableStateMapOf<String, Boolean>() }
-            val downloadsDir: File = remember { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -8057,54 +8662,17 @@ fun ToolsTab(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(msg.fileName, fontSize = 11.sp, color = MinimalistPrimary, maxLines = 1, modifier = Modifier.weight(1f))
-                                                val isDownloading = downloadingMap[msg.fileName] == true
-                                                val localFile = remember(msg.fileName, downloadedMap[msg.fileName]) {
-                                                    val f = File(downloadsDir, msg.fileName)
-                                                    if (f.exists() && f.length() > 0) f else null
-                                                }
-                                                if (isDownloading) {
-                                                    CircularProgressIndicator(
-                                                        modifier = Modifier.size(20.dp).padding(2.dp),
-                                                        color = Color(0xFF4ADE80),
-                                                        strokeWidth = 2.dp
-                                                    )
-                                                } else if (localFile != null) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        color = Color(0x2422C55E),
-                                                        modifier = Modifier.clickable {
-                                                            openDownloadedFile(context, localFile)
-                                                        }
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                        ) {
-                                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
-                                                            Text("Aç", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
-                                                        }
-                                                    }
-                                                } else {
-                                                    IconButton(
-                                                        onClick = {
-                                                            downloadFileDirectly(
-                                                                context = context,
-                                                                ip = ipAddress,
-                                                                password = password,
-                                                                filename = msg.fileName,
-                                                                onStart = { downloadingMap[msg.fileName] = true },
-                                                                onComplete = { saved ->
-                                                                    downloadingMap[msg.fileName] = false
-                                                                    if (saved != null) downloadedMap[msg.fileName] = true
-                                                                }
-                                                            )
-                                                        },
-                                                        modifier = Modifier.size(28.dp)
-                                                    ) {
-                                                        Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(16.dp))
-                                                    }
-                                                }
+                                                FlowAttachmentActions(
+                                                    context = context,
+                                                    ipAddress = ipAddress,
+                                                    password = password,
+                                                    msg = msg,
+                                                    downloadingMap = downloadingMap,
+                                                    progressMap = progressMap,
+                                                    downloadedMap = downloadedMap,
+                                                    iconSize = 16.dp,
+                                                    controlSize = 28.dp
+                                                )
                                             }
                                         } else if (msg.type == "file" && msg.fileUrl.isNotEmpty()) {
                                             Row(
@@ -8118,54 +8686,17 @@ fun ToolsTab(
                                                         Text(formatFileSize(msg.fileSize), fontSize = 10.5.sp, color = MinimalistSecondary)
                                                     }
                                                 }
-                                                val isDownloading = downloadingMap[msg.fileName] == true
-                                                val localFile = remember(msg.fileName, downloadedMap[msg.fileName]) {
-                                                    val f = File(downloadsDir, msg.fileName)
-                                                    if (f.exists() && f.length() > 0) f else null
-                                                }
-                                                if (isDownloading) {
-                                                    CircularProgressIndicator(
-                                                        modifier = Modifier.size(22.dp).padding(2.dp),
-                                                        color = Color(0xFF4ADE80),
-                                                        strokeWidth = 2.dp
-                                                    )
-                                                } else if (localFile != null) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        color = Color(0x2422C55E),
-                                                        modifier = Modifier.clickable {
-                                                            openDownloadedFile(context, localFile)
-                                                        }
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                        ) {
-                                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(13.dp))
-                                                            Text("Aç", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
-                                                        }
-                                                    }
-                                                } else {
-                                                    IconButton(
-                                                        onClick = {
-                                                            downloadFileDirectly(
-                                                                context = context,
-                                                                ip = ipAddress,
-                                                                password = password,
-                                                                filename = msg.fileName,
-                                                                onStart = { downloadingMap[msg.fileName] = true },
-                                                                onComplete = { saved ->
-                                                                    downloadingMap[msg.fileName] = false
-                                                                    if (saved != null) downloadedMap[msg.fileName] = true
-                                                                }
-                                                            )
-                                                        },
-                                                        modifier = Modifier.size(30.dp)
-                                                    ) {
-                                                        Icon(Icons.Default.Download, contentDescription = "İndir", tint = MinimalistPrimary, modifier = Modifier.size(18.dp))
-                                                    }
-                                                }
+                                                FlowAttachmentActions(
+                                                    context = context,
+                                                    ipAddress = ipAddress,
+                                                    password = password,
+                                                    msg = msg,
+                                                    downloadingMap = downloadingMap,
+                                                    progressMap = progressMap,
+                                                    downloadedMap = downloadedMap,
+                                                    iconSize = 18.dp,
+                                                    controlSize = 30.dp
+                                                )
                                             }
                                         } else {
                                             Text(
@@ -8180,9 +8711,12 @@ fun ToolsTab(
                                                  color = Color.White.copy(alpha = 0.06f),
                                                  modifier = Modifier
                                                      .clickable {
-                                                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                                         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("BigPocket", msg.text))
-                                                         Toast.makeText(context, "Kopyalandı", Toast.LENGTH_SHORT).show()
+                                                         val copied = copyToSystemClipboard(context, msg.text)
+                                                         Toast.makeText(
+                                                             context,
+                                                             if (copied) "Kopyalandı" else "Kopyalanacak metin yok",
+                                                             Toast.LENGTH_SHORT
+                                                         ).show()
                                                      }
                                              ) {
                                                  Row(
@@ -8350,14 +8884,12 @@ fun ToolsTab(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(
                                     onClick = {
-                                        try {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                            val clip = android.content.ClipData.newPlainText("BigPocket Sync", clipboardText)
-                                            clipboard.setPrimaryClip(clip)
-                                            Toast.makeText(context, "Telefona kopyalandı!", Toast.LENGTH_SHORT).show()
-                                        } catch (e: Exception) {
-                                            // ignore
-                                        }
+                                        val copied = copyToSystemClipboard(context, clipboardText)
+                                        Toast.makeText(
+                                            context,
+                                            if (copied) "Telefona kopyalandı!" else "Pano boş, kopyalanacak metin yok.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     },
                                     shape = RoundedCornerShape(12.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
@@ -8388,10 +8920,15 @@ fun ToolsTab(
                     ) {
                         Button(
                             onClick = {
-                                if (localTextToSend.isNotEmpty()) {
+                                val text = localTextToSend.trim()
+                                if (text.isEmpty()) {
+                                    Toast.makeText(context, "Gönderilecek metin yok.", Toast.LENGTH_SHORT).show()
+                                } else if (!isConnected) {
+                                    Toast.makeText(context, "Bilgisayar bağlı değil.", Toast.LENGTH_SHORT).show()
+                                } else {
                                     SocketManager.sendControl(JSONObject().apply {
                                         put("type", "clipboard_sync")
-                                        put("text", localTextToSend)
+                                        put("text", text)
                                     })
                                     Toast.makeText(context, "Metin bilgisayara gönderildi!", Toast.LENGTH_SHORT).show()
                                     localTextToSend = ""
@@ -8406,6 +8943,7 @@ fun ToolsTab(
 
                         Button(
                             onClick = onSendClipboard,
+                            enabled = isConnected,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MinimalistSurfaceElevated,
@@ -8537,25 +9075,47 @@ fun ToolsTab(
                                     }
                                 
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        val downloadsDir = remember { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }
+                                        val poolKey = "pool:${file.name}"
                                         var isDownloadingThis by remember(file.name) { mutableStateOf(false) }
+                                        var progressThis by remember(file.name) { mutableStateOf<Pair<Long, Long>?>(null) }
                                         var isDownloadedThis by remember(file.name) {
-                                            mutableStateOf(File(downloadsDir, file.name).exists())
+                                            mutableStateOf(findDownloadedFile(context, file.name) != null)
                                         }
 
                                         if (isDownloadingThis) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(24.dp).padding(4.dp),
-                                                color = Color(0xFF4ADE80),
-                                                strokeWidth = 2.dp
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(24.dp).padding(4.dp),
+                                                    color = Color(0xFF4ADE80),
+                                                    strokeWidth = 2.dp
+                                                )
+                                                progressThis?.let { (done, total) ->
+                                                    Text(
+                                                        text = if (total > 0) "${done * 100 / total}%" else formatFileSize(done),
+                                                        fontSize = 10.sp,
+                                                        color = MinimalistSecondary
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = { cancelDownload(poolKey) },
+                                                    modifier = Modifier.size(30.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "İndirmeyi iptal et", tint = StatusRedText, modifier = Modifier.size(16.dp))
+                                                }
+                                            }
                                         } else if (isDownloadedThis) {
                                             Surface(
                                                 shape = RoundedCornerShape(8.dp),
                                                 color = Color(0x2422C55E),
                                                 modifier = Modifier.clickable {
-                                                    val f = File(downloadsDir, file.name)
-                                                    if (f.exists()) openDownloadedFile(context, f)
+                                                    val f = findDownloadedFile(context, file.name)
+                                                    if (f != null) {
+                                                        openDownloadedFile(context, f)
+                                                    } else {
+                                                        // Evicted since the last refresh; offer a re-download.
+                                                        isDownloadedThis = false
+                                                        Toast.makeText(context, "Dosya artık cihazda yok.", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
                                             ) {
                                                 Row(
@@ -8575,9 +9135,15 @@ fun ToolsTab(
                                                         ip = ipAddress,
                                                         password = password,
                                                         filename = file.name,
-                                                        onStart = { isDownloadingThis = true },
+                                                        downloadKey = poolKey,
+                                                        onStart = {
+                                                            isDownloadingThis = true
+                                                            progressThis = null
+                                                        },
+                                                        onProgress = { done, total -> progressThis = done to total },
                                                         onComplete = { saved ->
                                                             isDownloadingThis = false
+                                                            progressThis = null
                                                             if (saved != null) isDownloadedThis = true
                                                         }
                                                     )
@@ -9011,5 +9577,18 @@ private fun uploadIconToServer(context: Context, fileUri: Uri, ip: String, passw
         Log.e("UploadIcon", "Icon upload failed", e)
         return false
     }
+}
+
+/**
+ * Walks up the [ContextWrapper] chain to the hosting [Activity]. Compose can hand a themed
+ * wrapper instead of the activity itself, which used to make the window-flag lookup silently fail.
+ */
+private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
 

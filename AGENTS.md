@@ -21,6 +21,8 @@ Windows Defender ve diğer EDR/AV motorları Go ile yazılmış uygulamaları ko
 1. **Powershell / CMD Çağrılarını Kısıtla:**
    - Arka planda `powershell.exe -Command ...` veya `cmd.exe /c ...` çalıştırmak Defender'ın en büyük şüphesidir.
    - Pano (Clipboard), bildirimler ve sistem işlemleri için mümkün oldukça yerel Windows Win32 API'leri (`user32.dll`, `shell32.dll`, `ole32.dll`) çağrılmalıdır.
+   - **İstek/olay yolunda (telemetri tik'i, slider, poll döngüsü) asla alt süreç başlatılmaz.** Ekran parlaklığı `\\.\LCD` + `DeviceIoControl` (`IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS`) ile ayarlanır; eski `powershell -Command "(Get-WmiObject ...)"` yolu bu yüzden kaldırıldı. Uygulama/URL açma `ShellExecuteW` ile yapılır; `cmd /C` yalnızca gerçekten kabuk sözdizimi gereken komutlar (boru, yönlendirme, `%VAR%`) için son çaredir.
+   - **Bellek sınırı:** süreç ömrü boyunca yaşayan tüm önbellekler (kapak/thumbnail, yetkili IP, başarısız giriş kayıtları) üst sınır + TTL ile budanmalıdır; sınırsız `static Mutex<HashMap<..>>` yasaktır. Örn. kapak araması `MEDIA_COVER_CACHE_MAX = 256` (eskiler atılır) ve başarısız aramalar `MEDIA_COVER_MISS_TTL = 10 dk` hatırlanır — aksi halde aynı şarkı için her telemetri tikinde yeniden `curl` doğar.
 2. **Derleme Bayrakları (Build Flags):**
    - Go ikili dosyalarını derlerken debug/sembol tablolarını gizlemeyen ve temiz PE çıktısı üreten parametreler kullanılmalıdır:
      ```powershell
@@ -52,3 +54,10 @@ Windows Defender ve diğer EDR/AV motorları Go ile yazılmış uygulamaları ko
   - `MainScreen.kt` ve `main.go` monolitik durumdadır. Yeni özellik eklerken bu dosyaları daha da büyütmek yerine modüler paketlere (`services/`, `update/`, `plugins/`, `discovery/`) ayırın.
 * **Otomatik Keşif (Discovery):**
   - Telefon ve PC aynı Wi-Fi ağındayken IP girmeye gerek kalmadan UDP 47800 üzerinden haberleşir. Bu mekanizmanın port ve paket formatı bozulmamalıdır.
+
+---
+
+## 5. Güvenlik / Kimlik Doğrulama
+* **LAN istemcisi asla kilitlenmez (`is_lan_peer`):**
+  - Aynı yerel ağdaki istemciler (loopback, RFC 1918 `192.168.x.x` / `10.x.x.x` / `172.16-31.x.x`, link-local, taşıyıcı NAT `100.64/10`, IPv4-mapped ve IPv6 ULA/link-local) için kaba kuvvet (brute-force) bloğu **hiçbir zaman** uygulanmaz. Doğru şifre yazan telefon, kaç hatalı denemeden sonra olursa olsun panele girebilmelidir.
+  - Throttle yalnızca yerel ağ dışındaki (port yönlendirme ile erişen) istemcilere uygulanır; giriş kayıtları (`AuthState::failures`) ve yetkili IP kaydı (`AuthState::authorized`) üst sınır + TTL ile budanır (`AUTH_MAX_TRACKED_IPS`, `AUTH_MAX_AUTHORIZED_IPS`).

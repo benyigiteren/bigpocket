@@ -43,8 +43,14 @@ fun UpdateDialog(info: UpdateManager.UpdateInfo, onDismiss: () -> Unit) {
         if (UpdateManager.needsInstallPermission(context)) {
             error = "Kurulum için \"Bilinmeyen uygulamaları yükle\" iznini verin, sonra tekrar Kur'a basın."
             UpdateManager.openInstallPermissionSettings(context)
-        } else {
+            return
+        }
+        try {
             UpdateManager.install(context, file)
+        } catch (e: Exception) {
+            // Reported instead of crashing: install() throws a user-facing message
+            // when the APK is gone or the device cannot start an installer.
+            error = e.message ?: "Kurulum başlatılamadı."
         }
     }
 

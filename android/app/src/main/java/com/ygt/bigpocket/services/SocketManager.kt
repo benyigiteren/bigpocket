@@ -22,10 +22,18 @@ import kotlin.concurrent.thread
 object SocketManager {
     private const val TAG = "SocketManager"
 
+    /**
+     * Safety net for a socket that opens but never finishes the auth handshake (half-open TCP
+     * connection after a Wi-Fi drop, server version mismatch, ...). The desktop answers an
+     * unauthenticated socket after 5s, so this only fires when the link is truly wedged.
+     */
+    private const val CONNECT_TIMEOUT_MS = 12_000L
+
     // The keep-alive ping surfaces dead ("zombie") sockets within 15 seconds, which is what
     // triggers the automatic reconnection below.
     private val client = OkHttpClient.Builder()
         .pingInterval(15, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
         .build()
     private var webSocket: WebSocket? = null
 
@@ -43,20 +51,50 @@ object SocketManager {
     var flowMessageListener: ((JSONObject) -> Unit)? = null
     var flowDeletedListener: ((String) -> Unit)? = null
     var flowClearedListener: (() -> Unit)? = null
+    // Read from the OkHttp callback threads, the UI and the streaming threads.
+    @Volatile
     var isConnected = false
         private set
+
+    @Volatile
     var isConnecting = false
         private set
 
-    // Automatic reconnection with exponential backoff: 2s, 4s, 8s, then capped at 15s.
-    private val reconnectDelaysMs = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L)
-    private val reconnectHandler = Handler(Looper.getMainLooper())
+    /**
+     * Set when the PC rejected the password (or temporarily blocked this phone after too many
+     * attempts). While true neither the backoff loop nor UDP auto-discovery may retry, otherwise
+     * the phone would keep hammering a rejected password and stay banned by the server's
+     * brute-force guard. Cleared by the next explicit [connect].
+     */
+    @Volatile
+    var isAuthRejected = false
+        private set
+
+    /**
+     * Set when the user explicitly dropped the link (in-app button or the notification action) and
+     * cleared by the next [connect]. Discovered PCs must not resurrect a link the user just closed.
+     */
+    @Volatile
+    var isUserDisconnected = false
+        private set
+
+    // Automatic reconnection with exponential backoff: 1s, 2s, 4s, then capped at 5s.
+    private val reconnectDelaysMs = longArrayOf(1_000L, 2_000L, 4_000L, 5_000L)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
+    private var connectTimeoutRunnable: Runnable? = null
+    @Volatile
     private var reconnectAttempt = 0
+    @Volatile
     private var autoReconnect = false
 
     // Bumped for every new socket and every manual disconnect so stale callbacks are ignored.
+    @Volatile
     private var generation = 0
+
+    // Socket generation that already queued a retry, so a socket reporting both onClosed and
+    // onFailure can not queue two reconnect attempts at once.
+    private var scheduledForGeneration = -1
 
     private var audioSocket: Socket? = null
     private var audioOutputStream: OutputStream? = null
@@ -69,37 +107,44 @@ object SocketManager {
     var isCameraStreaming = false
         private set
 
+    // Written on the main thread, read by the streaming/HTTP worker threads.
+    @Volatile
     var currentIp = ""
+
+    @Volatile
     var currentPassword = ""
 
     fun connect(ip: String, password: String) {
         currentIp = ip
         currentPassword = password
+        isAuthRejected = false
+        isUserDisconnected = false
 
         // Tear down the previous session (streams + socket) before opening the new link.
-        generation++
-        cancelReconnect()
         reconnectAttempt = 0
+        autoReconnect = true
         stopAudioStream()
         stopCameraStream()
-        try {
-            webSocket?.close(1000, "Reconnecting")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing WS", e)
-        }
-        webSocket = null
-        isConnected = false
-        isConnecting = false
-        connectionStateListener?.invoke(false)
+        closeActiveSocket()
+        setDisconnected()
 
-        autoReconnect = true
         openSocket()
     }
+
+    /**
+     * True while the backoff loop is already retrying [ip]. UDP auto-discovery uses this so a
+     * broadcast packet can not restart a running backoff, which would pin the retry delay at its
+     * first (1s) step and turn the loop into a reconnect storm.
+     */
+    fun isRetryingFor(ip: String): Boolean = autoReconnect && ip == currentIp
 
     /** Opens the WebSocket for [currentIp]; safe to call from the reconnect handler. */
     private fun openSocket() {
         if (currentIp.isEmpty()) return
-        generation++
+        // A dead socket must be fully closed before its replacement is opened, otherwise two live
+        // sockets overlap and both write to the shared listener state.
+        closeActiveSocket()
+
         val gen = generation
         isConnecting = true
 
@@ -126,24 +171,35 @@ object SocketManager {
                     } else if (type == "auth_success") {
                         isConnected = true
                         isConnecting = false
+                        isAuthRejected = false
                         reconnectAttempt = 0
+                        cancelConnectTimeout()
                         Log.d(TAG, "WebSocket authenticated successfully")
                         sendControl(JSONObject().apply {
                             put("type", "client_connected")
                         })
-                        connectionStateListener?.invoke(true)
+                        notifyConnectionState()
                     } else if (type == "auth_failed") {
                         Log.e(TAG, "Authentication failed: ${json.optString("message")}")
                         isConnected = false
                         isConnecting = false
+                        isAuthRejected = true
                         // A rejected password is never retried automatically.
                         autoReconnect = false
                         cancelReconnect()
-                        connectionStateListener?.invoke(false)
-                        webSocket.close(1000, "Auth failed")
+                        cancelConnectTimeout()
+                        notifyConnectionState()
+                        try {
+                            webSocket.close(1000, "Auth failed")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing rejected socket", e)
+                        }
                     } else if (type == "clipboard_sync") {
-                        val clipText = json.getString("text")
-                        clipboardListener?.invoke(clipText)
+                        // optString: the PC may send a null/absent text, which getString throws on.
+                        val clipText = json.optString("text", "")
+                        if (clipText.isNotEmpty()) {
+                            clipboardListener?.invoke(clipText)
+                        }
                     } else if (type == "flow_new") {
                         val msgObj = json.optJSONObject("message")
                         if (msgObj != null) {
@@ -213,63 +269,129 @@ object SocketManager {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (gen != generation) return
                 Log.d(TAG, "WebSocket closed: $code $reason")
-                isConnected = false
-                isConnecting = false
-                connectionStateListener?.invoke(false)
+                cancelConnectTimeout()
+                setDisconnected()
                 scheduleReconnect()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (gen != generation) return
                 Log.e(TAG, "WebSocket failure: ${t.message}")
-                isConnected = false
-                isConnecting = false
-                connectionStateListener?.invoke(false)
+                cancelConnectTimeout()
+                setDisconnected()
                 scheduleReconnect()
             }
         })
+
+        scheduleConnectTimeout(gen)
     }
 
     /**
-     * Retries the last connection with exponential backoff (2s, 4s, 8s, max 15s). Never runs
-     * after a deliberate [disconnect], only after an unexpected drop.
+     * Retries the last connection with exponential backoff (1s, 2s, 4s, max 5s). Never runs after
+     * a deliberate [disconnect] or a rejected password, only after an unexpected drop.
      */
     private fun scheduleReconnect() {
         if (!autoReconnect || currentIp.isEmpty()) return
+        // onClosed and onFailure can both report the same dead socket; queue a single retry.
+        if (scheduledForGeneration == generation) return
+        scheduledForGeneration = generation
         val delayMs = reconnectDelaysMs[reconnectAttempt.coerceIn(0, reconnectDelaysMs.size - 1)]
         reconnectAttempt++
         cancelReconnect()
         Log.d(TAG, "Auto-reconnecting to $currentIp in ${delayMs}ms (attempt $reconnectAttempt)")
         val runnable = Runnable {
             reconnectRunnable = null
-            if (autoReconnect && !isConnected && !isConnecting) openSocket()
+            scheduledForGeneration = -1
+            // openSocket() closes any leftover socket before it opens the replacement.
+            if (autoReconnect && !isConnected) openSocket()
         }
         reconnectRunnable = runnable
-        reconnectHandler.postDelayed(runnable, delayMs)
+        mainHandler.postDelayed(runnable, delayMs)
     }
 
     private fun cancelReconnect() {
-        reconnectRunnable?.let { reconnectHandler.removeCallbacks(it) }
+        reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
         reconnectRunnable = null
+    }
+
+    /**
+     * Fails a socket that opened but never authenticated so the retry loop keeps making progress
+     * instead of sitting in "connecting" forever (the classic post-Wi-Fi-drop stuck state).
+     */
+    private fun scheduleConnectTimeout(gen: Int) {
+        cancelConnectTimeout()
+        val runnable = Runnable {
+            connectTimeoutRunnable = null
+            if (gen != generation || isConnected) return@Runnable
+            Log.w(TAG, "No authenticated socket for $currentIp after ${CONNECT_TIMEOUT_MS}ms, retrying")
+            closeActiveSocket()
+            setDisconnected()
+            scheduleReconnect()
+        }
+        connectTimeoutRunnable = runnable
+        mainHandler.postDelayed(runnable, CONNECT_TIMEOUT_MS)
+    }
+
+    private fun cancelConnectTimeout() {
+        connectTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        connectTimeoutRunnable = null
+    }
+
+    /**
+     * Invalidates the callbacks of the current socket and hard-closes it. [WebSocket.cancel] is
+     * used rather than a graceful close because the case that triggers a reconnect is usually a
+     * dead link, where a close handshake would linger until the timeout.
+     */
+    private fun closeActiveSocket() {
+        generation++
+        cancelReconnect()
+        cancelConnectTimeout()
+        val previous = webSocket
+        webSocket = null
+        if (previous != null) {
+            try {
+                previous.cancel()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing WebSocket", e)
+            }
+        }
+    }
+
+    /** Clears both connection flags and pushes the new state to the UI. */
+    private fun setDisconnected() {
+        isConnected = false
+        isConnecting = false
+        notifyConnectionState()
+    }
+
+    /**
+     * Delivers the connection flag to [connectionStateListener] on the main thread, so Compose
+     * reflects a connect/drop in the same frame instead of one extra dispatch hop later.
+     */
+    private fun notifyConnectionState() {
+        if (connectionStateListener == null) return
+        val connected = isConnected
+        val deliver = Runnable {
+            // Resolved at delivery time: the owning composable may have replaced its listener.
+            val listener = connectionStateListener ?: return@Runnable
+            try {
+                listener(connected)
+            } catch (e: Exception) {
+                Log.e(TAG, "Connection state listener failed", e)
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) deliver.run() else mainHandler.post(deliver)
     }
 
     fun disconnect() {
         autoReconnect = false
-        generation++
-        cancelReconnect()
+        isAuthRejected = false
+        isUserDisconnected = true
         reconnectAttempt = 0
         stopAudioStream()
         stopCameraStream()
-
-        try {
-            webSocket?.close(1000, "Goodbye")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing WS", e)
-        }
-        webSocket = null
-        isConnected = false
-        isConnecting = false
-        connectionStateListener?.invoke(false)
+        closeActiveSocket()
+        setDisconnected()
     }
 
     fun sendControl(json: JSONObject) {

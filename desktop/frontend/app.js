@@ -47,6 +47,56 @@ function getWebSocketUrl() {
     return "ws://127.0.0.1:8085/ws";
 }
 
+// ----------------- WebSocket command queue -----------------
+// Every deck interaction (button press, media key, volume, brightness, per-app
+// volume) travels over the socket. When the socket is briefly down the command
+// is queued and flushed on the next successful connection instead of falling
+// back to a REST route the server does not expose.
+const pendingWsCommands = [];
+const WS_QUEUE_LIMIT = 24;
+let lastWsQueueNoticeAt = 0;
+
+function sendWsCommand(payload) {
+    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.send(JSON.stringify(payload));
+        return true;
+    }
+    // Slider drags fire per pointer step: only the newest level matters, so an
+    // already-queued command for the same target is replaced, not appended.
+    const sliderKey = payload.type === 'set_app_volume'
+        ? `app:${payload.name}`
+        : (payload.type === 'set_volume' || payload.type === 'set_brightness' ? payload.type : '');
+    if (sliderKey) {
+        const idx = pendingWsCommands.findIndex(c => (c.type === 'set_app_volume' ? `app:${c.name}` : c.type) === sliderKey);
+        if (idx !== -1) {
+            pendingWsCommands[idx] = payload;
+            return false;
+        }
+    }
+    if (pendingWsCommands.length >= WS_QUEUE_LIMIT) pendingWsCommands.shift();
+    pendingWsCommands.push(payload);
+    // Throttle the notice so a slider drag cannot flood the toast area.
+    const now = performance.now();
+    if (now - lastWsQueueNoticeAt > 3000 && typeof showAppleToast === 'function') {
+        lastWsQueueNoticeAt = now;
+        showAppleToast('Sunucu bağlantısı bekleniyor…', null, null, 2000);
+    }
+    return false;
+}
+
+function flushWsCommandQueue() {
+    if (!pendingWsCommands.length) return;
+    if (!wsClient || wsClient.readyState !== WebSocket.OPEN) return;
+    const queued = pendingWsCommands.splice(0, pendingWsCommands.length);
+    queued.forEach(payload => {
+        try {
+            wsClient.send(JSON.stringify(payload));
+        } catch (err) {
+            console.warn('Queued command dropped', err);
+        }
+    });
+}
+
 // Resolves a same-origin API path. When the page itself came from port 8085 the
 // relative path already reaches the server and is left untouched.
 function apiUrl(path) {
@@ -722,6 +772,9 @@ function connectWebSocket() {
             }));
         } else if (msg.type === 'auth_success') {
             console.log("WebSocket authenticated successfully");
+            // Commands sent while the socket was down (or unauthenticated) are
+            // safe to replay now.
+            flushWsCommandQueue();
         } else if (msg.type === 'auth_failed') {
             console.error("WebSocket authentication failed");
             showPasswordPrompt();
@@ -757,6 +810,9 @@ function connectWebSocket() {
             fetchConfig();
         } else if (msg.type === 'system_stats') {
             cachedLiveStats = {
+                // Keep the previous frame's fields when the server omits one
+                // (weather_* and active_window are filled by other channels).
+                ...cachedLiveStats,
                 cpu: msg.cpu || 0,
                 ram: msg.ram || 0,
                 cpu_temp: msg.cpu_temp || 0,
@@ -775,12 +831,18 @@ function connectWebSocket() {
                 media_artist: msg.media_artist || "",
                 media_playing: !!msg.media_playing,
                 media_cover: msg.media_cover || "",
+                // The scrubber + CANLI YAYIN badge read these three fields.
+                media_is_live: !!msg.media_is_live,
+                media_pos_sec: Number(msg.media_pos_sec) || 0,
+                media_dur_sec: Number(msg.media_dur_sec) || 0,
                 weather_city: msg.weather_city || "Istanbul",
                 weather_temp: msg.weather_temp || 0,
                 weather_code: msg.weather_code || 0,
                 weather_desc: msg.weather_desc || "",
                 weather_wind: msg.weather_wind || 0
             };
+            // Re-anchor the local playback clock to this server sample.
+            anchorMediaClock(cachedLiveStats);
             // Seed the per-city weather cache with the server's current city reading
             if (!weatherCache[normalizeCityKey(cachedLiveStats.weather_city)]) {
                 weatherCache[normalizeCityKey(cachedLiveStats.weather_city)] = {
@@ -1158,14 +1220,29 @@ function fitDeckFrame() {
     if (!stage || !mockup || !frame || !apiConfig) return;
 
     if (document.body.classList.contains('mobile-mode')) {
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.maxWidth = '100vw';
-        frame.style.maxHeight = '100vh';
-        frame.style.padding = '0';
-        frame.style.margin = '0';
-        frame.style.borderRadius = '0';
-        frame.style.border = 'none';
+        // Mobile mode: CSS owns the geometry (fixed 100%/100dvh, overflow hidden).
+        // Only the derived cell size is computed here so every widget's
+        // typography/padding scales with the real grid cell.
+        const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
+        const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
+        const viewportW = window.innerWidth || document.documentElement.clientWidth || 360;
+        const viewportH = window.innerHeight || document.documentElement.clientHeight || 640;
+        const pad = 8;
+        const gap = cols >= 5 ? 6 : 8;
+        const cell = Math.max(44, Math.floor(Math.min(
+            (viewportW - 2 * pad - (cols - 1) * gap) / cols,
+            (viewportH - 2 * pad - (rows - 1) * gap) / rows
+        )));
+        frame.style.setProperty('--cell', `${cell}px`);
+        frame.style.setProperty('--gap', `${gap}px`);
+        frame.style.width = '';
+        frame.style.height = '';
+        frame.style.maxWidth = '';
+        frame.style.maxHeight = '';
+        frame.style.padding = '';
+        frame.style.margin = '';
+        frame.style.borderRadius = '';
+        frame.style.border = '';
         return;
     }
 
@@ -1219,7 +1296,6 @@ function setupStreamDeck() {
     const closeModalBtn = document.getElementById('btn-close-modal');
     const applyEditBtn = document.getElementById('btn-apply-edit');
     const editType = document.getElementById('edit-type');
-    const editValue = document.getElementById('edit-value');
 
     // Düzen Seçici — the only three board shapes
     const LAYOUT_PRESETS = {
@@ -1240,8 +1316,6 @@ function setupStreamDeck() {
         });
     });
 
-    editType.addEventListener('change', () => applyEditTypeHints(editType.value));
-
     const appSearchInput = document.getElementById('app-search-input');
     const appSelect = document.getElementById('edit-app-select');
 
@@ -1254,6 +1328,12 @@ function setupStreamDeck() {
         const selectedOption = appSelect.options[appSelect.selectedIndex];
         document.getElementById('edit-value').value = appSelect.value;
         document.getElementById('edit-label').value = selectedOption.textContent;
+        const advancedToggle = document.getElementById('edit-command-advanced-toggle');
+        if (advancedToggle) advancedToggle.checked = false;
+        const customCmd = document.getElementById('edit-custom-command');
+        if (customCmd) customCmd.value = '';
+        syncCommandCustomRow();
+        highlightActiveChip('command-preset-chips', 'data-command', appSelect.value);
 
         // Icon follows the picked application
         const name = selectedOption.textContent.toLowerCase();
@@ -1304,58 +1384,82 @@ function setupStreamDeck() {
         });
     }
 
-    // Automatically record hotkeys
-    editValue.addEventListener('keydown', (e) => {
-        if (editType.value !== 'hotkey') return;
+    // Görsel kısayol kaydedici — click to focus and capture keystrokes as keycaps
+    const hotkeyRecorder = document.getElementById('hotkey-recorder');
+    if (hotkeyRecorder) {
+        hotkeyRecorder.addEventListener('click', () => hotkeyRecorder.focus());
+        hotkeyRecorder.addEventListener('focus', () => hotkeyRecorder.classList.add('is-recording'));
+        hotkeyRecorder.addEventListener('blur', () => {
+            hotkeyRecorder.classList.remove('is-recording');
+            renderHotkeyChips();   // drop any modifier-only preview
+        });
+        hotkeyRecorder.addEventListener('keydown', handleHotkeyRecorderKey);
+    }
+    const hotkeyPresetChips = document.getElementById('hotkey-preset-chips');
+    if (hotkeyPresetChips) {
+        hotkeyPresetChips.addEventListener('click', (e) => {
+            const chip = e.target.closest('.control-chip[data-hotkey]');
+            if (!chip) return;
+            setHotkeyValue(chip.getAttribute('data-hotkey'));
+        });
+    }
 
-        if ((e.key === 'Backspace' || e.key === 'Delete') && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
-            return;
-        }
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        const keys = [];
-        if (e.ctrlKey) keys.push('ctrl');
-        if (e.shiftKey) keys.push('shift');
-        if (e.altKey) keys.push('alt');
-        if (e.metaKey) keys.push('meta');
-
-        let key = e.key;
-        if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') {
-            if (keys.length > 0) {
-                editValue.value = keys.join('+') + '+';
+    // Komut çipleri + gelişmiş özel komut alanı
+    const commandPresetChips = document.getElementById('command-preset-chips');
+    if (commandPresetChips) {
+        commandPresetChips.addEventListener('click', (e) => {
+            const chip = e.target.closest('.control-chip[data-command]');
+            if (!chip) return;
+            const cmd = chip.getAttribute('data-command');
+            const toggle = document.getElementById('edit-command-advanced-toggle');
+            if (toggle) toggle.checked = false;
+            syncCommandCustomRow();
+            setCommandValue(cmd);
+            const labelInput = document.getElementById('edit-label');
+            if (labelInput && !labelInput.value.trim()) labelInput.value = chip.textContent.trim();
+        });
+    }
+    const commandAdvancedToggle = document.getElementById('edit-command-advanced-toggle');
+    if (commandAdvancedToggle) {
+        commandAdvancedToggle.addEventListener('change', () => {
+            syncCommandCustomRow();
+            const customInput = document.getElementById('edit-custom-command');
+            if (commandAdvancedToggle.checked) {
+                if (customInput) customInput.focus();
+            } else if (customInput) {
+                customInput.value = '';
             }
-            return;
-        }
+        });
+    }
+    const customCommandInput = document.getElementById('edit-custom-command');
+    if (customCommandInput) {
+        customCommandInput.addEventListener('input', () => {
+            document.getElementById('edit-value').value = customCommandInput.value;
+            highlightActiveChip('command-preset-chips', 'data-command', customCommandInput.value.trim());
+        });
+    }
 
-        const keyMap = {
-            ' ': 'space',
-            'ArrowUp': 'up',
-            'ArrowDown': 'down',
-            'ArrowLeft': 'left',
-            'ArrowRight': 'right',
-            'Escape': 'esc',
-            'Tab': 'tab',
-            'Enter': 'enter',
-            'Insert': 'insert',
-            'Home': 'home',
-            'End': 'end',
-            'PageUp': 'pageup',
-            'PageDown': 'pagedown',
-            'CapsLock': 'capslock',
-            'NumLock': 'numlock',
-            'ScrollLock': 'scrolllock'
-        };
-
-        const mappedKey = keyMap[key] || key.toLowerCase();
-        const finalKeys = [...keys];
-        if (!finalKeys.includes(mappedKey)) {
-            finalKeys.push(mappedKey);
-        }
-
-        editValue.value = finalKeys.join('+');
-    });
+    // Şehir seçimi: "Özel Şehir" seçilince görsel giriş alanı açılır
+    const weatherCitySelect = document.getElementById('edit-weather-city');
+    if (weatherCitySelect) {
+        weatherCitySelect.addEventListener('change', () => {
+            const custom = weatherCityIsCustom();
+            const customGroup = document.getElementById('weather-custom-group');
+            if (customGroup) customGroup.style.display = custom ? '' : 'none';
+            const customInput = document.getElementById('edit-weather-custom');
+            if (custom) {
+                if (customInput) customInput.focus();
+            } else {
+                document.getElementById('edit-value').value = weatherCitySelect.value;
+            }
+        });
+    }
+    const weatherCustomInput = document.getElementById('edit-weather-custom');
+    if (weatherCustomInput) {
+        weatherCustomInput.addEventListener('input', () => {
+            document.getElementById('edit-value').value = weatherCustomInput.value;
+        });
+    }
 
     if (closeModalBtn) closeModalBtn.addEventListener('click', () => modal.classList.remove('active'));
     const closeModalX = document.getElementById('btn-close-modal-x');
@@ -1364,7 +1468,11 @@ function setupStreamDeck() {
         if (e.target === modal) modal.classList.remove('active');
     });
     applyEditBtn.addEventListener('click', applyButtonEdit);
-    editType.addEventListener('change', () => applyEditTypeHints(editType.value));
+    editType.addEventListener('change', () => {
+        const nextType = editType.value;
+        primeValueForType(nextType);
+        applyEditTypeHints(nextType);
+    });
 
     // Delete button inside modal
     const deleteBtn = document.getElementById('btn-delete-button');
@@ -1565,8 +1673,14 @@ function initDeckStage() {
     refreshDeckStage();
 }
 
-// Live Real-Time Ticking for All Clocks on Canvas
+// Live Real-Time Ticking for All Clocks on Canvas.
+// Split by resolution: second-level styles (analog, neon, retro, digital
+// seconds) repaint every tick, while minute/day-level styles only repaint when
+// the underlying value actually changes — no DOM writes 60x/minute for a HH:MM.
+const clockTickKeys = { minute: '', day: '' };
+
 setInterval(() => {
+    if (document.hidden) return;
     const now = new Date();
     const hours = now.getHours().toString().padStart(2, '0');
     const minutes = now.getMinutes().toString().padStart(2, '0');
@@ -1575,6 +1689,14 @@ setInterval(() => {
     const hNum = now.getHours();
     const mNum = now.getMinutes();
 
+    const minuteKey = `${hours}:${minutes}`;
+    const minuteFresh = minuteKey !== clockTickKeys.minute;
+    const dayKey = now.toDateString();
+    const dayFresh = dayKey !== clockTickKeys.day;
+    clockTickKeys.minute = minuteKey;
+    clockTickKeys.day = dayKey;
+
+    // ---- second resolution ------------------------------------------------
     // Analog clocks
     document.querySelectorAll('.deck-clock-widget.analog-mode').forEach(widget => {
         const analogEl = widget.querySelector('.deck-analog-wrapper');
@@ -1589,56 +1711,21 @@ setInterval(() => {
         }
     });
 
-    // Apple Stacked Clocks (12 / 38)
-    document.querySelectorAll('.deck-apple-stacked-clock').forEach(clock => {
-        const hEl = clock.querySelector('.deck-apple-stacked-h');
-        const mEl = clock.querySelector('.deck-apple-stacked-m');
-        if (hEl) hEl.textContent = hours;
-        if (mEl) mEl.textContent = minutes;
-    });
-
     // Apple Lockscreen Clocks & Digital Seconds
     document.querySelectorAll('.deck-apple-lockscreen-clock').forEach(clock => {
         const timeEl = clock.querySelector('.deck-apple-clock-time');
-        if (timeEl) {
-            if (timeEl.classList.contains('with-seconds')) {
-                timeEl.textContent = `${hours}:${minutes}:${secondsStr}`;
+        if (!timeEl) return;
+        if (timeEl.classList.contains('with-seconds')) {
+            timeEl.textContent = `${hours}:${minutes}:${secondsStr}`;
+        } else if (minuteFresh) {
+            const spans = timeEl.querySelectorAll('span');
+            if (spans.length >= 3) {
+                spans[0].textContent = hours;
+                spans[2].textContent = minutes;
             } else {
-                const spans = timeEl.querySelectorAll('span');
-                if (spans.length >= 3) {
-                    spans[0].textContent = hours;
-                    spans[2].textContent = minutes;
-                } else {
-                    timeEl.innerHTML = `<span>${hours}</span><span class="deck-apple-colon">:</span><span>${minutes}</span>`;
-                }
+                timeEl.innerHTML = `<span>${hours}</span><span class="deck-apple-colon">:</span><span>${minutes}</span>`;
             }
         }
-    });
-
-    // Clean Mode Clocks
-    document.querySelectorAll('.deck-clock-time-clean').forEach(el => {
-        el.textContent = `${hours}:${minutes}`;
-    });
-
-    // Pixel Hub clock date line stays in sync (Çar, 28 Eki)
-    const dowLabel = formatDeckDate(now);
-    document.querySelectorAll('.md-clock__dow').forEach(el => {
-        el.textContent = dowLabel;
-    });
-
-    // Split-flap clocks (Fliqlo) keep their weekday strip current
-    document.querySelectorAll('.deck-flip-label').forEach(el => {
-        el.textContent = dowLabel;
-    });
-
-    // Apple Minimal
-    document.querySelectorAll('.deck-am-clock').forEach(clock => {
-        const hEl = clock.querySelector('.deck-am-h');
-        const mEl = clock.querySelector('.deck-am-m');
-        const dEl = clock.querySelector('.deck-am-date');
-        if (hEl) hEl.textContent = hours;
-        if (mEl) mEl.textContent = minutes;
-        if (dEl) dEl.textContent = dowLabel;
     });
 
     // Neon Cyberpunk (with live seconds)
@@ -1651,6 +1738,59 @@ setInterval(() => {
         if (sEl) sEl.textContent = secondsStr;
     });
 
+    // Retro CRT terminal ([09:41:22])
+    document.querySelectorAll('.deck-retro-clock').forEach(clock => {
+        const tEl = clock.querySelector('.deck-retro-time');
+        if (tEl) tEl.textContent = `${hours}:${minutes}:${secondsStr}`;
+    });
+
+    if (!minuteFresh) return;
+
+    // ---- minute / day resolution -----------------------------------------
+    const dowLabel = formatDeckDate(now);
+
+    // Apple Stacked Clocks (12 / 38)
+    document.querySelectorAll('.deck-apple-stacked-clock').forEach(clock => {
+        const hEl = clock.querySelector('.deck-apple-stacked-h');
+        const mEl = clock.querySelector('.deck-apple-stacked-m');
+        if (hEl) hEl.textContent = hours;
+        if (mEl) mEl.textContent = minutes;
+    });
+
+    // Clean Mode Clocks
+    document.querySelectorAll('.deck-clock-time-clean').forEach(el => {
+        el.textContent = `${hours}:${minutes}`;
+    });
+
+    // Pixel Hub clock date line stays in sync (Çar, 28 Eki)
+    document.querySelectorAll('.md-clock__dow').forEach(el => {
+        if (dayFresh) el.textContent = dowLabel;
+    });
+
+    // Split-flap clocks (Fliqlo) keep their weekday strip current
+    document.querySelectorAll('.deck-flip-label').forEach(el => {
+        if (dayFresh) el.textContent = dowLabel;
+    });
+
+    // StandBy flip widget (HH / MM cards)
+    document.querySelectorAll('.deck-flip-widget').forEach(widget => {
+        const nums = widget.querySelectorAll('.deck-flip-num');
+        if (nums.length >= 2) {
+            if (nums[0].textContent !== hours) nums[0].textContent = hours;
+            if (nums[1].textContent !== minutes) nums[1].textContent = minutes;
+        }
+    });
+
+    // Apple Minimal
+    document.querySelectorAll('.deck-am-clock').forEach(clock => {
+        const hEl = clock.querySelector('.deck-am-h');
+        const mEl = clock.querySelector('.deck-am-m');
+        const dEl = clock.querySelector('.deck-am-date');
+        if (hEl) hEl.textContent = hours;
+        if (mEl) mEl.textContent = minutes;
+        if (dEl && dayFresh) dEl.textContent = dowLabel;
+    });
+
     // Swiss Serif
     document.querySelectorAll('.deck-swiss-clock').forEach(clock => {
         const hEl = clock.querySelector('.deck-swiss-h');
@@ -1658,13 +1798,7 @@ setInterval(() => {
         const dEl = clock.querySelector('.deck-swiss-date');
         if (hEl) hEl.textContent = hours;
         if (mEl) mEl.textContent = minutes;
-        if (dEl) dEl.textContent = dowLabel;
-    });
-
-    // Retro CRT terminal ([09:41:22])
-    document.querySelectorAll('.deck-retro-clock').forEach(clock => {
-        const tEl = clock.querySelector('.deck-retro-time');
-        if (tEl) tEl.textContent = `${hours}:${minutes}:${secondsStr}`;
+        if (dEl && dayFresh) dEl.textContent = dowLabel;
     });
 
     // Turkish word clock ("ON BİRİ KIRK BEŞ GEÇİYOR")
@@ -1673,9 +1807,17 @@ setInterval(() => {
         el.textContent = wordLabel;
     });
 
-    // Legacy or mini clocks
-    document.querySelectorAll('.deck-clock-widget:not(.analog-mode) .deck-clock-time').forEach(timeEl => {
-        timeEl.textContent = `${hours}:${minutes}:${secondsStr}`;
+    // World clocks (local + New York)
+    document.querySelectorAll('.deck-world-clock').forEach(clock => {
+        const localEl = clock.querySelector('.deck-world-local');
+        const nyEl = clock.querySelector('.deck-world-ny');
+        if (localEl) localEl.textContent = `${hours}:${minutes}`;
+        if (nyEl) {
+            try {
+                nyEl.textContent = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+                    .toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+            } catch (e) { /* keep previous value */ }
+        }
     });
 }, 1000);
 
@@ -1761,6 +1903,9 @@ let cachedLiveStats = {
     media_artist: "",
     media_playing: false,
     media_cover: "",
+    media_is_live: false,
+    media_pos_sec: 0,
+    media_dur_sec: 0,
     weather_city: "Istanbul",
     weather_temp: 0,
     weather_code: 0,
@@ -1990,6 +2135,81 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+// ----------------- Live media scrubber clock -----------------
+// `system_stats` frames arrive every ~2s, so a raw position read makes the
+// scrubber jump. Each server sample re-anchors the local clock; between frames
+// the position advances locally, giving a continuous 0:00 / dur readout.
+const mediaClock = { pos: 0, dur: 0, playing: false, live: false, title: '', anchoredAt: 0 };
+let mediaClockTimer = null;
+
+function anchorMediaClock(stats) {
+    mediaClock.title = stats.media_title || '';
+    mediaClock.pos = Number(stats.media_pos_sec) || 0;
+    mediaClock.dur = Number(stats.media_dur_sec) || 0;
+    mediaClock.playing = !!stats.media_playing;
+    mediaClock.live = !!stats.media_is_live;
+    mediaClock.anchoredAt = performance.now();
+    document.querySelectorAll('.deck-media').forEach(card => paintMediaClockCard(card));
+    ensureMediaClockLoop();
+}
+
+function currentMediaPosition() {
+    if (!mediaClock.playing || mediaClock.dur <= 0) return mediaClock.pos;
+    const elapsed = (performance.now() - mediaClock.anchoredAt) / 1000;
+    return Math.max(0, Math.min(mediaClock.dur, mediaClock.pos + elapsed));
+}
+
+function formatMediaSeconds(value) {
+    const total = Math.max(0, Math.floor(Number(value) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const pad = (n) => n.toString().padStart(2, '0');
+    return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+
+function mediaClockNeedsTick() {
+    return mediaClock.playing && !mediaClock.live && mediaClock.dur > 0 && !!document.querySelector('.deck-media');
+}
+
+function ensureMediaClockLoop() {
+    if (mediaClockTimer) return;
+    if (!mediaClockNeedsTick()) return;
+    mediaClockTimer = setInterval(() => {
+        if (!mediaClockNeedsTick()) {
+            clearInterval(mediaClockTimer);
+            mediaClockTimer = null;
+            return;
+        }
+        document.querySelectorAll('.deck-media').forEach(card => paintMediaClockCard(card));
+    }, 250);
+}
+
+// Paints one media card from the anchored clock: bar width, elapsed / total and
+// the CANLI YAYIN badge, all by class toggling (never innerHTML churn).
+function paintMediaClockCard(card) {
+    const wrap = card.querySelector('.deck-media__progress-wrap');
+    if (!wrap) return;
+    const live = mediaClock.live;
+    const dur = mediaClock.dur;
+    const showProgress = !live && dur > 0;
+    const idle = !live && dur <= 0;
+
+    card.classList.toggle('is-live', live);
+    card.classList.toggle('is-idle', idle);
+    card.classList.toggle('is-ticking', showProgress && mediaClock.playing);
+
+    if (!showProgress) return;
+    const pos = currentMediaPosition();
+    const pct = Math.min(100, (pos / dur) * 100);
+    const bar = wrap.querySelector('.deck-media__progress-bar');
+    if (bar) bar.style.width = `${pct.toFixed(2)}%`;
+    const curEl = wrap.querySelector('.deck-media__time-cur');
+    const durEl = wrap.querySelector('.deck-media__time-dur');
+    if (curEl) curEl.textContent = formatMediaSeconds(pos);
+    if (durEl) durEl.textContent = formatMediaSeconds(dur);
+}
+
 // Weather DOM mirrors the shared live-stat pass
 function updateWeatherDOM() {
     updateLiveStatsDOM();
@@ -2036,14 +2256,9 @@ function updateLiveStatsDOM() {
             const mediaCard = btnEl.querySelector('.deck-media');
             const bgEl = btnEl.querySelector('.deck-media__cover-bg');
             const thumbEl = btnEl.querySelector('.deck-media__thumb');
-            const progBar = btnEl.querySelector('.deck-media__progress-bar');
-            const curTimeEl = btnEl.querySelector('.deck-media__time-cur');
-            const durTimeEl = btnEl.querySelector('.deck-media__time-dur');
             const title = cachedLiveStats.media_title || (btn.label || 'Şimdi Çalıyor');
             const artist = cachedLiveStats.media_artist || 'Medya bekleniyor';
             const cover = cachedLiveStats.media_cover || '';
-            const pos = Number(cachedLiveStats.media_pos_sec) || 0;
-            const dur = Number(cachedLiveStats.media_dur_sec) || 0;
 
             if (titleEl) titleEl.textContent = title;
             if (artistEl) artistEl.textContent = artist;
@@ -2051,6 +2266,9 @@ function updateLiveStatsDOM() {
 
             if (mediaCard) {
                 mediaCard.classList.toggle('has-cover', !!cover);
+                // Scrubber / CANLI YAYIN badge: classes only, so the progress
+                // bar, timestamps and live badge keep working across ticks.
+                paintMediaClockCard(mediaCard);
             }
             if (bgEl && cover) {
                 bgEl.style.backgroundImage = `url("${cover}")`;
@@ -2058,13 +2276,6 @@ function updateLiveStatsDOM() {
             if (thumbEl && cover) {
                 thumbEl.src = cover;
             }
-            if (progBar && dur > 0) {
-                const pct = Math.min(100, Math.round((pos / dur) * 100));
-                progBar.style.width = `${pct}%`;
-            }
-            const fmtSec = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
-            if (curTimeEl) curTimeEl.textContent = fmtSec(pos);
-            if (durTimeEl) durTimeEl.textContent = fmtSec(dur);
             return;
         }
 
@@ -2241,60 +2452,12 @@ setInterval(() => {
     if (document.querySelector('.deck-pomodoro-widget')) renderPomodoroDOM();
 }, 1000);
 
-// 1-second interval to tick Clock widgets smoothly
-setInterval(() => {
-    document.querySelectorAll('.deck-clock-widget').forEach(clock => {
-        const timeEl = clock.querySelector('.deck-clock-time');
-        const dateEl = clock.querySelector('.deck-clock-date');
-        const now = new Date();
-        if (timeEl) {
-            timeEl.textContent = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        }
-        if (dateEl) {
-            dateEl.textContent = now.toLocaleDateString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' });
-        }
-    });
-}, 1000);
-
-// 1-second tick for StandBy flip clocks and world clocks
-setInterval(() => {
-    const now = new Date();
-    const hh = now.getHours().toString().padStart(2, '0');
-    const mm = now.getMinutes().toString().padStart(2, '0');
-    document.querySelectorAll('.deck-flip-widget').forEach(widget => {
-        const nums = widget.querySelectorAll('.deck-flip-num');
-        if (nums.length >= 2) {
-            if (nums[0].textContent !== hh) nums[0].textContent = hh;
-            if (nums[1].textContent !== mm) nums[1].textContent = mm;
-        }
-    });
-
-    document.querySelectorAll('.deck-world-clock').forEach(clock => {
-        const localEl = clock.querySelector('.deck-world-local');
-        const nyEl = clock.querySelector('.deck-world-ny');
-        if (localEl) localEl.textContent = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-        if (nyEl) {
-            try {
-                nyEl.textContent = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-            } catch (e) { /* keep previous value */ }
-        }
-    });
-}, 1000);
-
 // Trigger media action (Prev, Play/Pause, Next)
 function triggerMediaAction(action) {
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        wsClient.send(JSON.stringify({
-            type: "media_control",
-            action: action
-        }));
-    } else {
-        authFetch('/stream_deck_trigger', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: action })
-        }).catch(e => console.error("Media trigger error", e));
-    }
+    sendWsCommand({
+        type: 'media_control',
+        action: action
+    });
 }
 
 // Map preset keys to button properties
@@ -3771,6 +3934,14 @@ function renderStreamDeckButtons() {
                         <span class="md-clock__meta">İstanbul · saniyeli</span>
                     </div>
                 `;
+            } else if (clockStyle === 'digital_clean') {
+                // Sade dijital: yalnızca büyük rakamlar (.deck-clock-time-clean)
+                bodyContent = `
+                    <div class="deck-clock-widget md-clock ${sizeClass}">
+                        <span class="deck-clock-time-clean">${hours}:${minutes}</span>
+                        <span class="md-clock__meta">Sade dijital</span>
+                    </div>
+                `;
             } else if (clockStyle === 'apple_stacked') {
                 bodyContent = `
                     <div class="md-clock md-clock--stacked deck-apple-stacked-clock ${sizeClass}">
@@ -4083,12 +4254,15 @@ function renderStreamDeckButtons() {
             const cover = cachedLiveStats.media_cover || '';
             const hasCover = !!cover;
             const playIcon = cachedLiveStats.media_playing ? mdIcon('pause', 14) : mdIcon('play', 14);
-            const pos = Number(cachedLiveStats.media_pos_sec) || 0;
-            const dur = Number(cachedLiveStats.media_dur_sec) || 215;
-            const pct = dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0;
-            const fmtSec = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+            // Clock comes from the anchored media clock so the card is already
+            // right on first paint and keeps ticking between server frames.
+            const isLive = mediaClock.live;
+            const dur = mediaClock.dur;
+            const showProgress = !isLive && dur > 0;
+            const pos = showProgress ? currentMediaPosition() : 0;
+            const pct = showProgress ? Math.min(100, (pos / dur) * 100) : 0;
             bodyContent = `
-                <div class="deck-media ${rich ? 'is-rich' : 'is-compact'} ${hasCover ? 'has-cover' : ''}">
+                <div class="deck-media ${rich ? 'is-rich' : 'is-compact'} ${hasCover ? 'has-cover' : ''} ${isLive ? 'is-live' : ''} ${!isLive && !showProgress ? 'is-idle' : ''} ${showProgress && mediaClock.playing ? 'is-ticking' : ''}">
                     <div class="deck-media__cover-bg" ${hasCover ? `style="background-image: url('${escapeHtml(cover)}');"` : ''}></div>
                     <div class="deck-media__cover-overlay"></div>
                     ${rich ? `
@@ -4105,12 +4279,16 @@ function renderStreamDeckButtons() {
                         <span class="deck-media__title deck-np-title">${escapeHtml(btn.label || title)}</span>
                     </div>`}
                     <div class="deck-media__progress-wrap">
+                        <div class="deck-media__live-badge">
+                            <span class="deck-media__live-dot"></span>
+                            <span class="deck-media__live-text">CANLI YAYIN</span>
+                        </div>
                         <div class="deck-media__progress-track">
-                            <div class="deck-media__progress-bar" style="width: ${pct}%;"></div>
+                            <div class="deck-media__progress-bar" style="width: ${pct.toFixed(2)}%;"></div>
                         </div>
                         <div class="deck-media__progress-times">
-                            <span class="deck-media__time-cur">${fmtSec(pos)}</span>
-                            <span class="deck-media__time-dur">${fmtSec(dur)}</span>
+                            <span class="deck-media__time-cur">${formatMediaSeconds(pos)}</span>
+                            <span class="deck-media__time-dur">${formatMediaSeconds(dur)}</span>
                         </div>
                     </div>
                     <div class="deck-media__controls">
@@ -4295,6 +4473,14 @@ function renderStreamDeckButtons() {
                     triggerPomodoroWidget(btn.id);
                     return;
                 }
+                // Media cards own their buttons: the body acts as play/pause,
+                // mirroring the phone's tap-anywhere behaviour.
+                if (btn.type === 'now_playing' || btn.type === 'media_control' || btn.type === 'media_widget') {
+                    triggerMediaAction('playpause');
+                    item.classList.add('deck-btn-triggered');
+                    setTimeout(() => item.classList.remove('deck-btn-triggered'), 300);
+                    return;
+                }
                 testButtonAction(btn.id, item);
                 return;
             }
@@ -4394,35 +4580,7 @@ function renderStreamDeckButtons() {
         list.appendChild(emptySlot);
     });
 
-    // Container-level drop listener ensures drops anywhere in the grid work seamlessly
-    list.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-    });
-    list.addEventListener('drop', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        document.querySelectorAll('.deck-btn, .deck-slot-empty').forEach(el => el.classList.remove('drag-over'));
-        const dataText = e.dataTransfer.getData('text/plain');
-        if (!dataText) return;
-        const cell = cellFromEvent(e, list, rows, cols);
-        if (dataText.startsWith('preset:')) {
-            const presetKey = dataText.replace('preset:', '');
-            createWidgetFromPreset(presetKey, cell);
-            const pm = document.getElementById('widget-picker-modal');
-            if (pm) pm.classList.remove('active', 'modal-dragging-preset');
-            return;
-        }
-        const draggedId = parseInt(dataText);
-        if (!isNaN(draggedId)) {
-            const targetBtn = pageButtons.find(b => b.id !== draggedId && b.grid_row === cell.row && b.grid_col === cell.col);
-            if (targetBtn) {
-                swapStreamDeckButtons(draggedId, targetBtn.id);
-            } else {
-                moveStreamDeckButtonToCell(draggedId, cell.row, cell.col);
-            }
-        }
-    });
+    bindDeckContainerDrops(list);
     // Weather cards lazily fetch their own city on first paint
     pageButtons.forEach(btn => {
         if (btn.type !== 'weather') return;
@@ -4432,6 +4590,49 @@ function renderStreamDeckButtons() {
         if (weatherInFlight.has(key)) return;
         weatherInFlight.add(key);
         fetchWeatherForCity(city).finally(() => weatherInFlight.delete(key));
+    });
+}
+
+// Container-level drop target: the grid element survives re-renders, so this is
+// bound exactly once — binding it per render made a single drop run N handlers
+// and create N duplicate widgets.
+function bindDeckContainerDrops(list) {
+    if (list.dataset.dropsBound === '1') return;
+    list.dataset.dropsBound = '1';
+
+    list.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    });
+
+    list.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        document.querySelectorAll('.deck-btn, .deck-slot-empty').forEach(el => el.classList.remove('drag-over'));
+        const dataText = e.dataTransfer.getData('text/plain');
+        if (!dataText || !apiConfig) return;
+
+        const rows = Math.max(1, apiConfig.stream_deck_rows || 2);
+        const cols = Math.max(1, apiConfig.stream_deck_cols || 4);
+        const cell = cellFromEvent(e, list, rows, cols);
+        if (dataText.startsWith('preset:')) {
+            createWidgetFromPreset(dataText.replace('preset:', ''), cell);
+            const pm = document.getElementById('widget-picker-modal');
+            if (pm) pm.classList.remove('active', 'modal-dragging-preset');
+            return;
+        }
+
+        const draggedId = parseInt(dataText, 10);
+        if (isNaN(draggedId)) return;
+        const activePage = apiConfig.active_page || 0;
+        const targetBtn = (apiConfig.stream_deck_buttons || [])
+            .filter(b => (b.page || 0) === activePage)
+            .find(b => b.id !== draggedId && b.grid_row === cell.row && b.grid_col === cell.col);
+        if (targetBtn) {
+            swapStreamDeckButtons(draggedId, targetBtn.id);
+        } else {
+            moveStreamDeckButtonToCell(draggedId, cell.row, cell.col);
+        }
     });
 }
 
@@ -4445,22 +4646,18 @@ function selectDeckButton(id) {
 }
 
 function setMasterVolumeByPercent(pct) {
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        wsClient.send(JSON.stringify({
-            type: 'set_volume',
-            action: 'set',
-            level: pct
-        }));
-    }
+    sendWsCommand({
+        type: 'set_volume',
+        action: 'set',
+        level: pct
+    });
 }
 
 function setDisplayBrightness(pct) {
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        wsClient.send(JSON.stringify({
-            type: 'set_brightness',
-            level: pct
-        }));
-    }
+    sendWsCommand({
+        type: 'set_brightness',
+        level: pct
+    });
 }
 
 function handleSliderTrackClick(e, type) {
@@ -4488,6 +4685,9 @@ function handleSliderTrackClick(e, type) {
 let audioSessionsCache = {};
 let audioSessionsFetchPromise = null;
 let appVolumeDragTrack = null;
+// Flipped off the first time /api/audio_sessions answers with a non-JSON body
+// (SPA fallback), so an unsupported build is not polled forever.
+let audioSessionsSupported = true;
 
 function prettyAppLabel(exe) {
     const base = String(exe || '').replace(/\.exe$/i, '');
@@ -4496,9 +4696,23 @@ function prettyAppLabel(exe) {
 }
 
 function fetchAudioSessions() {
+    if (!audioSessionsSupported) return Promise.resolve(audioSessionsCache);
     if (audioSessionsFetchPromise) return audioSessionsFetchPromise;
     const request = authFetch('/api/audio_sessions')
-        .then(res => res.json())
+        .then(res => {
+            const contentType = res.headers.get('content-type') || '';
+            // The SPA fallback answers unknown routes with index.html; treat that
+            // as "endpoint not available in this build" and stop polling it.
+            if (!res.ok || !contentType.includes('application/json')) {
+                audioSessionsSupported = false;
+                if (appVolumeRefreshTimer) {
+                    clearInterval(appVolumeRefreshTimer);
+                    appVolumeRefreshTimer = null;
+                }
+                return audioSessionsCache;
+            }
+            return res.json();
+        })
         .then(data => {
             const next = {};
             if (data && data.success && Array.isArray(data.sessions)) {
@@ -4534,9 +4748,7 @@ function paintAllAppVolumePills() {
 
 function sendAppVolume(key, pct) {
     if (!key) return;
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        wsClient.send(JSON.stringify({ type: 'set_app_volume', name: key, volume: pct }));
-    }
+    sendWsCommand({ type: 'set_app_volume', name: key, volume: pct });
 }
 
 function appVolumePctFromPointer(e, track) {
@@ -4616,9 +4828,9 @@ function loadAudioSessionsForPicker(force = false) {
 // screen and never fights an in-progress drag.
 let appVolumeRefreshTimer = null;
 function ensureAppVolumeRefreshLoop() {
-    if (appVolumeRefreshTimer) return;
+    if (appVolumeRefreshTimer || !audioSessionsSupported) return;
     appVolumeRefreshTimer = setInterval(() => {
-        if (!document.querySelector('.apple-pill-track[data-app-key]')) {
+        if (!audioSessionsSupported || !document.querySelector('.apple-pill-track[data-app-key]')) {
             clearInterval(appVolumeRefreshTimer);
             appVolumeRefreshTimer = null;
             return;
@@ -4825,21 +5037,10 @@ function testButtonAction(buttonId, element) {
         element.classList.add('deck-btn-triggered');
         setTimeout(() => element.classList.remove('deck-btn-triggered'), 300);
     }
-    // High-speed WebSocket trigger (0ms latency)
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-        wsClient.send(JSON.stringify({
-            type: 'stream_deck_press',
-            button_id: buttonId
-        }));
-        return;
-    }
-    authFetch('/stream_deck_trigger', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ button_id: buttonId })
-    })
-    .catch(err => {
-        console.error("Test trigger error", err);
+    // High-speed WebSocket trigger (0ms latency); queued if the socket is down.
+    sendWsCommand({
+        type: 'stream_deck_press',
+        button_id: buttonId
     });
 }
 
@@ -4868,34 +5069,236 @@ function applyEditTypeHints(type) {
     const valEl = document.getElementById('edit-value');
     if (valEl) valEl.placeholder = hint.placeholder;
 
-    // Show raw text field ONLY for actual text commands/hotkeys
-    const textTypes = ['hotkey', 'command', 'url', 'text_snippet'];
-    const valGroup = document.getElementById('edit-value-group');
-    if (valGroup) valGroup.style.display = textTypes.includes(type) ? 'block' : 'none';
+    const show = (id, visible) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+    };
 
-    const appGroup = document.getElementById('installed-apps-group');
-    if (appGroup) appGroup.style.display = type === 'command' ? 'block' : 'none';
-
-    // Clock typography controls
+    // The raw text field only ever appears for genuine free text (URL / snippet).
+    // Every structured component gets its own visual control instead.
     const isClock = type === 'clock_widget';
-    ['clock-options-group', 'clock-font-group', 'clock-size-group'].forEach(id => {
-        const group = document.getElementById(id);
-        if (group) group.style.display = isClock ? 'block' : 'none';
+    const isWeather = type === 'weather';
+    const isSlider = type === 'volume_slider' || type === 'brightness_slider';
+
+    show('edit-value-group', type === 'url' || type === 'text_snippet');
+    show('hotkey-group', type === 'hotkey');
+    show('command-group', type === 'command');
+    show('toggle-group', type === 'toggle');
+    show('audio-sessions-group', type === 'app_volume_slider');
+    show('clock-options-group', isClock);
+    show('clock-font-group', isClock);
+    show('clock-size-group', isClock);
+    show('live-info-group', type === 'live_info');
+    show('slider-options-group', isSlider);
+    show('weather-options-group', isWeather);
+    show('weather-custom-group', isWeather && weatherCityIsCustom());
+
+    if (type === 'hotkey') renderHotkeyChips();
+    if (type === 'command') {
+        loadInstalledApps();
+        syncCommandCustomRow();
+    }
+    if (type === 'app_volume_slider') loadAudioSessionsForPicker();
+}
+
+function weatherCityIsCustom() {
+    const citySel = document.getElementById('edit-weather-city');
+    return !!citySel && citySel.value === 'custom';
+}
+
+// ---- Görsel kısayol kaydedici -------------------------------------------
+// The hotkey value lives in #edit-value (the single store `applyButtonEdit`
+// reads), but the UI is a keycap strip — never a raw string box.
+const HOTKEY_TOKEN_LABELS = {
+    ctrl: 'Ctrl', shift: 'Shift', alt: 'Alt', meta: 'Win',
+    space: 'Space', esc: 'Esc', escape: 'Esc', enter: 'Enter', return: 'Enter',
+    tab: 'Tab', backspace: 'Backspace', delete: 'Del', insert: 'Ins',
+    up: '↑', down: '↓', left: '←', right: '→',
+    home: 'Home', end: 'End', pageup: 'PgUp', pagedown: 'PgDn',
+    playpause: 'Play/Pause', next: 'Sonraki', prev: 'Önceki',
+    volumeup: 'Ses +', volumedown: 'Ses -', mute: 'Sessiz'
+};
+
+function hotkeyTokens() {
+    const store = document.getElementById('edit-value');
+    if (!store) return [];
+    return String(store.value || '').split('+').map(t => t.trim()).filter(Boolean);
+}
+
+function hotkeyTokenLabel(token) {
+    return HOTKEY_TOKEN_LABELS[token] || (token.length === 1 ? token.toUpperCase() : token.charAt(0).toUpperCase() + token.slice(1));
+}
+
+function renderHotkeyChips() {
+    const wrap = document.getElementById('hotkey-chips');
+    if (!wrap) return;
+    const tokens = hotkeyTokens();
+    wrap.innerHTML = '';
+    if (!tokens.length) {
+        const empty = document.createElement('span');
+        empty.className = 'hotkey-placeholder';
+        empty.textContent = 'Kaydetmek için klavyeden tuşlara basın';
+        wrap.appendChild(empty);
+        return;
+    }
+    tokens.forEach((token, i) => {
+        if (i > 0) {
+            const plus = document.createElement('span');
+            plus.className = 'hotkey-plus';
+            plus.textContent = '+';
+            wrap.appendChild(plus);
+        }
+        const chip = document.createElement('span');
+        chip.className = 'hotkey-chip';
+        chip.textContent = hotkeyTokenLabel(token);
+        wrap.appendChild(chip);
     });
+}
 
-    // Live info / sensor group
-    const liveGroup = document.getElementById('live-info-group');
-    if (liveGroup) liveGroup.style.display = type === 'live_info' ? 'block' : 'none';
+function setHotkeyValue(value) {
+    const store = document.getElementById('edit-value');
+    if (store) store.value = value;
+    renderHotkeyChips();
+    highlightActiveChip('hotkey-preset-chips', 'data-hotkey', value);
+}
 
-    // Slider options group
-    const sliderGroup = document.getElementById('slider-options-group');
-    if (sliderGroup) sliderGroup.style.display = (type === 'volume_slider' || type === 'brightness_slider') ? 'block' : 'none';
+function highlightActiveChip(containerId, attr, value) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    box.querySelectorAll('.control-chip').forEach(chip => {
+        chip.classList.toggle('active', chip.getAttribute(attr) === value);
+    });
+}
 
-    // Weather options group
-    const weatherGroup = document.getElementById('weather-options-group');
-    if (weatherGroup) weatherGroup.style.display = type === 'weather' ? 'block' : 'none';
+// Keyboard capture driven by the recorder strip (pointer = focus, then type).
+function handleHotkeyRecorderKey(e) {
+    if (e.key === 'Backspace' && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        const tokens = hotkeyTokens();
+        tokens.pop();
+        setHotkeyValue(tokens.join('+'));
+        return;
+    }
+    if (e.key === 'Delete' && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        setHotkeyValue('');
+        return;
+    }
 
-    if (type === 'command') loadInstalledApps();
+    e.preventDefault();
+    e.stopPropagation();
+
+    const tokens = [];
+    if (e.ctrlKey) tokens.push('ctrl');
+    if (e.shiftKey) tokens.push('shift');
+    if (e.altKey) tokens.push('alt');
+    if (e.metaKey) tokens.push('meta');
+
+    const isModifierOnly = ['Control', 'Shift', 'Alt', 'Meta', 'OS'].includes(e.key);
+    if (isModifierOnly) {
+        // Preview the held modifiers only; never store a dangling "ctrl+".
+        renderHotkeyChipPreview(tokens);
+        return;
+    }
+
+    const keyMap = {
+        ' ': 'space', 'ArrowUp': 'up', 'ArrowDown': 'down', 'ArrowLeft': 'left', 'ArrowRight': 'right',
+        'Escape': 'esc', 'Tab': 'tab', 'Enter': 'enter', 'Insert': 'insert',
+        'Home': 'home', 'End': 'end', 'PageUp': 'pageup', 'PageDown': 'pagedown'
+    };
+    const mapped = keyMap[e.key] || e.key.toLowerCase();
+    // "+" is the separator, so it can never be a token of its own.
+    if (!mapped || mapped === '+') return;
+    if (!tokens.includes(mapped)) tokens.push(mapped);
+    setHotkeyValue(tokens.join('+'));
+}
+
+// Transient preview while only modifiers are held down.
+function renderHotkeyChipPreview(tokens) {
+    const wrap = document.getElementById('hotkey-chips');
+    const store = document.getElementById('edit-value');
+    if (!wrap) return;
+    if (!tokens.length) {
+        renderHotkeyChips();
+        return;
+    }
+    const committed = store ? String(store.value || '') : '';
+    wrap.innerHTML = '';
+    tokens.forEach((token, i) => {
+        if (i > 0) {
+            const plus = document.createElement('span');
+            plus.className = 'hotkey-plus';
+            plus.textContent = '+';
+            wrap.appendChild(plus);
+        }
+        const chip = document.createElement('span');
+        chip.className = 'hotkey-chip is-preview';
+        chip.textContent = hotkeyTokenLabel(token);
+        wrap.appendChild(chip);
+    });
+    if (committed) {
+        const rest = document.createElement('span');
+        rest.className = 'hotkey-placeholder';
+        rest.textContent = '+ mevcut: ' + committed;
+        wrap.appendChild(rest);
+    }
+}
+
+// ---- Komut / uygulama seçici -------------------------------------------------
+function setCommandValue(value) {
+    const store = document.getElementById('edit-value');
+    if (store) store.value = value || '';
+    const customInput = document.getElementById('edit-custom-command');
+    if (customInput && customInput.value !== (value || '')) customInput.value = value || '';
+    highlightActiveChip('command-preset-chips', 'data-command', value || '');
+}
+
+function syncCommandCustomRow() {
+    const toggle = document.getElementById('edit-command-advanced-toggle');
+    const row = document.getElementById('edit-command-custom-row');
+    if (!row) return;
+    row.style.display = (toggle && toggle.checked) ? '' : 'none';
+}
+
+// Re-typing a card must leave the new control usable straight away: if the
+// stored value cannot describe the freshly picked type, seed a sane default.
+const HOTKEY_SHAPE = /^[a-z0-9+]+$/i;
+
+function primeValueForType(type) {
+    const valueInput = document.getElementById('edit-value');
+    if (!valueInput) return;
+    const current = (valueInput.value || '').trim();
+
+    const selectHas = (id, wanted) => {
+        const sel = document.getElementById(id);
+        if (!sel) return true;
+        return Array.from(sel.options).some(opt => opt.value === wanted);
+    };
+
+    if (type === 'hotkey') {
+        if (!current || !HOTKEY_SHAPE.test(current)) setHotkeyValue('ctrl+c');
+    } else if (type === 'toggle') {
+        if (!selectHas('edit-toggle-action', current)) {
+            document.getElementById('edit-toggle-action').value = 'mic_mute';
+        }
+    } else if (type === 'live_info') {
+        if (!selectHas('edit-metric-select', current)) {
+            document.getElementById('edit-metric-select').value = 'cpu';
+        }
+    } else if (type === 'clock_widget') {
+        if (!selectHas('edit-clock-style', current)) {
+            document.getElementById('edit-clock-style').value = 'apple_minimal';
+        }
+    } else if (type === 'weather') {
+        if (!selectHas('edit-weather-city', current)) {
+            document.getElementById('edit-weather-city').value = 'Istanbul';
+            const customGroup = document.getElementById('weather-custom-group');
+            if (customGroup) customGroup.style.display = 'none';
+            valueInput.value = 'Istanbul';
+        }
+    } else if (type === 'url') {
+        if (!/^https?:\/\//i.test(current)) valueInput.value = 'https://';
+    }
 }
 
 function setEditSizePills(col, row) {
@@ -4937,12 +5340,40 @@ function openEditButtonModal(id) {
         const city = btn.value || 'Istanbul';
         if (['Istanbul', 'Ankara', 'Izmir', 'Bursa', 'Antalya', 'London', 'New York'].includes(city)) {
             weatherCitySel.value = city;
+            const customInput = document.getElementById('edit-weather-custom');
+            if (customInput) customInput.value = '';
         } else {
             weatherCitySel.value = 'custom';
+            const customInput = document.getElementById('edit-weather-custom');
+            if (customInput) customInput.value = city;
             document.getElementById('edit-value').value = city;
-            const valGroup = document.getElementById('edit-value-group');
-            if (valGroup) valGroup.style.display = 'block';
         }
+    }
+
+    // Toggle action (mic / speaker / virtual monitor / pomodoro)
+    const toggleSel = document.getElementById('edit-toggle-action');
+    if (toggleSel) {
+        const known = Array.from(toggleSel.options).map(o => o.value);
+        toggleSel.value = known.includes(btn.value || '') ? btn.value : 'mic_mute';
+    }
+
+    // Command builder: presets + installed apps + optional advanced command
+    const customCommandInput = document.getElementById('edit-custom-command');
+    if (customCommandInput) customCommandInput.value = btn.type === 'command' ? (btn.value || '') : '';
+    const advancedToggle = document.getElementById('edit-command-advanced-toggle');
+    if (advancedToggle) {
+        const presetValues = Array.from(document.querySelectorAll('#command-preset-chips .control-chip'))
+            .map(chip => chip.getAttribute('data-command') || '');
+        const matchesPreset = (val) => presetValues.some(p => p && (val === p || val.startsWith(p + ' ')));
+        advancedToggle.checked = btn.type === 'command' && !!btn.value && !matchesPreset(btn.value);
+        syncCommandCustomRow();
+    }
+    highlightActiveChip('command-preset-chips', 'data-command', btn.value || '');
+    highlightActiveChip('hotkey-preset-chips', 'data-hotkey', btn.type === 'hotkey' ? (btn.value || '') : '');
+    if ((btn.type || 'hotkey') === 'hotkey') {
+        setHotkeyValue(btn.value || '');
+    } else {
+        renderHotkeyChips();
     }
 
     applyEditTypeHints(btn.type || 'hotkey');
@@ -5028,6 +5459,10 @@ function applyButtonEdit() {
     const type = document.getElementById('edit-type').value;
     let value = document.getElementById('edit-value').value;
     const icon = document.getElementById('edit-icon-select').value;
+    const existingBtn = (apiConfig && apiConfig.stream_deck_buttons)
+        ? apiConfig.stream_deck_buttons.find(b => b.id === editingButtonId)
+        : null;
+    const previousValue = existingBtn ? (existingBtn.value || '') : '';
 
     if (type === 'clock_widget') {
         const clockStyleSel = document.getElementById('edit-clock-style');
@@ -5041,9 +5476,26 @@ function applyButtonEdit() {
         value = 'display_brightness';
     } else if (type === 'now_playing') {
         value = 'media_session';
+    } else if (type === 'media_widget') {
+        value = value || 'playpause';
+    } else if (type === 'toggle') {
+        const toggleSel = document.getElementById('edit-toggle-action');
+        value = toggleSel ? toggleSel.value : (previousValue || 'mic_mute');
+    } else if (type === 'hotkey') {
+        // Chips are the source of truth; never persist a dangling "ctrl+".
+        const tokens = hotkeyTokens();
+        value = tokens.length ? tokens.join('+') : previousValue;
+    } else if (type === 'command') {
+        const advanced = document.getElementById('edit-command-advanced-toggle');
+        const customInput = document.getElementById('edit-custom-command');
+        value = (advanced && advanced.checked && customInput ? customInput.value : value).trim();
+        if (!value) value = previousValue;
     } else if (type === 'weather') {
         const citySel = document.getElementById('edit-weather-city');
-        if (citySel && citySel.value !== 'custom') {
+        if (citySel && citySel.value === 'custom') {
+            const customInput = document.getElementById('edit-weather-custom');
+            value = (customInput ? customInput.value : '').trim() || previousValue || 'Istanbul';
+        } else if (citySel) {
             value = citySel.value;
         }
     }
@@ -5061,7 +5513,9 @@ function applyButtonEdit() {
                 icon: finalIcon,
                 color: '#F4F4F5',
                 col_span: editSizeSpans.col,
-                row_span: editSizeSpans.row
+                row_span: editSizeSpans.row,
+                // Only toggle cards carry an on/off state.
+                state: type === 'toggle' ? !!existing.state : false
             };
             // Clock cards keep their typography; other widget types never carry it.
             const clockStyleSel = document.getElementById('edit-clock-style');
@@ -5208,14 +5662,22 @@ function updateDriverUI(data) {
     if (data.driver_exists) {
         icon.className = "driver-status-icon success";
         title.textContent = "Sanal Ekran Sürücüsü Aktif";
-        
-        if (data.monitors > 1) {
-            desc.textContent = `Toplam monitör: ${data.monitors}.`;
+
+        // Prefer the explicit server flag: "more than one monitor" also matches
+        // a PC that already has 2+ physical displays with the virtual one off.
+        const monitorCount = Number(data.monitors) || 0;
+        const isActive = data.virtual_monitor_active === undefined
+            ? monitorCount > 1
+            : !!data.virtual_monitor_active;
+        if (isActive) {
+            desc.textContent = `Toplam monitör: ${monitorCount}.`;
             badge.className = "status-pill status-green";
             badge.textContent = "AKTİF";
             chkEnable.checked = true;
         } else {
-            desc.textContent = "Sürücü yüklü, sanal monitör kapalı.";
+            desc.textContent = monitorCount > 1
+                ? `Toplam monitör: ${monitorCount}. Sanal monitör kapalı.`
+                : "Sürücü yüklü, sanal monitör kapalı.";
             badge.className = "status-pill status-yellow";
             badge.textContent = "KAPALI";
             chkEnable.checked = false;
@@ -5582,37 +6044,26 @@ function checkMicDriverStatus() {
 function checkMobileMode() {
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode');
-    if (mode) {
-        document.body.classList.add('mobile-mode');
-        const sidebar = document.querySelector('.sidebar');
-        if (sidebar) sidebar.style.display = 'none';
-        const contentHeader = document.querySelector('.content-header');
-        if (contentHeader) contentHeader.style.display = 'none';
-        const mainContent = document.querySelector('.main-content');
-        if (mainContent) {
-            mainContent.style.marginLeft = '0';
-            mainContent.style.padding = '0';
-            mainContent.style.width = '100vw';
-            mainContent.style.height = '100vh';
-        }
-        const appContainer = document.querySelector('.app-container');
-        if (appContainer) {
-            appContainer.style.padding = '0';
-            appContainer.style.margin = '0';
-            appContainer.style.width = '100vw';
-            appContainer.style.height = '100vh';
-        }
-        
-        // Hide all tabs
+    if (!mode) return;
+
+    document.body.classList.add('mobile-mode');
+
+    // The mobile-mode stylesheet owns the whole layout (100% / 100dvh, no
+    // scrollbars, no clipping) — only the panel routing happens here.
+    const targetPanel = document.getElementById('panel-' + mode);
+    if (targetPanel) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        
-        const targetPanel = document.getElementById('panel-' + mode);
-        if (targetPanel) {
-            targetPanel.classList.add('active');
-            targetPanel.style.height = '100vh';
-            targetPanel.style.width = '100vw';
-        }
+        targetPanel.classList.add('active');
     }
+
+    // The global resize handler already re-fits the frame; orientation changes
+    // on Android WebView also need an explicit pass once the viewport settles.
+    const syncViewport = () => {
+        lastDeckFitKey = '';
+        fitDeckFrame();
+    };
+    window.addEventListener('orientationchange', () => setTimeout(syncViewport, 120));
+    syncViewport();
 }
 
 // ----------------- Auto Update Prompt -----------------

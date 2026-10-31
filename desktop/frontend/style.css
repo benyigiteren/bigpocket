@@ -783,28 +783,6 @@ body.is-deck-dragging-active .deck-btn:not(.is-drag-lifted) {
     background: var(--bg-surface);
 }
 
-.deck-clock-time {
-    font-family: var(--font-mono);
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: var(--text-main);
-    line-height: 1.1;
-    background: rgba(255, 255, 255, 0.04);
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.deck-clock-date {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    margin-top: 5px;
-}
-
 /* Background Styles */
 .deck-btn.bg-transparent {
     background: transparent !important;
@@ -3626,6 +3604,47 @@ input:checked + .slider:before {
     line-height: 1;
 }
 
+.deck-media__live-badge {
+    display: none;                 /* shown only when the card carries .is-live */
+    align-items: center;
+    gap: 6px;
+    background: rgba(239, 68, 68, 0.16);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    padding: 3px 8px;
+    border-radius: 99px;
+    width: fit-content;
+    margin: 2px 0;
+}
+
+/* Live stream: badge in, scrubber out. Idle (no duration yet): wrap hidden. */
+.deck-media.is-live .deck-media__live-badge { display: inline-flex; }
+.deck-media.is-live .deck-media__progress-track,
+.deck-media.is-live .deck-media__progress-times { display: none; }
+.deck-media.is-idle .deck-media__progress-wrap { display: none; }
+/* Between server frames the bar advances locally: keep the motion linear. */
+.deck-media.is-ticking .deck-media__progress-bar { transition: width 0.25s linear; }
+
+.deck-media__live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+    animation: livePulse 1.2s infinite alternate;
+}
+
+.deck-media__live-text {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #ef4444;
+}
+
+@keyframes livePulse {
+    0% { opacity: 0.4; }
+    100% { opacity: 1; transform: scale(1.15); }
+}
+
 
 .deck-media__controls { display: flex; align-items: center; gap: 6px; }
 
@@ -3807,8 +3826,7 @@ input:checked + .slider:before {
 }
 .deck-apple-clock-time,
 .deck-apple-stacked-h,
-.deck-apple-stacked-m,
-.deck-clock-time { color: var(--text-main); text-shadow: none; font-weight: 300; }
+.deck-apple-stacked-m { color: var(--text-main); text-shadow: none; font-weight: 300; }
 
 .deck-world-city { color: var(--text-muted); }
 .deck-world-time { color: var(--text-main); font-weight: 300; }
@@ -3881,6 +3899,9 @@ body.mobile-mode .floating-quick-actions {
     display: none !important;
 }
 
+/* Fixed to the visual viewport: 100dvh where supported so the Android URL bar
+   never creates a scrollbar, with 100vh as the fallback. Every level is 100%
+   and overflow-hidden, so nothing can scroll or clip. */
 body.mobile-mode,
 body.mobile-mode .app-container,
 body.mobile-mode .main-content,
@@ -3896,29 +3917,56 @@ body.mobile-mode .deck-hardware-frame {
     border-radius: 0 !important;
     box-shadow: none !important;
     background: #101012 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    max-width: 100vw !important;
-    max-height: 100vh !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
     overflow: hidden !important;
+    overscroll-behavior: none !important;
+    box-sizing: border-box !important;
 }
+
+body.mobile-mode {
+    position: fixed !important;
+    inset: 0 !important;
+    height: 100dvh !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body.mobile-mode .app-container { flex-direction: column !important; gap: 0 !important; }
+body.mobile-mode .main-content { display: block !important; gap: 0 !important; }
+body.mobile-mode .tab-panel.active { display: flex !important; flex: 1 1 auto !important; gap: 0 !important; animation: none !important; }
+body.mobile-mode .deck-studio-card { display: flex !important; flex-direction: column !important; gap: 0 !important; }
+body.mobile-mode .deck-canvas-stage { display: flex !important; flex-direction: column !important; gap: 0 !important; }
+body.mobile-mode .deck-phone-mockup { display: grid !important; place-items: stretch !important; }
+
 body.mobile-mode .buttons-grid,
 body.mobile-mode .deck-hardware-frame .buttons-grid {
-    padding: 10px !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    gap: 10px !important;
+    flex: 1 1 auto !important;
+    padding: 8px !important;
+    width: 100% !important;
+    height: 100% !important;
+    gap: var(--gap, 8px) !important;
     box-sizing: border-box !important;
     grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)) !important;
     grid-template-rows: repeat(var(--rows, 2), minmax(0, 1fr)) !important;
-    grid-auto-rows: auto !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
+    justify-content: stretch !important;
     background: #101012 !important;
     border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
 }
 
 body.mobile-mode .deck-btn {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
     border-radius: 18px !important;
+    touch-action: manipulation;
 }
 /* --- Sade kart penceresi (4 alan) --- */
 .edit-modal-card { width: 100%; max-width: 440px; padding: 0; overflow: hidden; }
@@ -3953,6 +4001,169 @@ body.mobile-mode .deck-btn {
 }
 .size-pill:hover { color: var(--text-main); border-color: var(--border-hover); }
 .size-pill.active { background: var(--accent-solid); border-color: transparent; color: var(--text-inverse); }
+
+/* --- Görsel bileşen kontrolleri (kısayol kaydedici · komut çipleri) --- */
+.control-sub-label {
+    display: block;
+    margin: 12px 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+.control-sub-label input[type="checkbox"] {
+    width: auto;
+    margin: 0 6px 0 0;
+    vertical-align: middle;
+    accent-color: var(--accent-solid);
+}
+.control-hint {
+    margin: 8px 0 0;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    opacity: 0.75;
+}
+.control-hint b { color: var(--text-main); font-weight: 600; }
+
+/* Kısayol kaydedici: tuş kapsülleri (ham metin kutusu yerine) */
+.hotkey-recorder {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 46px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-main);
+    border: 1px solid var(--border-color);
+    cursor: text;
+    transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.hotkey-recorder::-webkit-scrollbar { display: none; }
+.hotkey-recorder:hover { border-color: var(--border-hover); }
+.hotkey-recorder:focus,
+.hotkey-recorder.is-recording {
+    outline: none;
+    background: var(--bg-elevated);
+    border-color: var(--accent-solid);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+}
+.hotkey-chips {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+.hotkey-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    background: #27272a;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-bottom: 2.5px solid rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+.hotkey-chip.is-preview {
+    opacity: 0.62;
+    border-style: dashed;
+}
+.hotkey-plus {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+.hotkey-placeholder {
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+.hotkey-live-badge {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--text-muted);
+    opacity: 0.35;
+    transition: color 0.16s ease, opacity 0.16s ease;
+}
+.hotkey-recorder.is-recording .hotkey-live-badge {
+    color: var(--status-red-txt);
+    opacity: 1;
+}
+
+/* Hazır eylem çipleri (kısayol · komut) */
+.control-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.control-chip {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-full);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.control-chip:hover { color: var(--text-main); border-color: var(--border-hover); }
+.control-chip.active {
+    background: var(--accent-solid);
+    border-color: transparent;
+    color: var(--text-inverse);
+}
+
+/* Özel komut satırı: terminal ön ekli görsel alan */
+.command-custom-row {
+    align-items: center;
+    margin-top: 6px;
+    padding: 0 10px 0 0;
+    background: var(--bg-main);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: border-color 0.16s ease, background 0.16s ease;
+}
+.command-custom-row:focus-within {
+    border-color: var(--accent-solid);
+    background: var(--bg-elevated);
+}
+.input-prefix-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.command-custom-row input[type="text"] {
+    background: transparent !important;
+    border: none !important;
+    font-family: var(--font-mono);
+    padding: 12px 0 !important;
+}
+.command-custom-row input[type="text"]:focus { background: transparent !important; }
 
 /* --- Bileşen seçici --- */
 .picker-modal-card { width: 100%; max-width: 840px; padding: 0; overflow: hidden; }

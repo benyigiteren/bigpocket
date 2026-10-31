@@ -115,7 +115,10 @@ fn main() {
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
                         "quit" => {
-                            server::set_virtual_monitor(false);
+                            // Blocking form: the detached variant would be killed
+                            // by `exit` before it detaches the virtual display,
+                            // leaving a ghost monitor in Display Settings.
+                            server::set_virtual_monitor_blocking(false);
                             std::process::exit(0);
                         }
                         "show" => {
@@ -178,6 +181,14 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // The event loop is going away — OS shutdown/logoff included.
+                // The virtual display must not outlive the app, or Windows keeps
+                // a ghost second screen in Display Settings.
+                server::set_virtual_monitor_blocking(false);
+            }
+        });
 }

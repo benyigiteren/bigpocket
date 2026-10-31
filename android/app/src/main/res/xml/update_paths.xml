@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- In-app updater APK (cache/updates). -->
     <cache-path name="updates" path="updates/" />
-    <external-path name="downloads" path="Download/" />
-    <external-path name="external_files" path="." />
+    <!-- Download target: getExternalFilesDir(DIRECTORY_DOWNLOADS). -->
+    <external-files-path name="downloads" path="Download/" />
+    <!-- Fallback used when external storage is unavailable (filesDir/downloads). -->
+    <files-path name="internal_downloads" path="downloads/" />
+    <!-- Files pulled by releases that still wrote into the public Download folder. -->
+    <external-path name="legacy_downloads" path="Download/" />
 </paths>

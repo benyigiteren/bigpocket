@@ -80,6 +80,11 @@ class MainActivity : ComponentActivity() {
   }
   override fun onDestroy() {
     super.onDestroy()
-    com.ygt.bigpocket.services.SocketManager.disconnect()
+    // Only a real exit may tear the link down. A configuration rebuild (theme, font size,
+    // locale, "don't keep activities") re-creates the activity within the same process, and
+    // disconnecting there left the app permanently offline with auto-reconnect disabled.
+    if (isFinishing) {
+      com.ygt.bigpocket.services.SocketManager.disconnect()
+    }
   }
 }

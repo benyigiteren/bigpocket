@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20261031a">
 </head>
 <body>
     <div class="app-container">
@@ -316,24 +316,83 @@
                                     <option value="hotkey">Kısayol Tuşu</option>
                                     <option value="command">Uygulama Aç / Komut</option>
                                     <option value="url">Web Sitesi</option>
-                                    <option value="weather">Hava Durumu (Şehir)</option>
+                                    <option value="text_snippet">Hızlı Metin</option>
+                                    <option value="toggle">Anahtar (Aç / Kapa)</option>
+                                    <option value="clock_widget">Saat &amp; Tarih</option>
                                     <option value="live_info">PC Sıcaklık &amp; Durum (Sensör)</option>
+                                    <option value="weather">Hava Durumu (Şehir)</option>
                                     <option value="now_playing">Şimdi Çalıyor</option>
                                     <option value="media_widget">Medya Kontrolü (Tek Buton)</option>
                                     <option value="media_control">Medya Kontrol Masası (3 Buton)</option>
-                                    <option value="clock_widget">Saat &amp; Tarih</option>
                                     <option value="volume_slider">Ses Kaydırıcı</option>
                                     <option value="app_volume_slider">Uygulama Sesi (Per-App Ses)</option>
                                     <option value="brightness_slider">Parlaklık</option>
-                                    <option value="toggle">Anahtar (Aç / Kapa)</option>
-                                    <option value="media_widget">Medya Kontrolü</option>
-                                    <option value="text_snippet">Hızlı Metin</option>
                                 </select>
                             </div>
 
-                            <div class="form-group" id="edit-value-group">
+                            <div class="form-group" id="edit-value-group" style="display: none;">
                                 <label for="edit-value" id="edit-value-label">Görev / Değer</label>
                                 <input type="text" id="edit-value" placeholder="ctrl+alt+t" autocomplete="off">
+                            </div>
+
+                            <!-- Kısayol kaydedici: görsel tuş kapsülleri, ham metin kutusu yok -->
+                            <div class="form-group" id="hotkey-group" style="display: none;">
+                                <label id="hotkey-group-label">Kısayol Kombinasyonu</label>
+                                <div class="hotkey-recorder" id="hotkey-recorder" tabindex="0" role="button" aria-labelledby="hotkey-group-label">
+                                    <div class="hotkey-chips" id="hotkey-chips"></div>
+                                    <span class="hotkey-live-badge">KAYIT</span>
+                                </div>
+                                <div class="control-chips" id="hotkey-preset-chips">
+                                    <button type="button" class="control-chip" data-hotkey="ctrl+c">Kopyala</button>
+                                    <button type="button" class="control-chip" data-hotkey="ctrl+v">Yapıştır</button>
+                                    <button type="button" class="control-chip" data-hotkey="ctrl+shift+m">Mikrofonu Kapat</button>
+                                    <button type="button" class="control-chip" data-hotkey="alt+tab">Pencere Değiştir</button>
+                                    <button type="button" class="control-chip" data-hotkey="meta+d">Masaüstünü Göster</button>
+                                    <button type="button" class="control-chip" data-hotkey="meta+l">Ekranı Kilitle</button>
+                                </div>
+                                <p class="control-hint">Kaydediciye tıklayıp kombinasyonu tuşlayın. <b>Backspace</b> son tuşu siler, <b>Delete</b> tümünü temizler.</p>
+                            </div>
+
+                            <!-- Komut / uygulama: görsel uygulama seçici + hazır komut çipleri -->
+                            <div class="form-group" id="command-group" style="display: none;">
+                                <label for="edit-app-select">Çalıştırılacak Uygulama</label>
+                                <div class="edit-inline-row">
+                                    <input type="text" id="app-search-input" placeholder="Uygulama ara..." autocomplete="off">
+                                    <select id="edit-app-select">
+                                        <option value="">-- Uygulama Seçin --</option>
+                                    </select>
+                                </div>
+                                <label class="control-sub-label">Hazır Komutlar</label>
+                                <div class="control-chips" id="command-preset-chips">
+                                    <button type="button" class="control-chip" data-command="clean_clipboard">Panoyu Temizle</button>
+                                    <button type="button" class="control-chip" data-command="empty_trash">Çöp Kutusunu Boşalt</button>
+                                    <button type="button" class="control-chip" data-command="explorer.exe">Dosya Gezgini</button>
+                                    <button type="button" class="control-chip" data-command="notepad.exe">Not Defteri</button>
+                                    <button type="button" class="control-chip" data-command="calc.exe">Hesap Makinesi</button>
+                                    <button type="button" class="control-chip" data-command="taskmgr.exe">Görev Yöneticisi</button>
+                                    <button type="button" class="control-chip" data-command="SnippingTool.exe">Ekran Görüntüsü</button>
+                                    <button type="button" class="control-chip" data-command="explorer.exe ms-settings:">Windows Ayarları</button>
+                                </div>
+                                <label class="control-sub-label" for="edit-custom-command">
+                                    <input type="checkbox" id="edit-command-advanced-toggle">
+                                    Gelişmiş: özel komut çalıştır
+                                </label>
+                                <div class="edit-inline-row command-custom-row" id="edit-command-custom-row" style="display: none;">
+                                    <span class="input-prefix-glyph" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>
+                                    <input type="text" id="edit-custom-command" placeholder="Örn. python C:\\scripts\\is.py" autocomplete="off" spellcheck="false">
+                                </div>
+                            </div>
+
+                            <!-- Anahtar eylemi: görsel eylem seçici -->
+                            <div class="form-group" id="toggle-group" style="display: none;">
+                                <label for="edit-toggle-action">Anahtar Eylemi</label>
+                                <select id="edit-toggle-action">
+                                    <option value="mic_mute">🎙️ Mikrofonu Sessize Al / Aç</option>
+                                    <option value="speaker_mute">🔊 Hoparlörü Sessize Al / Aç</option>
+                                    <option value="virtual_monitor">🖥️ Sanal Monitör Aç / Kapa</option>
+                                    <option value="pomodoro">⏱️ Pomodoro Zamanlayıcı</option>
+                                </select>
+                                <p class="control-hint">Kart her basışta bu eylemi açar/kapatır.</p>
                             </div>
 
                             <div class="form-group" id="clock-options-group" style="display: none;">
@@ -384,6 +443,7 @@
                                     <option value="gpu">🎮 Ekran Kartı (GPU Yükü %)</option>
                                     <option value="net_speed">🌐 Ağ Hızı (Canlı Download/Upload)</option>
                                     <option value="combo">⭕ 3'lü Sensör Halkası (CPU + RAM + Sıcaklık)</option>
+                                    <option value="activity_ring">💿 Aktivite Halkası (Geniş Metrik)</option>
                                 </select>
                             </div>
 
@@ -415,17 +475,11 @@
                                     <option value="New York">New York</option>
                                     <option value="custom">Özel Şehir...</option>
                                 </select>
-                            </div>
-                            <div class="form-group" id="installed-apps-group" style="display: none;">
-                                <label for="edit-app-select">Kurulu Uygulama</label>
-                                <div class="edit-inline-row">
-                                    <input type="text" id="app-search-input" placeholder="Uygulama ara..." autocomplete="off">
-                                    <select id="edit-app-select">
-                                        <option value="">-- Uygulama Seçin --</option>
-                                    </select>
+                                <div class="form-group" id="weather-custom-group" style="display: none; margin: 10px 0 0;">
+                                    <label for="edit-weather-custom">Özel Şehir Adı</label>
+                                    <input type="text" id="edit-weather-custom" placeholder="Örn. Trabzon" autocomplete="off">
                                 </div>
                             </div>
-
                             <div class="form-group" id="audio-sessions-group" style="display: none;">
                                 <label for="edit-audio-app-select">Sesi Yönetilecek Uygulama</label>
                                 <div class="edit-inline-row">
@@ -1575,7 +1629,7 @@
     </div>
     <div class="cmdk-toast-host" id="cmdk-toast-host"></div>
 
-    <script src="app.js?v=20261030f"></script>
+    <script src="app.js?v=20261031a"></script>
     <script src="flow.js?v=20261030f"></script>
     <script src="command_palette.js?v=20261030f"></script>
 </body>
