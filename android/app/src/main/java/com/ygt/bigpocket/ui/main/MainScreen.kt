@@ -2700,8 +2700,9 @@ fun ConnectionTab(
 
 // Map standard config string icons to compose Vector drawables
 private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector.ImageVector {
-    val clean = iconName.substringBefore(":")
+    val clean = iconName.substringBefore(":").lowercase()
     return when (clean) {
+        "keyboard", "hotkey", "key" -> Icons.Default.Keyboard
         "mic" -> Icons.Default.Mic
         "volup", "volume_up" -> Icons.Default.VolumeUp
         "voldown", "volume_down" -> Icons.Default.VolumeDown
@@ -2709,7 +2710,7 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
         "volume", "master_volume" -> Icons.Default.VolumeUp
         "bright", "brightness", "sun", "light" -> Icons.Default.LightMode
         "play", "playpause" -> Icons.Default.PlayArrow
-        "skip", "nexttrack" -> Icons.Default.SkipNext
+        "skip", "nexttrack", "next" -> Icons.Default.SkipNext
         "prev", "prevtrack" -> Icons.Default.SkipPrevious
         "calc" -> Icons.Default.Calculate
         "web", "globe" -> Icons.Default.Public
@@ -2740,7 +2741,8 @@ private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector
         "delete" -> Icons.Default.Delete
         "edit" -> Icons.Default.Edit
         "close" -> Icons.Default.Close
-        else -> Icons.Default.Star
+        "star" -> Icons.Default.Star
+        else -> Icons.Default.Keyboard
     }
 }
 
@@ -2762,9 +2764,8 @@ fun AppleCapsuleSlider(
 ) {
     val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
-    val p = palette ?: deckPaletteFor(if (type == "brightness") "brightness_slider" else "volume_slider", "", "")
-    val accent = if (accentColor == Color.Unspecified) p.accent else accentColor
     val isBrightness = type == "brightness"
+    val safeLabel = if (label.isNotBlank()) label else if (isBrightness) "Parlaklık" else "Ana Ses"
 
     var debounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var localValue by remember(value) { mutableFloatStateOf(value) }
@@ -2780,7 +2781,7 @@ fun AppleCapsuleSlider(
     val scheduleCommit: (Float) -> Unit = { target ->
         debounceJob?.cancel()
         debounceJob = coroutineScope.launch {
-            kotlinx.coroutines.delay(350L)
+            kotlinx.coroutines.delay(300L)
             onValueChange(target)
         }
     }
@@ -2798,13 +2799,8 @@ fun AppleCapsuleSlider(
                 detectTapGestures(
                     onLongPress = { onLongClick?.invoke() },
                     onTap = { offset ->
-                        val horizontal = size.width > size.height * 1.25f
-                        val fraction = if (horizontal) {
-                            offset.x / size.width.toFloat()
-                        } else {
-                            1f - (offset.y / size.height.toFloat())
-                        }
-                        val level = fraction.coerceIn(0f, 1f) * 100f
+                        val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        val level = fraction * 100f
                         localValue = level
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         commitNow(level)
@@ -2823,123 +2819,76 @@ fun AppleCapsuleSlider(
                     },
                     onDragCancel = {
                         isDragging = false
-                        commitNow(localValue)
+                        localValue = value
                     },
                     onDrag = { change, _ ->
                         change.consume()
-                        val horizontal = size.width > size.height * 1.25f
-                        val fraction = if (horizontal) {
-                            change.position.x / size.width.toFloat()
-                        } else {
-                            1f - (change.position.y / size.height.toFloat())
-                        }
-                        val level = fraction.coerceIn(0f, 1f) * 100f
+                        val fraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        val level = fraction * 100f
                         localValue = level
                         scheduleCommit(level)
                     }
                 )
             }
+            .padding(14.dp)
     ) {
-        val horizontal = maxWidth > maxHeight * 1.25f
-        val density = androidx.compose.ui.platform.LocalDensity.current
-
-        if (horizontal) {
-            val fillWidth = with(density) { (fillFraction * constraints.maxWidth.toFloat()).toDp() }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(fillWidth)
-                    .fillMaxHeight()
-                    .background(accent.copy(alpha = 0.22f))
-            )
-        } else {
-            val fillHeight = with(density) { (fillFraction * constraints.maxHeight.toFloat()).toDp() }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(fillHeight)
-                    .background(accent.copy(alpha = 0.22f))
-            )
-        }
-
-        if (horizontal) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Row: 32dp circular badge with icon on left, %85 on right
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(MinimalistSurfaceElevated),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = sliderIcon,
-                            contentDescription = label,
-                            tint = accent,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Text(
-                        text = label,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MinimalistPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Text(
-                    text = clampedValue.toInt().toString() + "%",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Light,
-                    color = MinimalistPrimary
-                )
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.Start,
-                verticalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
                         .background(MinimalistSurfaceElevated),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = sliderIcon,
-                        contentDescription = label,
-                        tint = accent,
-                        modifier = Modifier.size(18.dp)
+                        contentDescription = safeLabel,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
                 Text(
-                    text = clampedValue.toInt().toString() + "%",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Light,
-                    color = MinimalistPrimary
+                    text = "%${clampedValue.toInt()}",
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White
                 )
-                Text(
-                    text = label,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MinimalistSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            }
+
+            // Middle: Label
+            Text(
+                text = safeLabel,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Bottom: Sleek horizontal capsule track matching PC Image 1
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(fillFraction)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White)
                 )
             }
         }
@@ -3005,7 +2954,7 @@ fun StreamDeckClockTile(
     val dateText = dateFormat.format(now).replaceFirstChar { it.uppercase() }
     val timeText = timeFormat.format(now)
     val wordText = turkishClockWords(calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE))
-    val secondary = if (label.isNotBlank()) label else "İstanbul · yerel saat"
+    val secondary = if (label.isNotBlank() && label != "Saat & Tarih" && label != "Saat") label else "İstanbul · yerel saat"
     val digitsFont = when (fontFamilyStr) {
         "serif" -> FontFamily.Serif
         "sans", "sans_serif" -> FontFamily.SansSerif
@@ -3638,7 +3587,7 @@ private fun DeckComboRings(
         ) {
             DeckMetricRing("İşlemci", "%" + cpu, (cpu / 100f).coerceIn(0f, 1f), cpuColor, ringSize)
             DeckMetricRing("Bellek", "%" + ram, (ram / 100f).coerceIn(0f, 1f), ramColor, ringSize)
-            DeckMetricRing("Sıcaklık", cpuTemp.toString() + "°", (cpuTemp / 100f).coerceIn(0f, 1f), tempColor, ringSize)
+            DeckMetricRing("Sıcaklık", cpuTemp.toString() + "°C", (cpuTemp / 100f).coerceIn(0f, 1f), tempColor, ringSize)
         }
     }
 }
@@ -3956,12 +3905,22 @@ private fun DeckActionCard(
                 )
             } else {
                 Icon(
-                    imageVector = getVectorIcon(button.icon),
+                    imageVector = getVectorIcon(button.icon.ifBlank { if (button.type == "hotkey") "keyboard" else "star" }),
                     contentDescription = button.label,
                     tint = palette.accent,
                     modifier = Modifier.size(18.dp)
                 )
             }
+        }
+        if (button.type != "toggle") {
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MinimalistSecondary.copy(alpha = 0.5f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(16.dp)
+            )
         }
         Column(modifier = Modifier.align(Alignment.BottomStart)) {
             Text(
@@ -4418,7 +4377,6 @@ fun StreamDeckNowPlayingTile(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .scale(1.08f)
                     .blur(5.dp)
             )
             Box(
