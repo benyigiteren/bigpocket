@@ -31,8 +31,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.platform.LocalConfiguration
 import android.content.res.Configuration
@@ -4677,6 +4680,7 @@ fun BentoDeckGrid(
     onDeleteButton: (StreamDeckButtonInfo) -> Unit = {},
     onCustomizeButton: (StreamDeckButtonInfo) -> Unit = {},
     onMoveToCell: (Int, Int) -> Unit = { _, _ -> },
+    onSwapButtons: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val rowCount = rows.coerceAtLeast(1)
@@ -4688,6 +4692,11 @@ fun BentoDeckGrid(
     val placements = layout.placements
     val emptyCells = layout.emptyCells
 
+    var draggingButtonId by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var hoverCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val haptic = LocalHapticFeedback.current
+
     BoxWithConstraints(modifier = modifier) {
         val boundedWidth = if (maxWidth.value.isFinite()) maxWidth else gap * (colCount + 1) + 64.dp * colCount
         val boundedHeight = if (maxHeight.value.isFinite()) maxHeight else gap * (rowCount + 1) + 64.dp * rowCount
@@ -4698,9 +4707,10 @@ fun BentoDeckGrid(
             emptyCells.forEachIndexed { index, cell ->
                 val r = cell.first
                 val c = cell.second
+                val isHoverTarget = draggingButtonId != null && hoverCell == (r to c)
                 EmptySlotTile(
-                    isEditMode = isEditMode,
-                    isDropTarget = isEditMode && selectedForSwapId != null,
+                    isEditMode = isEditMode || draggingButtonId != null,
+                    isDropTarget = isHoverTarget || (isEditMode && selectedForSwapId != null),
                     onClick = {
                         if (isEditMode) {
                             onMoveToCell(r, c)
@@ -4712,17 +4722,89 @@ fun BentoDeckGrid(
                     modifier = Modifier
                         .offset(x = (cellWidth + gap) * c, y = (cellHeight + gap) * r)
                         .size(cellWidth, cellHeight)
+                        .then(
+                            if (isHoverTarget) {
+                                Modifier.border(2.dp, Color(0xFF818CF8), RoundedCornerShape(DeckCorner))
+                            } else {
+                                Modifier
+                            }
+                        )
                 )
             }
 
             placements.forEach { placement ->
+                val isDragging = draggingButtonId == placement.button.id
                 val tileWidth = cellWidth * placement.colSpan + gap * (placement.colSpan - 1)
                 val tileHeight = cellHeight * placement.rowSpan + gap * (placement.rowSpan - 1)
                 val isSelected = selectedForSwapId == placement.button.id
+                val isHoverTarget = draggingButtonId != null && !isDragging && hoverCell == (placement.row to placement.col)
+
                 Box(
                     modifier = Modifier
                         .offset(x = (cellWidth + gap) * placement.col, y = (cellHeight + gap) * placement.row)
                         .size(tileWidth, tileHeight)
+                        .zIndex(if (isDragging) 100f else 1f)
+                        .graphicsLayer {
+                            if (isDragging) {
+                                translationX = dragOffset.x
+                                translationY = dragOffset.y
+                                scaleX = 1.08f
+                                scaleY = 1.08f
+                                shadowElevation = 32f
+                            }
+                        }
+                        .then(
+                            if (isHoverTarget) {
+                                Modifier.border(2.dp, Color(0xFF818CF8), RoundedCornerShape(DeckCorner))
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .pointerInput(placement.button.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    draggingButtonId = placement.button.id
+                                    dragOffset = Offset.Zero
+                                    hoverCell = placement.row to placement.col
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffset += dragAmount
+                                    val originX = (cellWidth + gap).toPx() * placement.col
+                                    val originY = (cellHeight + gap).toPx() * placement.row
+                                    val currentCenterX = originX + dragOffset.x + tileWidth.toPx() / 2f
+                                    val currentCenterY = originY + dragOffset.y + tileHeight.toPx() / 2f
+                                    val targetC = (currentCenterX / (cellWidth + gap).toPx()).toInt().coerceIn(0, colCount - 1)
+                                    val targetR = (currentCenterY / (cellHeight + gap).toPx()).toInt().coerceIn(0, rowCount - 1)
+                                    hoverCell = targetR to targetC
+                                },
+                                onDragEnd = {
+                                    val target = hoverCell
+                                    val btnId = draggingButtonId
+                                    if (target != null && btnId != null) {
+                                        val targetR = target.first
+                                        val targetC = target.second
+                                        if (targetR != placement.row || targetC != placement.col) {
+                                            val targetPlacement = placements.firstOrNull { it.row == targetR && it.col == targetC && it.button.id != btnId }
+                                            if (targetPlacement != null) {
+                                                onSwapButtons(btnId, targetPlacement.button.id)
+                                            } else {
+                                                onMoveToCell(targetR, targetC)
+                                            }
+                                        }
+                                    }
+                                    draggingButtonId = null
+                                    dragOffset = Offset.Zero
+                                    hoverCell = null
+                                },
+                                onDragCancel = {
+                                    draggingButtonId = null
+                                    dragOffset = Offset.Zero
+                                    hoverCell = null
+                                }
+                            )
+                        }
                 ) {
                     ElgatoKeycapTile(
                         button = placement.button,
@@ -4739,7 +4821,6 @@ fun BentoDeckGrid(
                         isSelectedForSwap = isSelected,
                         modifier = Modifier.fillMaxSize()
                     )
-
                     if (isEditMode) {
                         // Whole-card tap target: selects the card, then swaps or moves it.
                         Box(
@@ -5672,6 +5753,23 @@ fun StreamDeckTab(
                     onDeleteButton = { btn -> handleDelete(btn) },
                     onCustomizeButton = { btn -> onButtonLongClick(btn) },
                     onMoveToCell = { r, c -> handleMoveToCell(r, c) },
+                    onSwapButtons = { id1, id2 ->
+                        val layout = packBentoLayout(pageButtons, rowCount, colCount)
+                        val from = layout.placements.firstOrNull { it.button.id == id1 }
+                        val to = layout.placements.firstOrNull { it.button.id == id2 }
+                        if (from != null && to != null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onButtonsUpdated(
+                                buttons.map {
+                                    when (it.id) {
+                                        from.button.id -> it.copy(gridRow = to.row, gridCol = to.col)
+                                        to.button.id -> it.copy(gridRow = from.row, gridCol = from.col)
+                                        else -> it
+                                    }
+                                }
+                            )
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
