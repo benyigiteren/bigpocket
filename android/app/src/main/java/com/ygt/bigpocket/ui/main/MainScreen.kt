@@ -925,19 +925,15 @@ private suspend fun autoDetectPCIP(): String? = withContext(Dispatchers.IO) {
     try {
         val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
         while (interfaces.hasMoreElements()) {
-            val element = interfaces.nextElement()
-            val name = element.name.lowercase()
-            if (name.contains("rndis") || name.contains("usb") || name.contains("wlan") || name.contains("ap") || name.contains("eth")) {
-                val addresses = element.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val addr = addresses.nextElement()
-                    if (!addr.isLoopbackAddress) {
-                        val ip = addr.hostAddress ?: ""
-                        if (ip.contains(".") && (ip.startsWith("192.168.") || ip.startsWith("172.") || ip.startsWith("10."))) {
-                            val parts = ip.split(".")
-                            if (parts.size == 4) {
-                                subnets.add("${parts[0]}.${parts[1]}.${parts[2]}")
-                            }
+            val addresses = interfaces.nextElement().inetAddresses
+            while (addresses.hasMoreElements()) {
+                val addr = addresses.nextElement()
+                if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                    val ip = addr.hostAddress ?: ""
+                    if (ip.startsWith("192.168.") || ip.startsWith("172.") || ip.startsWith("10.")) {
+                        val parts = ip.split(".")
+                        if (parts.size == 4) {
+                            subnets.add("${parts[0]}.${parts[1]}.${parts[2]}")
                         }
                     }
                 }
@@ -1480,25 +1476,47 @@ fun MainScreen(
         }
     }
 
-    // Permission launcher
-    val permissionsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
-        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
-        if (!cameraGranted || !audioGranted) {
-            Toast.makeText(context, "Özellikleri kullanmak için izin vermelisiniz.", Toast.LENGTH_LONG).show()
+    // On-demand Permission Launchers (never requested on app cold launch)
+    var pendingCameraAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pendingCameraAction?.invoke()
+        } else {
+            Toast.makeText(context, "Kamera özelliğini kullanmak için kamera izni gereklidir.", Toast.LENGTH_SHORT).show()
+        }
+        pendingCameraAction = null
+    }
+
+    var pendingMicAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pendingMicAction?.invoke()
+        } else {
+            Toast.makeText(context, "Mikrofon özelliğini kullanmak için mikrofon izni gereklidir.", Toast.LENGTH_SHORT).show()
+        }
+        pendingMicAction = null
+    }
+
+    val requestCameraPermissionOrRun: (() -> Unit) -> Unit = { action ->
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            action()
+        } else {
+            pendingCameraAction = action
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
-    LaunchedEffect(Unit) {
-        permissionsLauncher.launch(
-            arrayOf(
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.POST_NOTIFICATIONS
-            )
-        )
+    val requestMicPermissionOrRun: (() -> Unit) -> Unit = { action ->
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            action()
+        } else {
+            pendingMicAction = action
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     // File picker launcher
@@ -1549,6 +1567,17 @@ fun MainScreen(
     // Auto discovery: while disconnected, listen for BigPocket PCs on the LAN and connect automatically.
     LaunchedEffect(isConnected, manualDisconnect) {
         if (isConnected || manualDisconnect) return@LaunchedEffect
+        val fallbackJob = launch {
+            delay(3500)
+            if (!isConnected && !SocketManager.isConnected && !SocketManager.isConnecting && !manualDisconnect) {
+                val detectedIp = autoDetectPCIP()
+                if (detectedIp != null && !isConnected && !SocketManager.isConnected && !manualDisconnect) {
+                    ipAddress = detectedIp
+                    prefs.edit().putString("ip_address", detectedIp).apply()
+                    SocketManager.connect(detectedIp, password)
+                }
+            }
+        }
         val lastAttempt = mutableMapOf<String, Long>()
         var warnedPassword = false
         var warnedUntrusted = false
@@ -2583,7 +2612,11 @@ fun MainScreen(
                                 SocketManager.connect(ipAddress, password)
                             }
                         },
-                        onScanQrClick = { showQrScanner = true },
+                        onScanQrClick = {
+                            requestCameraPermissionOrRun {
+                                showQrScanner = true
+                            }
+                        },
                         context = context,
                         keepScreenOn = keepScreenOn,
                         onKeepScreenOnChange = { checked ->
@@ -2711,12 +2744,25 @@ fun MainScreen(
                         previewView = cameraPreviewView,
                         isMicStreaming = isMicStreaming,
                         onMicToggle = { active ->
-                            isMicStreaming = active
-                            if (active) SocketManager.startAudioStream() else SocketManager.stopAudioStream()
+                            if (active) {
+                                requestMicPermissionOrRun {
+                                    isMicStreaming = true
+                                    SocketManager.startAudioStream()
+                                }
+                            } else {
+                                isMicStreaming = false
+                                SocketManager.stopAudioStream()
+                            }
                         },
                         isCamStreaming = isCamStreaming,
                         onCamToggle = { active ->
-                            isCamStreaming = active
+                            if (active) {
+                                requestCameraPermissionOrRun {
+                                    isCamStreaming = true
+                                }
+                            } else {
+                                isCamStreaming = false
+                            }
                         },
                         useFrontCamera = useFrontCamera,
                         onCameraSelect = { active ->

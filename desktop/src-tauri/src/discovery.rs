@@ -14,10 +14,17 @@ pub const DISCOVERY_PORT: u16 = 47800;
 
 fn get_broadcast_targets() -> Vec<String> {
     let mut targets = vec![format!("255.255.255.255:{DISCOVERY_PORT}")];
-    if let Ok(ip) = local_ip_address::local_ip() {
-        if let std::net::IpAddr::V4(v4) = ip {
-            let octets = v4.octets();
-            targets.push(format!("{}.{}.{}.255:{DISCOVERY_PORT}", octets[0], octets[1], octets[2]));
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_name, ip) in interfaces {
+            if let std::net::IpAddr::V4(v4) = ip {
+                if !v4.is_loopback() && !v4.is_link_local() {
+                    let octets = v4.octets();
+                    let bcast = format!("{}.{}.{}.255:{DISCOVERY_PORT}", octets[0], octets[1], octets[2]);
+                    if !targets.contains(&bcast) {
+                        targets.push(bcast);
+                    }
+                }
+            }
         }
     }
     targets
