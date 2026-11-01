@@ -201,10 +201,7 @@
             }));
             const data = await res.json();
             if (data.success && data.message) {
-                // Also trigger sync to phone clipboard
-                if (window.sendWebSocketMessage) {
-                    window.sendWebSocketMessage({ type: 'clipboard_sync', text });
-                }
+                // Message created and broadcast by server
             }
         } catch (e) {
             console.error('Flow send text error:', e);
@@ -446,6 +443,8 @@
         fetchFlowMessages,
         copyText,
         handleIncomingMessage: function (msg) {
+            const id = msg.id || msg.ID;
+            if (id && flowMessages.some(m => (m.id || m.ID) === id)) return;
             flowMessages.push(msg);
             renderFlow();
         },

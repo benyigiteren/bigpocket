@@ -662,6 +662,34 @@ private fun downloadsDirectory(context: Context): File =
 private fun legacyDownloadsDirectory(): File =
     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
 
+private fun saveToPublicDownloads(context: Context, sourceFile: File, displayName: String) {
+    try {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, resolveMimeType(context, android.net.Uri.EMPTY, sourceFile))
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/BigPocket")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { output ->
+                    sourceFile.inputStream().use { input -> input.copyTo(output) }
+                }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val publicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "BigPocket")
+            if (!publicDir.exists()) publicDir.mkdirs()
+            val target = File(publicDir, displayName)
+            sourceFile.copyTo(target, overwrite = true)
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("FileDownload", "Could not mirror to public downloads", e)
+    }
+}
+
 /** Drops any directory component so a `file_name` from the PC cannot escape the download dir. */
 private fun safeDownloadName(raw: String): String {
     val base = raw.replace('\\', '/').substringAfterLast('/').trim().trimStart('.')
@@ -673,6 +701,9 @@ private fun findDownloadedFile(context: Context, name: String): File? {
     val safeName = safeDownloadName(name)
     val current = File(downloadsDirectory(context), safeName)
     if (current.isFile && current.length() > 0) return current
+    @Suppress("DEPRECATION")
+    val publicBp = File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "BigPocket"), safeName)
+    if (publicBp.isFile && publicBp.length() > 0) return publicBp
     val legacy = File(legacyDownloadsDirectory(), safeName)
     if (legacy.isFile && legacy.length() > 0) return legacy
     return null
@@ -756,9 +787,10 @@ private fun downloadFileDirectly(
                     destFile.delete()
                     if (!partFile.renameTo(destFile)) throw java.io.IOException("Dosya kaydedilemedi")
                 }
+                saveToPublicDownloads(context, destFile, safeName)
                 if (!isSuperseded()) onMainThread {
                     onProgress(destFile.length(), if (total > 0) total else destFile.length())
-                    Toast.makeText(context, "✓ İndirildi: $safeName", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "✓ İndirildi: $safeName (İndirilenler/BigPocket)", Toast.LENGTH_SHORT).show()
                     onComplete(destFile)
                 }
             }
@@ -8487,6 +8519,7 @@ fun ToolsTab(
                 timestamp = obj.optLong("timestamp", System.currentTimeMillis())
             )
             coroutineScope.launch(Dispatchers.Main) {
+                if (flowMessagesList.any { it.id == newItem.id }) return@launch
                 flowMessagesList = flowMessagesList + newItem
             }
         }

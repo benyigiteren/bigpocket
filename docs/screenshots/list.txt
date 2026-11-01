@@ -1,0 +1,13 @@
+file '02_streamdeck.png'
+duration 2.5
+file '03_flow_chat.png'
+duration 2.5
+file '01_dashboard.png'
+duration 2.5
+file '04_virtual_monitor.png'
+duration 2.0
+file '05_webcam.png'
+duration 2.0
+file '06_settings.png'
+duration 2.0
+file '06_settings.png'

@@ -817,6 +817,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/palette/action", post(palette_action))
         .route("/upload_icon", post(upload_icon_handler))
         .route("/extract_icon", post(extract_icon_handler))
+        .route("/open_shared_folder", post(open_shared_folder_handler))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     let public = Router::new()
@@ -1362,12 +1363,6 @@ async fn handle_control(
         "clipboard_sync" => {
             if let Some(text) = as_str(payload, "text") {
                 set_clipboard(text);
-                let text = text.to_string();
-                let message = state
-                    .flow
-                    .add_message(FlowMessage::new("phone", "text", text))
-                    .await;
-                state.broadcast(json!({"type": "flow_new", "message": message}));
             }
         }
         "flow_send" => {
@@ -2044,8 +2039,49 @@ async fn save_upload(
         file.flush()
             .await
             .map_err(|err| UploadError::Io(err.to_string()))?;
+        copy_to_downloads(&path, &original_name);
         return Ok(Some((file_name, path, size)));
     }
+}
+
+pub fn get_user_downloads_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let path = PathBuf::from(profile).join("Downloads");
+            if path.exists() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+pub fn copy_to_downloads(src_path: &FsPath, original_name: &str) {
+    if let Some(downloads) = get_user_downloads_dir() {
+        let bp_dir = downloads.join("BigPocket");
+        let _ = std::fs::create_dir_all(&bp_dir);
+        let clean_name = original_name.replace('\\', "_").replace('/', "_");
+        let dest = bp_dir.join(clean_name);
+        let _ = std::fs::copy(src_path, dest);
+    }
+}
+
+async fn open_shared_folder_handler() -> Response {
+    let folder = if let Some(downloads) = get_user_downloads_dir() {
+        let bp_downloads = downloads.join("BigPocket");
+        let _ = std::fs::create_dir_all(&bp_downloads);
+        bp_downloads
+    } else {
+        get_shared_dir()
+    };
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(folder)
+            .spawn();
+    }
+    Json(json!({"success": true})).into_response()
 }
 
 /// Failure while spooling an upload, carrying the HTTP status it maps to.
