@@ -1353,6 +1353,27 @@
                             </a>
                         </div>
                     </div>
+                    <!-- Bağlantı Teşhisi ve Sorun Giderici Kartı -->
+                    <div class="card" style="grid-column: 1 / -1; border-color: var(--border-color); margin-top: 14px;">
+                        <div class="card-header">
+                            <div>
+                                <span class="meta-tag" style="color: var(--accent-solid);">AĞ &amp; BAĞLANTI TEŞHİSİ</span>
+                                <h2>Sorun Giderme ve Teşhis Raporu</h2>
+                                <p class="text-muted">Telefon bağlanamıyorsa güvenlik duvarı iznini yenileyin veya hata günlüğünü tek tıkla kopyalayın.</p>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px;">
+                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">Windows Güvenlik Duvarı İzni</div>
+                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px; margin-bottom: 12px;">Port 8085 ve UDP 47800 için gelen bağlantı kuralı tanımlar.</div>
+                                <button class="btn btn-secondary" id="btn-fix-firewall" style="width: 100%; height: 38px;">Güvenlik Duvarı İznini Yenile</button>
+                            </div>
+                            <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px;">
+                                <div style="font-weight: 600; font-size: 13.5px; color: var(--text-main);">PC Teşhis Raporunu Kopyala</div>
+                                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px; margin-bottom: 12px;">IP adresleri, portlar ve bağlantı durumunu panoya kopyalar.</div>
+                                <button class="btn btn-primary" id="btn-copy-pc-diag" style="width: 100%; height: 38px;">Teşhis Raporunu Kopyala</button>
+                            </div>
+                        </div>
                     <!-- MCP (Model Context Protocol) & REST API Integration Card -->
                     <div class="card" style="grid-column: 1 / -1; border-color: var(--border-color);">
                         <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">

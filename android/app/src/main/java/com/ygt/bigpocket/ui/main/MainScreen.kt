@@ -933,7 +933,7 @@ private suspend fun autoDetectPCIP(): String? = withContext(Dispatchers.IO) {
                     val addr = addresses.nextElement()
                     if (!addr.isLoopbackAddress) {
                         val ip = addr.hostAddress ?: ""
-                        if (ip.contains(".") && (ip.startsWith("192.168.") || ip.startsWith("172."))) {
+                        if (ip.contains(".") && (ip.startsWith("192.168.") || ip.startsWith("172.") || ip.startsWith("10."))) {
                             val parts = ip.split(".")
                             if (parts.size == 4) {
                                 subnets.add("${parts[0]}.${parts[1]}.${parts[2]}")
@@ -3001,6 +3001,43 @@ fun ConnectionTab(
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )
+                    }
+
+                    if (!isConnected && SocketManager.lastErrorFriendly.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0x22EF4444)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Bağlantı Uyarısı", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(SocketManager.lastErrorFriendly, fontSize = 11.5.sp, color = MinimalistPrimary)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val report = SocketManager.getFullDiagnosticReport(context)
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("BigPocket Diagnostic", report))
+                                            Toast.makeText(context, "Teşhis raporu panoya kopyalandı!", Toast.LENGTH_SHORT).show()
+                                        },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = MinimalistAccent, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Hata Teşhis Raporunu Kopyala", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MinimalistAccent)
+                                }
+                            }
+                        }
                     }
 
                     if (!isConnected) {

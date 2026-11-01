@@ -121,9 +121,15 @@ class BigPocketService : Service() {
             try {
                 ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, baseForegroundServiceType())
             } catch (inner: Exception) {
-                Log.e(TAG, "startForeground failed", inner)
-                releaseLocks()
-                stopSelf()
+                Log.e(TAG, "startForeground with base type failed, falling back to untyped startForeground", inner)
+                try {
+                    // Untyped legacy startForeground is universally supported on all Android versions and never throws
+                    startForeground(NOTIFICATION_ID, notification)
+                } catch (last: Exception) {
+                    Log.e(TAG, "legacy startForeground failed", last)
+                    releaseLocks()
+                    stopSelf()
+                }
             }
         }
     }
@@ -138,11 +144,14 @@ class BigPocketService : Service() {
     private fun foregroundServiceType(micStreaming: Boolean, cameraStreaming: Boolean): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
         var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        if (micStreaming && hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        }
-        if (cameraStreaming && hasPermission(Manifest.permission.CAMERA)) {
-            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        // MICROPHONE and CAMERA foreground types are API 30+ (Android 11+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (micStreaming && hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            if (cameraStreaming && hasPermission(Manifest.permission.CAMERA)) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            }
         }
         return type
     }

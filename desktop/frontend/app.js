@@ -608,20 +608,65 @@ function setupUsbBridge() {
 
 // Setup Shutdown
 function setupShutdown() {
+    if (!shutdownBtn) return;
     shutdownBtn.addEventListener('click', () => {
-        if (confirm("BigPocket sunucusu kapatılsın mı?")) {
-            authFetch('/shutdown')
+        if (confirm("BigPocket sunucusu ve tüm arka plan servisleri kapatılsın mı?")) {
+            authFetch('/shutdown', { method: 'POST' })
                 .then(res => res.json())
                 .then(data => {
-                    alert("Sunucu kapatıldı.");
+                    alert("BigPocket sunucusu kapatılıyor.");
                     window.close();
                 })
                 .catch(err => {
-                    // Fail gracefully as server shuts down immediately
                     alert("Kapatma komutu gönderildi.");
+                    window.close();
                 });
         }
     });
+
+    const btnFixFw = document.getElementById('btn-fix-firewall');
+    if (btnFixFw) {
+        btnFixFw.addEventListener('click', () => {
+            showToast("Güvenlik duvarı kuralı ekleniyor...");
+            authFetch('/api/fix_firewall', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    alert(data.message || "Windows Güvenlik Duvarı kuralı başarıyla güncellendi!");
+                })
+                .catch(err => {
+                    alert("İşlem tamamlandı veya kural zaten mevcut.");
+                });
+        });
+    }
+
+    const btnCopyDiag = document.getElementById('btn-copy-pc-diag');
+    if (btnCopyDiag) {
+        btnCopyDiag.addEventListener('click', () => {
+            authFetch('/api/diagnostics')
+                .then(res => res.json())
+                .then(data => {
+                    const text = [
+                        "=== BigPocket PC Teşhis Raporu ===",
+                        `Tarih: ${new Date().toLocaleString('tr-TR')}`,
+                        `Cihaz: ${data.hostname || 'PC'}`,
+                        `Sürüm: ${data.version || '1.5.2-beta'}`,
+                        `Web Sunucusu Portu: ${data.port || 8085}`,
+                        `Yerel IP Adresleri: ${(data.local_ips || []).join(', ')}`,
+                        `Şifre Koruma: ${data.has_password ? 'Aktif' : 'Yok'}`,
+                        `Tarayıcı Kullanıcı Aracısı: ${navigator.userAgent}`
+                    ].join('\n');
+                    navigator.clipboard.writeText(text).then(() => {
+                        showToast("PC Teşhis raporu panoya kopyalandı!");
+                        alert("Teşhis raporu panoya kopyalandı:\n\n" + text);
+                    });
+                })
+                .catch(err => {
+                    const fallback = `=== BigPocket PC Teşhis Raporu ===\nURL: ${window.location.href}\nHata: ${err.message}`;
+                    navigator.clipboard.writeText(fallback);
+                    showToast("Teşhis bilgisi kopyalandı.");
+                });
+        });
+    }
 }
 
 // Fetch System Info

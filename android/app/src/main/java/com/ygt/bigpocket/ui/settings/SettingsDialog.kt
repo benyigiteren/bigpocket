@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -403,6 +404,60 @@ fun SettingsDialog(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Card 2c: Bağlantı Teşhisi ve Rapor
+                Text(
+                    text = "BAĞLANTI TEŞHİSİ & HATA RAPORU",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MinimalistSecondary,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MinimalistSurfaceElevated),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = if (com.ygt.bigpocket.services.SocketManager.isConnected) "Bağlantı: Aktif (Bağlı)" else "Bağlantı: Bağlı Değil",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (com.ygt.bigpocket.services.SocketManager.isConnected) Color(0xFF4ADE80) else StatusRedText
+                        )
+                        if (com.ygt.bigpocket.services.SocketManager.lastErrorFriendly.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = com.ygt.bigpocket.services.SocketManager.lastErrorFriendly,
+                                fontSize = 11.5.sp,
+                                color = MinimalistSecondary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                val report = com.ygt.bigpocket.services.SocketManager.getFullDiagnosticReport(context)
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("BigPocket Diagnostic", report))
+                                android.widget.Toast.makeText(context, "Teşhis raporu panoya kopyalandı!", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MinimalistSurface, contentColor = MinimalistPrimary),
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MinimalistBorder)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Teşhis Raporunu Kopyala", fontSize = 12.5.sp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(18.dp))
+
                 // Card 3: Ağ & Proje
                 Text(
                     text = "AĞ & AÇIK KAYNAK",

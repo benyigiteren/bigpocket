@@ -78,6 +78,13 @@ object SocketManager {
     var isUserDisconnected = false
         private set
 
+    @Volatile
+    var lastError = ""
+        private set
+
+    @Volatile
+    var lastErrorFriendly = ""
+        private set
     // Automatic reconnection with exponential backoff: 1s, 2s, 4s, then capped at 5s.
     private val reconnectDelaysMs = longArrayOf(1_000L, 2_000L, 4_000L, 5_000L)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -172,19 +179,22 @@ object SocketManager {
                         isConnected = true
                         isConnecting = false
                         isAuthRejected = false
+                        lastError = ""
+                        lastErrorFriendly = ""
                         reconnectAttempt = 0
                         cancelConnectTimeout()
-                        Log.d(TAG, "WebSocket authenticated successfully")
                         sendControl(JSONObject().apply {
                             put("type", "client_connected")
                         })
                         notifyConnectionState()
                     } else if (type == "auth_failed") {
-                        Log.e(TAG, "Authentication failed: ${json.optString("message")}")
+                        val failMsg = json.optString("message", "Şifre hatalı")
+                        Log.e(TAG, "Authentication failed: $failMsg")
                         isConnected = false
                         isConnecting = false
                         isAuthRejected = true
-                        // A rejected password is never retried automatically.
+                        lastError = "Kimlik doğrulama başarısız: $failMsg"
+                        lastErrorFriendly = "Şifre hatalı veya PC bağlantıyı reddetti."
                         autoReconnect = false
                         cancelReconnect()
                         cancelConnectTimeout()
@@ -276,7 +286,19 @@ object SocketManager {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (gen != generation) return
-                Log.e(TAG, "WebSocket failure: ${t.message}")
+                val rawMsg = t.message ?: t.javaClass.simpleName
+                lastError = "$rawMsg (${t.javaClass.simpleName})"
+                lastErrorFriendly = when {
+                    t is java.net.ConnectException || rawMsg.contains("failed to connect") || rawMsg.contains("ECONNREFUSED") ->
+                        "PC'ye bağlanılamadı. BigPocket sunucusunun açık olduğundan ve Windows Güvenlik Duvarı'nın engellemediğinden emin olun."
+                    t is java.net.SocketTimeoutException || rawMsg.contains("timed out") ->
+                        "Zaman aşımı. Telefon ile PC'nin aynı ağda olduğunu veya USB Tethering'i kontrol edin."
+                    rawMsg.contains("EHOSTUNREACH") || rawMsg.contains("No route to host") ->
+                        "Ağ rotası bulunamadı. IP adresini ($currentIp) kontrol edin."
+                    else ->
+                        "Bağlantı hatası: $rawMsg"
+                }
+                Log.e(TAG, "WebSocket failure: $rawMsg -> $lastErrorFriendly")
                 cancelConnectTimeout()
                 setDisconnected()
                 scheduleReconnect()
@@ -324,6 +346,8 @@ object SocketManager {
             connectTimeoutRunnable = null
             if (gen != generation || isConnected) return@Runnable
             Log.w(TAG, "No authenticated socket for $currentIp after ${CONNECT_TIMEOUT_MS}ms, retrying")
+            lastError = "Zaman aşımı ($currentIp:8085 el sıkışma yanıtı vermedi)"
+            lastErrorFriendly = "Sunucu yanıt vermedi. Port 8085 Windows Güvenlik Duvarı tarafından engelleniyor olabilir."
             closeActiveSocket()
             setDisconnected()
             scheduleReconnect()
@@ -534,12 +558,33 @@ object SocketManager {
         sendControl(json)
     }
 
+    fun getFullDiagnosticReport(context: android.content.Context): String {
+        val sb = StringBuilder()
+        sb.append("=== BigPocket Android Teşhis Raporu ===\n")
+        sb.append("Tarih: ").append(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())).append("\n")
+        sb.append("Cihaz: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL).append("\n")
+        sb.append("Android Sürümü: ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n")
+        sb.append("Bağlantı Durumu: ").append(if (isConnected) "BAĞLI" else if (isConnecting) "BAĞLANILIYOR" else "BAĞLI DEĞİL").append("\n")
+        sb.append("Hedef IP: ").append(currentIp.ifEmpty { "Belirtilmemiş" }).append(":8085\n")
+        sb.append("Şifre Tanımlı: ").append(currentPassword.isNotEmpty()).append("\n")
+        sb.append("Son Teknik Hata: ").append(lastError.ifEmpty { "Kayıtlı hata yok" }).append("\n")
+        sb.append("Açıklama: ").append(lastErrorFriendly.ifEmpty { "Normal" }).append("\n")
+        try {
+            val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            @Suppress("DEPRECATION")
+            val active = cm?.activeNetworkInfo
+            sb.append("Ağ Bağlantısı: ").append(active?.typeName ?: "Bilinmiyor").append(" (Bağlı: ").append(active?.isConnected ?: false).append(")\n")
+        } catch (e: Exception) {
+            sb.append("Ağ Bilgisi: ").append(e.message).append("\n")
+        }
+        return sb.toString()
+    }
+
     fun deleteFlowMessage(id: String) {
         val json = JSONObject().apply {
             put("type", "flow_delete")
             put("id", id)
         }
-        // The live socket is the fast path; when it is not connected (e.g. the app is showing a
         // cached flow mid-reconnect) fall back to the REST endpoint so the delete still lands.
         if (isConnected) {
             sendControl(json)

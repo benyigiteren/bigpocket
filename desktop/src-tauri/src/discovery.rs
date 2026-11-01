@@ -12,12 +12,19 @@ use tokio::net::UdpSocket;
 /// UDP port the Android app listens on for discovery broadcasts.
 pub const DISCOVERY_PORT: u16 = 47800;
 
-/// Limited broadcast target (every host on the local subnet).
-const BROADCAST_TARGET: &str = "255.255.255.255:47800";
+fn get_broadcast_targets() -> Vec<String> {
+    let mut targets = vec![format!("255.255.255.255:{DISCOVERY_PORT}")];
+    if let Ok(ip) = local_ip_address::local_ip() {
+        if let std::net::IpAddr::V4(v4) = ip {
+            let octets = v4.octets();
+            targets.push(format!("{}.{}.{}.255:{DISCOVERY_PORT}", octets[0], octets[1], octets[2]));
+        }
+    }
+    targets
+}
 
 /// How often the "hello" packet is repeated.
 const BROADCAST_INTERVAL: Duration = Duration::from_secs(2);
-
 /// Starts the background broadcaster and returns its task handle.
 pub fn start_discovery(port: u16) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run_discovery(port))
@@ -78,8 +85,9 @@ async fn run_discovery(port: u16) {
     eprintln!("Discovery broadcasting on UDP {DISCOVERY_PORT}...");
     loop {
         let payload = format_payload(port);
-        if let Err(err) = socket.send_to(payload.as_bytes(), BROADCAST_TARGET).await {
-            eprintln!("discovery: broadcast failed: {err}");
+        let targets = get_broadcast_targets();
+        for target in targets {
+            let _ = socket.send_to(payload.as_bytes(), &target).await;
         }
         tokio::time::sleep(BROADCAST_INTERVAL).await;
     }

@@ -818,8 +818,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/upload_icon", post(upload_icon_handler))
         .route("/extract_icon", post(extract_icon_handler))
         .route("/open_shared_folder", post(open_shared_folder_handler))
+        .route("/shutdown", get(shutdown_handler).post(shutdown_handler))
+        .route("/api/shutdown", get(shutdown_handler).post(shutdown_handler))
+        .route("/api/fix_firewall", post(api_fix_firewall))
+        .route("/api/diagnostics", get(api_diagnostics))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
-
     let public = Router::new()
         .route("/ws", get(ws_handler))
         .route("/system_info", get(system_info))
@@ -2084,6 +2087,58 @@ async fn open_shared_folder_handler() -> Response {
     Json(json!({"success": true})).into_response()
 }
 
+async fn shutdown_handler() -> Response {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        set_virtual_monitor_blocking(false);
+        std::process::exit(0);
+    });
+    Json(json!({"success": true, "message": "BigPocket sunucusu kapatılıyor..."})).into_response()
+}
+
+async fn api_fix_firewall() -> Response {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Ok(exe) = std::env::current_exe() {
+            let exe_str = exe.to_string_lossy().to_string();
+            let out = std::process::Command::new("netsh")
+                .args([
+                    "advfirewall", "firewall", "add", "rule",
+                    "name=BigPocket",
+                    "dir=in",
+                    "action=allow",
+                    &format!("program={exe_str}"),
+                    "enable=yes",
+                    "profile=any",
+                ])
+                .creation_flags(0x0800_0000)
+                .output();
+            if let Ok(o) = out {
+                let msg = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                return Json(json!({"success": true, "message": if msg.is_empty() { "Kural eklendi." } else { &msg }})).into_response();
+            }
+        }
+    }
+    Json(json!({"success": false, "message": "Güvenlik duvarı kuralı eklenemedi."})).into_response()
+}
+
+async fn api_diagnostics() -> Response {
+    let mut ips = Vec::new();
+    if let Ok(ip) = local_ip_address::local_ip() {
+        ips.push(ip.to_string());
+    }
+    let host = sysinfo::System::host_name().unwrap_or_else(|| "PC".to_string());
+    let cfg = crate::config::load_config();
+    Json(json!({
+        "success": true,
+        "hostname": host,
+        "port": 8085,
+        "local_ips": ips,
+        "has_password": !cfg.password.is_empty(),
+        "version": "1.5.2-beta"
+    })).into_response()
+}
 /// Failure while spooling an upload, carrying the HTTP status it maps to.
 enum UploadError {
     /// The multipart field carried an unusable file name.

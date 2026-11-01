@@ -1579,6 +1579,9 @@ func performInstall(cfg installConfig, report func(step, pct int)) error {
 		return fmt.Errorf("kayıt defteri güncellenemedi: %w", err)
 	}
 	notify(stepRegistry, 92)
+	// Windows Güvenlik Duvarı izni ekle (Port 8085 TCP ve 47800 UDP)
+	exePath := filepath.Join(cfg.dir, "BigPocket.exe")
+	execCommandHidden("netsh", "advfirewall", "firewall", "add", "rule", "name=BigPocket", "dir=in", "action=allow", "program="+exePath, "enable=yes", "profile=any").Run()
 
 	notify(stepFinishing, 96)
 	tellShellToRefresh()
@@ -2096,6 +2099,7 @@ func runUninstaller(silent bool) {
 	removeShortcuts()
 	removeAutostart()
 	removeUninstallEntries()
+	execCommandHidden("netsh", "advfirewall", "firewall", "delete", "rule", "name=BigPocket").Run()
 	tellShellToRefresh()
 
 	scheduleDirectoryRemoval(dir)

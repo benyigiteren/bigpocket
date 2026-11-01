@@ -78,6 +78,26 @@ fn main() {
         .expect("failed to create Tokio runtime");
     let _guard = rt.enter();
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Ok(exe) = std::env::current_exe() {
+            let exe_str = exe.to_string_lossy().to_string();
+            let _ = std::process::Command::new("netsh")
+                .args([
+                    "advfirewall", "firewall", "add", "rule",
+                    "name=BigPocket",
+                    "dir=in",
+                    "action=allow",
+                    &format!("program={exe_str}"),
+                    "enable=yes",
+                    "profile=any",
+                ])
+                .creation_flags(0x0800_0000)
+                .output();
+        }
+    }
+
     let state = server::AppState::new();
 
     // Start UDP Auto-discovery on Port 47800
