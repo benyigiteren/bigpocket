@@ -160,11 +160,13 @@ object PcDiscovery {
             // Platform type: may be null when the interface list cannot be read.
             val interfaces = NetworkInterface.getNetworkInterfaces() ?: return targets.toList()
             for (nif in interfaces) {
-                if (!nif.isUp || nif.isLoopback) continue
-                for (ifAddress in nif.interfaceAddresses) {
-                    if (ifAddress.address !is Inet4Address) continue
-                    ifAddress.broadcast?.let { targets += it }
-                }
+                try {
+                    if (!nif.isUp || nif.isLoopback) continue
+                    for (ifAddress in nif.interfaceAddresses) {
+                        if (ifAddress.address !is Inet4Address) continue
+                        ifAddress.broadcast?.let { targets += it }
+                    }
+                } catch (_: Exception) { }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Cannot enumerate network interfaces", e)
