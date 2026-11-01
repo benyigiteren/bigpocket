@@ -3,6 +3,22 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
+## v1.5.3-beta
+
+### 🛡️ Android 10 (API 29) & Genel Android Kararlılığı
+- **Arka Plan Servis Çökme Koruması:** Android 10 ve altı sürümlerde API 30+ (Android 11) gerektiren `FOREGROUND_SERVICE_TYPE_MICROPHONE` ve `CAMERA` bayraklarının çağrılması engellendi; her Android sürümünde kararlı çalışan çift kademeli `startForeground` geri dönüşü eklendi.
+- **Doğrudan İndirilenler (Downloads/BigPocket):** Android'de indirilen dosyalar gizli iç klasörden genel `Download/BigPocket` klasörüne aktarılarak Dosyalarım uygulamasında anında görünür hale getirildi.
+
+### 💻 Windows Masaüstü & Sunucu İyileştirmeleri
+- **Çalışan "Sunucuyu Kapat" Fonksiyonu:** Web arayüzündeki kapatma butonu `/shutdown` ve `/api/shutdown` rotalarına bağlandı; tıklandığında sanal ekranı temizleyip arka plan sunucu sürecini eksiksiz sonlandırır.
+- **Otomatik Windows Güvenlik Duvarı İzni:** Uygulama ilk açıldığında ve `BigPocket-Setup.exe` kurulumunda port 8085 ve UDP 47800 için gelen bağlantı kuralları otomatik eklenir; Ayarlar menüsüne tek tıkla "Güvenlik Duvarı İznini Yenile" butonu eklendi.
+- **İndirilen Dosyaları Downloads Klasörüne Kaydetme:** Telefondan PC'ye aktarılan tüm dosyalar doğrudan kullanıcının `İndirilenler/BigPocket` klasörüne kopyalanır ve web arayüzünden klasör tek tıkla açılabilir.
+
+### 🔍 Tek Tıkla Bağlantı Teşhisi & Hata Tespiti (PC & Telefon)
+- **Android Hata Teşhis Kartı & Raporu:** Bağlantı koptuğunda veya PC bulunamadığında ekranda Türkçe açıklama çıkar; tek dokunuşla tüm ağ, cihaz ve hata detaylarını içeren rapor panoya kopyalanır.
+- **PC Teşhis Raporu:** Masaüstü Ayarlar sayfasına tek tıkla IP ve port teşhis raporunu panoya kopyalayan araç entegre edildi.
+- **WhatsApp Akışı Çift Mesaj Düzeltmesi:** Pano eşitlemesinde mesajların akışa 2 kez yazılması sorunu giderildi ve tekilleştirme koruması eklendi.
+
 ## v1.5.2-beta
 
 ### 🎵 Şimdi Çalıyor Kartı Hücre Oranı & Boyutlandırma İyileştirmesi

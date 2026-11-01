@@ -649,7 +649,7 @@ function setupShutdown() {
                         "=== BigPocket PC Teşhis Raporu ===",
                         `Tarih: ${new Date().toLocaleString('tr-TR')}`,
                         `Cihaz: ${data.hostname || 'PC'}`,
-                        `Sürüm: ${data.version || '1.5.2-beta'}`,
+                        `Sürüm: ${data.version || '1.5.3-beta'}`,
                         `Web Sunucusu Portu: ${data.port || 8085}`,
                         `Yerel IP Adresleri: ${(data.local_ips || []).join(', ')}`,
                         `Şifre Koruma: ${data.has_password ? 'Aktif' : 'Yok'}`,

@@ -49,7 +49,7 @@ pub const AUDIO_TCP_PORT: u16 = 8084;
 pub const SCREEN_TCP_PORT: u16 = 8086;
 
 /// Version reported by the update checker (mirrors Go's `AppVersion`).
-pub const APP_VERSION: &str = "v1.5.2-beta";
+pub const APP_VERSION: &str = "v1.5.3-beta";
 /// Public repository that publishes releases.
 pub const GITHUB_REPO: &str = "benyigiteren/bigpocket";
 const AUTH_MAX_FAILURES: u32 = 5;
@@ -2136,7 +2136,7 @@ async fn api_diagnostics() -> Response {
         "port": 8085,
         "local_ips": ips,
         "has_password": !cfg.password.is_empty(),
-        "version": "1.5.2-beta"
+        "version": "1.5.3-beta"
     })).into_response()
 }
 /// Failure while spooling an upload, carrying the HTTP status it maps to.
