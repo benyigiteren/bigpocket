@@ -1,10 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- BigPocket notification icon: phone-in-pocket monochrome silhouette.
+     Android notification icons use only the alpha channel; fillColor must be white (#FFF). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+
+    <!-- Phone body (upper half, sticking out of the pocket) -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M17,1.01L7,1c-1.1,0 -2,0.9 -2,2v18c0,1.1 0.9,2 2,2h10c1.1,0 2,-0.9 2,-2V3c0,-1.1 -0.9,-1.99 -2,-1.99zM17,19H7V5h10v14z"/>
+        android:pathData="M9.5,2 L14.5,2 A2,2 0 0,1 16.5,4 L16.5,10 L7.5,10 L7.5,4 A2,2 0 0,1 9.5,2 Z" />
+
+    <!-- Phone notch cutout (transparent) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M10.8,3.8 L13.2,3.8 A0.6,0.6 0 0,1 13.8,4.4 A0.6,0.6 0 0,1 13.2,5 L10.8,5 A0.6,0.6 0 0,1 10.2,4.4 A0.6,0.6 0 0,1 10.8,3.8 Z" />
+
+    <!-- Pocket rim (horizontal bar across the middle) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,9 L20,9 L20,11 L4,11 Z" />
+
+    <!-- Pocket body (rounded bottom) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,11 L19,11 L19,17 C19,20.3 15.9,22 12,22 C8.1,22 5,20.3 5,17 Z" />
 </vector>
