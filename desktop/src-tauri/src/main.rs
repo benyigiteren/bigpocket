@@ -3,10 +3,14 @@
 #![allow(dead_code)]
 
 mod config;
+mod deck_api;
 mod discovery;
 mod flow;
+mod mcp_handler;
+mod profile;
 mod server;
 mod system;
+mod system_api;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};

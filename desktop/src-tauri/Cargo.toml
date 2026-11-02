@@ -27,5 +27,10 @@ xcap = "0.9"
 enigo = { version = "0.2" }
 sysinfo = "0.31"
 windows = { version = "0.57", features = ["Media_Control", "Storage_Streams", "Foundation"] }
+# `flate2` is pinned to the pure-Rust (miniz_oxide) backend so `zip`'s
+# `deflate-flate2` feature compiles without a C toolchain; it is a direct dep
+# only to select that backend.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 [profile.release]
 strip = true

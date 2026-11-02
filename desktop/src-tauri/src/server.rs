@@ -822,6 +822,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/shutdown", get(shutdown_handler).post(shutdown_handler))
         .route("/api/fix_firewall", post(api_fix_firewall))
         .route("/api/diagnostics", get(api_diagnostics))
+        .nest(
+            "/api/deck",
+            crate::deck_api::deck_router().merge(crate::profile::profile_router()),
+        )
+        .merge(crate::mcp_handler::mcp_router())
+        .nest("/api/system", crate::system_api::system_router())
+        .merge(crate::system_api::system_routes())
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
     let public = Router::new()
         .route("/ws", get(ws_handler))
@@ -912,7 +919,7 @@ async fn auth_middleware(
     next.run(req).await
 }
 
-fn json_response(status: StatusCode, value: Value) -> Response {
+pub(crate) fn json_response(status: StatusCode, value: Value) -> Response {
     (status, Json(value)).into_response()
 }
 
@@ -1213,7 +1220,7 @@ impl Drop for SamplingGuard {
 /// flight — including after a timeout, when the wedged sample is still alive —
 /// callers immediately get [`AppState::cached_stats`] instead of queueing behind
 /// it. That is what keeps the stats ticker and the control handlers responsive.
-async fn system_stats(state: &Arc<AppState>) -> Value {
+pub(crate) async fn system_stats(state: &Arc<AppState>) -> Value {
     if state
         .stats_sampling
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -1266,7 +1273,7 @@ fn as_str<'a>(payload: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 /// Dispatch one authenticated WebSocket control message.
-async fn handle_control(
+pub(crate) async fn handle_control(
     state: &Arc<AppState>,
     msg_type: &str,
     payload: &Value,
@@ -1583,7 +1590,7 @@ async fn run_deck_value(state: &Arc<AppState>, value: &str) {
     }
 }
 
-fn toggle_pomodoro(state: &Arc<AppState>) {
+pub(crate) fn toggle_pomodoro(state: &Arc<AppState>) {
     let (snapshot, started) = {
         let Ok(mut pomodoro) = state.pomodoro.lock() else {
             return;
@@ -2300,7 +2307,7 @@ async fn media_cover_handler() -> Response {
     }
 }
 
-async fn system_info() -> Response {
+pub(crate) async fn system_info() -> Response {
     let ips: Vec<String> = own_interface_ips();
     let usb_ip = get_usb_tethering_ip();
     let mut ip_addr = if usb_ip.is_empty() {
@@ -3284,7 +3291,7 @@ fn get_usb_tethering_ip() -> String {
 }
 
 /// Run `adb reverse` for every media port, mirroring Go's `setupAdbReverse`.
-fn setup_adb_reverse() -> (bool, String) {
+pub(crate) fn setup_adb_reverse() -> (bool, String) {
     let candidates = ["adb", "adb.exe"];
     let mut adb = None;
     for candidate in candidates {
@@ -4326,7 +4333,7 @@ fn set_display_brightness(_level: u8) -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-fn set_clipboard(text: &str) -> bool {
+pub(crate) fn set_clipboard(text: &str) -> bool {
     use std::ffi::c_void;
     type Handle = *mut c_void;
     const CF_UNICODETEXT: u32 = 13;
@@ -4421,7 +4428,7 @@ fn get_clipboard() -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn set_clipboard(_text: &str) -> bool {
+pub(crate) fn set_clipboard(_text: &str) -> bool {
     false
 }
 
@@ -4458,7 +4465,7 @@ fn empty_recycle_bin() {}
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-fn show_notification(title: &str, message: &str) {
+pub(crate) fn show_notification(title: &str, message: &str) {
     use std::ffi::c_void;
 
     type Handle = *mut c_void;
@@ -4613,7 +4620,7 @@ fn show_notification(title: &str, message: &str) {
 }
 
 #[cfg(not(windows))]
-fn show_notification(title: &str, message: &str) {
+pub(crate) fn show_notification(title: &str, message: &str) {
     tracing::info!("[notification] {title}: {message}");
 }
 
@@ -5281,7 +5288,7 @@ fn autostart_status() -> bool {
 
 /// Adds or removes the Run-key entry, so the panel survives a reboot.
 #[cfg(windows)]
-fn set_autostart(enable: bool) -> Result<(), String> {
+pub(crate) fn set_autostart(enable: bool) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let output = if enable {
@@ -5323,7 +5330,7 @@ fn set_autostart(enable: bool) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn set_autostart(_enable: bool) -> Result<(), String> {
+pub(crate) fn set_autostart(_enable: bool) -> Result<(), String> {
     Err("Otomatik başlatma yalnızca Windows'ta desteklenir.".to_string())
 }
 
@@ -5845,7 +5852,7 @@ async fn open_sound_settings_handler() -> Response {
     json_response(StatusCode::OK, json!({"success": true}))
 }
 
-async fn installed_apps_handler() -> Response {
+pub(crate) async fn installed_apps_handler() -> Response {
     let apps = get_installed_apps();
     json_response(StatusCode::OK, json!({
         "success": true,
