@@ -50,9 +50,44 @@ fn check_single_instance() -> bool {
     true
 }
 
+/// Non-Windows single-instance guard: an exclusive lock on `<app data>/.lock`.
+///
+/// The lock is released by the kernel when the process exits, so unlike a pid
+/// file it can never go stale. It has to stay alive for the whole process, hence
+/// the `static` — dropping the handle would release the lock immediately.
+///
+/// A missing or unwritable app-data directory is treated as "no other
+/// instance": a read-only home directory must not stop the app from starting.
 #[cfg(not(windows))]
 fn check_single_instance() -> bool {
-    true
+    use fs2::FileExt;
+    use std::sync::OnceLock;
+
+    static INSTANCE_LOCK: OnceLock<std::fs::File> = OnceLock::new();
+
+    let dir = config::get_app_data_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return true;
+    }
+
+    let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(dir.join(".lock"))
+    else {
+        return true;
+    };
+
+    match file.try_lock_exclusive() {
+        Ok(()) => {
+            let _ = INSTANCE_LOCK.set(file);
+            true
+        }
+        // `WouldBlock`: another instance holds the lock.
+        Err(_) => false,
+    }
 }
 
 fn main() {

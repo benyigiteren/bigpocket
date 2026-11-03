@@ -34,6 +34,10 @@ use tower_http::services::{ServeDir, ServeFile};
 use crate::config::{self, Config};
 use crate::flow::{now_millis, FlowManager, FlowMessage};
 use crate::system::{Button, InputController, SystemMonitor};
+// Bounded desktop-helper invocation, used by the macOS/Linux branches of the
+// volume and brightness controls below.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::system::{run_command_timeout, CLI_TIMEOUT};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -4051,16 +4055,132 @@ fn waveout_volume_set(percent: u8) {
     }
 }
 
-#[cfg(not(windows))]
+// ---------------------------------------------------------------------------
+// Master volume (macOS `osascript`, Linux `wpctl` / `pactl`)
+//
+// The helpers are driven with `Command`, never through a shell, and every call
+// is bounded by `CLI_TIMEOUT` so a wedged audio daemon cannot pin a worker
+// forever.
+// ---------------------------------------------------------------------------
+
+/// Current output volume as a 0-100 percentage.
+#[cfg(target_os = "macos")]
 fn volume_get() -> Option<u8> {
-    None
+    let out = run_command_timeout(
+        "osascript",
+        &["-e", "output volume of (get volume settings)"],
+        CLI_TIMEOUT,
+    )?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse::<u8>().ok()
 }
 
-#[cfg(not(windows))]
-fn volume_set(_percent: u8) {}
+#[cfg(target_os = "macos")]
+fn volume_set(percent: u8) {
+    let script = format!("set volume output volume {}", percent.min(100));
+    let _ = run_command_timeout("osascript", &["-e", script.as_str()], CLI_TIMEOUT);
+}
 
-#[cfg(not(windows))]
-fn volume_set_mute(_mute: bool) {}
+#[cfg(target_os = "macos")]
+fn volume_set_mute(mute: bool) {
+    let script = if mute {
+        "set volume with output muted"
+    } else {
+        "set volume without output muted"
+    };
+    let _ = run_command_timeout("osascript", &["-e", script], CLI_TIMEOUT);
+}
+
+/// Current output volume as a 0-100 percentage.
+#[cfg(target_os = "linux")]
+fn volume_get() -> Option<u8> {
+    // PipeWire (`wpctl`) first, PulseAudio (`pactl`) as the fallback: a host
+    // runs either, and both report a percentage we can normalise.
+    if let Some(out) = run_command_timeout(
+        "wpctl",
+        &["get-volume", "@DEFAULT_AUDIO_SINK@"],
+        CLI_TIMEOUT,
+    ) {
+        if out.status.success() {
+            if let Some(volume) = parse_wpctl_volume(&String::from_utf8_lossy(&out.stdout)) {
+                return Some(volume);
+            }
+        }
+    }
+
+    let out = run_command_timeout(
+        "pactl",
+        &["get-sink-volume", "@DEFAULT_SINK@"],
+        CLI_TIMEOUT,
+    )?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_percent(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(target_os = "linux")]
+fn volume_set(percent: u8) {
+    let value = format!("{}%", percent.min(100));
+    if let Some(out) = run_command_timeout(
+        "wpctl",
+        &["set-volume", "@DEFAULT_AUDIO_SINK@", value.as_str()],
+        CLI_TIMEOUT,
+    ) {
+        if out.status.success() {
+            return;
+        }
+    }
+    let _ = run_command_timeout(
+        "pactl",
+        &["set-sink-volume", "@DEFAULT_SINK@", value.as_str()],
+        CLI_TIMEOUT,
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn volume_set_mute(mute: bool) {
+    let flag = if mute { "1" } else { "0" };
+    if let Some(out) = run_command_timeout(
+        "wpctl",
+        &["set-mute", "@DEFAULT_AUDIO_SINK@", flag],
+        CLI_TIMEOUT,
+    ) {
+        if out.status.success() {
+            return;
+        }
+    }
+    let _ = run_command_timeout(
+        "pactl",
+        &["set-sink-mute", "@DEFAULT_SINK@", flag],
+        CLI_TIMEOUT,
+    );
+}
+
+/// `wpctl get-volume` prints `Volume: 0.55`, optionally followed by `[MUTED]`.
+#[cfg(target_os = "linux")]
+fn parse_wpctl_volume(output: &str) -> Option<u8> {
+    let value = output.split(':').nth(1)?.split_whitespace().next()?;
+    let fraction = value.parse::<f64>().ok()?;
+    Some((fraction * 100.0).round().clamp(0.0, 100.0) as u8)
+}
+
+/// First `NN%` in a `pactl` response (e.g. `Volume: front-left: 65536 / 100% …`).
+#[cfg(target_os = "linux")]
+fn parse_percent(output: &str) -> Option<u8> {
+    let percent_at = output.find('%')?;
+    let digits: String = output[..percent_at]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    digits.parse::<u8>().ok()
+}
 
 // ---------------------------------------------------------------------------
 // Display brightness (DDC/CI, laptop ACPI-video IOCTL, gamma-ramp fallback)
@@ -4323,8 +4443,66 @@ fn set_brightness_gamma(level: u8) -> bool {
     }
 }
 
-#[cfg(not(windows))]
-fn set_display_brightness(_level: u8) -> bool {
+// ---------------------------------------------------------------------------
+// Display brightness (macOS `brightness` CLI, Linux sysfs / `brightnessctl`)
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+fn set_display_brightness(level: u8) -> bool {
+    // macOS exposes no absolute-brightness API to user space, so the
+    // conventional `brightness` CLI does the work (`brew install brightness`).
+    // The media-key route (key codes 144/145) only steps relatively and cannot
+    // answer whether a requested level was reached, so it is not used.
+    let value = format!("{:.2}", level.min(100) as f64 / 100.0);
+    match run_command_timeout("brightness", &[value.as_str()], CLI_TIMEOUT) {
+        Some(out) if out.status.success() => true,
+        _ => {
+            // A slider drag reaches this path many times; say it once.
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                tracing::warn!("Parlaklık ayarlanamadı: `brightness` bulunamadı (brew install brightness)");
+            });
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_display_brightness(level: u8) -> bool {
+    let level = level.min(100);
+    if set_brightness_sysfs(level) {
+        return true;
+    }
+    // `brightnessctl` goes through udev and also covers the systems where
+    // writing `/sys/class/backlight` needs privileges this process lacks.
+    let value = format!("{level}%");
+    matches!(
+        run_command_timeout("brightnessctl", &["set", value.as_str()], CLI_TIMEOUT),
+        Some(out) if out.status.success()
+    )
+}
+
+/// Writes the first ACPI backlight device, mapping 0-100 onto its raw range.
+#[cfg(target_os = "linux")]
+fn set_brightness_sysfs(level: u8) -> bool {
+    let Ok(entries) = std::fs::read_dir("/sys/class/backlight") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let device = entry.path();
+        let Some(max) = std::fs::read_to_string(device.join("max_brightness"))
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .filter(|max| *max > 0)
+        else {
+            continue;
+        };
+        // Rounded up so any level above 0 actually lights the panel.
+        let raw = (max * level as u64 + 99) / 100;
+        if std::fs::write(device.join("brightness"), raw.to_string()).is_ok() {
+            return true;
+        }
+    }
     false
 }
 
@@ -4427,14 +4605,34 @@ fn get_clipboard() -> Option<String> {
     }
 }
 
+/// Runs `action` against the process-wide `arboard` clipboard handle.
+///
+/// On X11/Wayland the process that owns the selection has to stay alive for
+/// other applications to paste, so the handle is created once and kept instead
+/// of being dropped after every operation. Creation is retried whenever it
+/// failed earlier — at startup the display server may not be reachable yet.
 #[cfg(not(windows))]
-pub(crate) fn set_clipboard(_text: &str) -> bool {
-    false
+fn with_clipboard<R>(action: impl FnOnce(&mut arboard::Clipboard) -> R) -> Option<R> {
+    static CLIPBOARD: std::sync::LazyLock<std::sync::Mutex<Option<arboard::Clipboard>>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(arboard::Clipboard::new().ok()));
+
+    let mut handle = CLIPBOARD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if handle.is_none() {
+        *handle = arboard::Clipboard::new().ok();
+    }
+    handle.as_mut().map(action)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn set_clipboard(text: &str) -> bool {
+    with_clipboard(|clipboard| clipboard.set_text(text))
+        .map(|result| result.is_ok())
+        .unwrap_or(false)
 }
 
 #[cfg(not(windows))]
 fn get_clipboard() -> Option<String> {
-    None
+    with_clipboard(|clipboard| clipboard.get_text().ok()).flatten()
 }
 
 #[cfg(windows)]
@@ -4619,9 +4817,34 @@ pub(crate) fn show_notification(title: &str, message: &str) {
     }
 }
 
+/// Shows a native desktop notification.
+///
+/// `notify-rust` performs blocking I/O — D-Bus on Linux, the notification
+/// centre on macOS — so the call is handed to the blocking pool instead of the
+/// async worker. A notification that cannot be shown is logged, never fatal.
 #[cfg(not(windows))]
 pub(crate) fn show_notification(title: &str, message: &str) {
-    tracing::info!("[notification] {title}: {message}");
+    let title = title.to_string();
+    let message = message.to_string();
+    let notify = move || {
+        if let Err(error) = notify_rust::Notification::new()
+            .appname("BigPocket")
+            .summary(&title)
+            .body(&message)
+            .show()
+        {
+            tracing::warn!("Bildirim gösterilemedi: {error}");
+        }
+    };
+
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn_blocking(notify);
+        }
+        Err(_) => {
+            let _ = std::thread::spawn(notify);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

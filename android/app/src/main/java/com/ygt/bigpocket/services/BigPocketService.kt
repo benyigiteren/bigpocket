@@ -117,20 +117,40 @@ class BigPocketService : Service() {
         } catch (e: Exception) {
             // A camera/microphone foreground type is rejected when the app is not in the
             // foreground (or the runtime permission was revoked); the plain device link stays.
-            Log.e(TAG, "startForeground with media types failed, retrying as device link", e)
+            Log.e(TAG, "startForeground with requested types (connectedDevice/mic/camera) failed; retrying with connectedDevice only", e)
             try {
                 ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, baseForegroundServiceType())
             } catch (inner: Exception) {
-                Log.e(TAG, "startForeground with base type failed, falling back to untyped startForeground", inner)
+                Log.e(TAG, "startForeground with connectedDevice type failed; falling back to untyped legacy startForeground", inner)
                 try {
                     // Untyped legacy startForeground is universally supported on all Android versions and never throws
                     startForeground(NOTIFICATION_ID, notification)
                 } catch (last: Exception) {
-                    Log.e(TAG, "legacy startForeground failed", last)
+                    Log.e(TAG, "legacy startForeground failed; stopping the service", last)
                     releaseLocks()
                     stopSelf()
                 }
             }
+        }
+    }
+
+    /**
+     * Whether our own process currently counts as foreground. API 34 (Android 14) rejects the
+     * camera/microphone foreground-service types when the app is not visible, so the type mask
+     * has to be reduced before promoting the service. When the process importance cannot be
+     * determined we assume foreground and let the startForeground fallback chain handle it.
+     */
+    private fun isAppInForeground(): Boolean {
+        return try {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                ?: return true
+            val myPid = android.os.Process.myPid()
+            val info = activityManager.runningAppProcesses?.firstOrNull { it.pid == myPid }
+                ?: return true
+            info.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not determine foreground state; assuming foreground", e)
+            true
         }
     }
 
@@ -146,11 +166,24 @@ class BigPocketService : Service() {
         var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
         // MICROPHONE and CAMERA foreground types are API 30+ (Android 11+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 14 (API 34) only allows the camera/microphone types while the app is in
+            // the foreground; requesting them from the background is rejected outright.
+            val appInForeground =
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || isAppInForeground()
+
             if (micStreaming && hasPermission(Manifest.permission.RECORD_AUDIO)) {
-                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                if (appInForeground) {
+                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                } else {
+                    Log.w(TAG, "App not in foreground (API 34+): omitting MICROPHONE foreground type")
+                }
             }
             if (cameraStreaming && hasPermission(Manifest.permission.CAMERA)) {
-                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                if (appInForeground) {
+                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                } else {
+                    Log.w(TAG, "App not in foreground (API 34+): omitting CAMERA foreground type")
+                }
             }
         }
         return type
@@ -237,8 +270,15 @@ class BigPocketService : Service() {
         }
         if (wifiLock == null) {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            // WIFI_MODE_FULL_HIGH_PERF is deprecated on API 34+; the low-latency mode is the
+            // supported replacement there (WIFI_MODE_FULL_LOW_LATENCY exists since API 29).
+            val wifiLockMode = if (Build.VERSION.SDK_INT >= 34) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
             wifiLock = wifiManager?.createWifiLock(
-                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                wifiLockMode,
                 "$packageName:bigpocket-wifi"
             )?.apply {
                 setReferenceCounted(false)

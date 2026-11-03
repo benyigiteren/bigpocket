@@ -2,7 +2,9 @@ package com.ygt.bigpocket
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -16,6 +18,10 @@ import com.ygt.bigpocket.services.ShareInbox
 import com.ygt.bigpocket.theme.BigPocketTheme
 
 class MainActivity : ComponentActivity() {
+  companion object {
+    private const val TAG = "MainActivity"
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
@@ -75,7 +81,18 @@ class MainActivity : ComponentActivity() {
     val isMicRunning = com.ygt.bigpocket.services.SocketManager.isAudioStreaming
     val isCamRunning = com.ygt.bigpocket.services.SocketManager.isCameraStreaming
     if (bgService && (isMicRunning || isCamRunning || com.ygt.bigpocket.services.SocketManager.isConnected)) {
-      com.ygt.bigpocket.services.BigPocketService.start(this, isMicRunning, isCamRunning)
+      try {
+        com.ygt.bigpocket.services.BigPocketService.start(this, isMicRunning, isCamRunning)
+      } catch (e: Exception) {
+        // API 31+ forbids starting a foreground service from the background. The service
+        // is already promoted while the activity is resumed (see MainScreen), so this is
+        // only a best-effort refresh and a failure here must not crash the app.
+        if (Build.VERSION.SDK_INT >= 31 && e is android.app.ForegroundServiceStartNotAllowedException) {
+          Log.w(TAG, "Cannot start FGS from background on API 31+", e)
+        } else {
+          throw e
+        }
+      }
     }
   }
   override fun onDestroy() {

@@ -5,7 +5,8 @@
 //! `config.json`. The file lives in the per-user app data directory:
 //!
 //! * Windows: `%APPDATA%\BigPocket\config.json`
-//! * Linux/macOS: `~/.config/bigpocket/config.json`
+//! * macOS: `~/Library/Application Support/BigPocket/config.json`
+//! * Linux: `~/.config/bigpocket/config.json`
 
 use std::fs;
 use std::path::PathBuf;
@@ -642,7 +643,8 @@ pub fn normalize_config(mut cfg: Config) -> Config {
 /// Directory holding `config.json` and the shared-file spool.
 ///
 /// * Windows: `%APPDATA%\BigPocket` (falling back to `%USERPROFILE%`).
-/// * Linux/macOS: `~/.config/bigpocket`.
+/// * macOS: `~/Library/Application Support/BigPocket`.
+/// * Linux: `~/.config/bigpocket`.
 pub fn get_app_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     fn resolve() -> PathBuf {
@@ -662,7 +664,24 @@ pub fn get_app_data_dir() -> PathBuf {
         PathBuf::from("BigPocket")
     }
 
-    #[cfg(not(target_os = "windows"))]
+    /// macOS keeps per-user application data under `Application Support`, not
+    /// in an XDG-style dotfile directory.
+    #[cfg(target_os = "macos")]
+    fn resolve() -> PathBuf {
+        if let Some(home) = std::env::var_os("HOME") {
+            if !home.is_empty() {
+                return PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join("BigPocket");
+            }
+        }
+        PathBuf::from("Library")
+            .join("Application Support")
+            .join("BigPocket")
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     fn resolve() -> PathBuf {
         if let Some(home) = std::env::var_os("HOME") {
             if !home.is_empty() {

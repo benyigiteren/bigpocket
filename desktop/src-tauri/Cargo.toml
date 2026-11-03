@@ -26,11 +26,24 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 xcap = "0.9"
 enigo = { version = "0.2" }
 sysinfo = "0.31"
-windows = { version = "0.57", features = ["Media_Control", "Storage_Streams", "Foundation"] }
+# Cross-platform clipboard and desktop notifications. Only the macOS/Linux
+# branches call into them — Windows keeps its own Win32 implementations — but
+# both crates build everywhere, so they are declared normally.
+arboard = "3"
+notify-rust = "4"
+# Advisory file lock behind the non-Windows single-instance guard in main.rs.
+fs2 = "0.4"
 # `flate2` is pinned to the pure-Rust (miniz_oxide) backend so `zip`'s
 # `deflate-flate2` feature compiles without a C toolchain; it is a direct dep
 # only to select that backend.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+
+[target.'cfg(windows)'.dependencies]
+# WinRT/Win32 bindings (GSMTC media sessions, storage streams). Windows-only:
+# keeping it out of the shared table avoids compiling the bindings — and the
+# several `windows-*` crates it pulls in — for macOS/Linux builds.
+windows = { version = "0.57", features = ["Media_Control", "Storage_Streams", "Foundation"] }
+
 [profile.release]
 strip = true

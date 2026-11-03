@@ -1519,6 +1519,35 @@ fun MainScreen(
         }
     }
 
+    // POST_NOTIFICATIONS is a runtime permission from API 33 on; without it the foreground
+    // service's "PC'ye Bağlı" status notification is silently dropped inside the app.
+    var pendingNotificationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pendingNotificationAction?.invoke()
+        } else {
+            Toast.makeText(
+                context,
+                "Bildirim izni olmadan arka planda bağlantı kontrolü yapılamaz",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        pendingNotificationAction = null
+    }
+
+    val requestNotificationPermissionOrRun: (() -> Unit) -> Unit = { action ->
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        ) {
+            action()
+        } else {
+            pendingNotificationAction = action
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     // File picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -1622,6 +1651,14 @@ fun MainScreen(
             prefs.edit().putString("ip_address", pc.ip).apply()
             Toast.makeText(context, "${pc.name} bulundu, bağlanılıyor…", Toast.LENGTH_SHORT).show()
             SocketManager.connect(pc.ip, password)
+        }
+    }
+
+    // Ask for the notification permission the first time the PC link comes up. Without it the
+    // foreground service cannot surface its status/connection notification on API 33+.
+    LaunchedEffect(isConnected) {
+        if (isConnected) {
+            requestNotificationPermissionOrRun { }
         }
     }
 

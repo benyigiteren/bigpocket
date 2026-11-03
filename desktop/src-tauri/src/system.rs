@@ -37,6 +37,56 @@ fn input_error(error: enigo::InputError) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Desktop helper CLIs (non-Windows)
+// ---------------------------------------------------------------------------
+
+/// Wall-clock budget for the short helper CLIs this module and [`crate::server`]
+/// drive (`osascript`, `playerctl`, `wpctl`, ...).
+///
+/// They are local IPC calls; anything slower means a wedged daemon, and the
+/// caller must not be held hostage by it.
+#[cfg(not(windows))]
+pub(crate) const CLI_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Runs `program` with `args` and returns its output only if it exits within
+/// `timeout`; the child is killed and `None` returned otherwise.
+///
+/// `stdin`/`stderr` are detached and only `stdout` is piped, so a helper can
+/// neither block on a terminal nor flood a buffer the caller is not reading.
+#[cfg(not(windows))]
+pub(crate) fn run_command_timeout(
+    program: &str,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<std::process::Output> {
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            // Already exited: reap it and collect whatever it wrote to stdout.
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // System telemetry
 // ---------------------------------------------------------------------------
 
@@ -2010,7 +2060,148 @@ fn detect_media_info_internal() -> MediaInfo {
     MediaInfo::default()
 }
 
-#[cfg(not(windows))]
+// ---------------------------------------------------------------------------
+// Now-playing detection (macOS AppleScript, Linux MPRIS via `playerctl`)
+// ---------------------------------------------------------------------------
+
+/// Output of `osascript -e script`, trimmed, or `None` when it fails or prints
+/// nothing (the usual outcome when no scriptable player is running).
+#[cfg(target_os = "macos")]
+fn osascript(script: &str) -> Option<String> {
+    let output = run_command_timeout("osascript", &["-e", script], CLI_TIMEOUT)?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Trimmed stdout of `program`, or `None` when it fails or prints nothing.
+#[cfg(target_os = "linux")]
+fn command_text(program: &str, args: &[&str]) -> Option<String> {
+    let output = run_command_timeout(program, args, CLI_TIMEOUT)?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Reads the now-playing track off Spotify, falling back to Music.
+///
+/// Both expose the same AppleScript properties; the whole probe is a single
+/// `osascript` call so a polling client does not pay for one process per field.
+/// `is running` is checked first because `tell application` would otherwise
+/// launch the player. Fields are separated by `return` (CR): a `\n` escape does
+/// not exist in AppleScript string literals.
+#[cfg(target_os = "macos")]
+fn media_info_macos() -> MediaInfo {
+    const SCRIPT: &str = r#"
+set output to ""
+try
+    if application "Spotify" is running then
+        tell application "Spotify"
+            set output to (name of current track) & return & (artist of current track) & return & (player state as text) & return & (round ((duration of current track) / 1000)) & return & (round (player position))
+        end tell
+    end if
+end try
+if output is "" then
+    try
+        if application "Music" is running then
+            tell application "Music"
+                if player state is not stopped then
+                    set output to (name of current track) & return & (artist of current track) & return & (player state as text) & return & (round (duration of current track)) & return & (round (player position))
+                end if
+            end tell
+        end if
+    end try
+end if
+return output
+"#;
+
+    let Some(raw) = osascript(SCRIPT) else {
+        return MediaInfo::default();
+    };
+
+    let mut fields = raw.split(|c| c == '\r' || c == '\n').map(str::trim);
+    let title = fields.next().unwrap_or_default().to_string();
+    let artist = fields.next().unwrap_or_default().to_string();
+    let state = fields.next().unwrap_or_default().to_ascii_lowercase();
+    let duration_sec = fields.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    let position_sec = fields.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+
+    if title.is_empty() {
+        return MediaInfo::default();
+    }
+
+    MediaInfo {
+        title,
+        artist,
+        is_playing: state == "playing",
+        is_live: false,
+        // Artwork lookup needs the Windows search helpers; clients fall back to
+        // the music-note tile without it.
+        cover_url: String::new(),
+        position_sec,
+        duration_sec,
+    }
+}
+
+/// Reads the now-playing track from the MPRIS player `playerctl` selects.
+///
+/// The status query doubles as "is anything on the bus at all?", so the four
+/// metadata calls are only made when there is something to report.
+#[cfg(target_os = "linux")]
+fn media_info_linux() -> MediaInfo {
+    let Some(status) = command_text("playerctl", &["status"]) else {
+        return MediaInfo::default();
+    };
+    if status.eq_ignore_ascii_case("stopped") {
+        return MediaInfo::default();
+    }
+
+    let Some(title) = command_text("playerctl", &["metadata", "title"]) else {
+        return MediaInfo::default();
+    };
+    let artist = command_text("playerctl", &["metadata", "artist"]).unwrap_or_default();
+    // `mpris:length` is microseconds, `position` is (fractional) seconds.
+    let duration_sec = command_text("playerctl", &["metadata", "mpris:length"])
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|micros| (micros / 1_000_000) as u32)
+        .unwrap_or(0);
+    let position_sec = command_text("playerctl", &["position"])
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|secs| *secs > 0.0)
+        .map(|secs| secs as u32)
+        .unwrap_or(0);
+
+    MediaInfo {
+        title,
+        artist,
+        is_playing: status.eq_ignore_ascii_case("playing"),
+        is_live: false,
+        // Artwork lookup needs the Windows search helpers; clients fall back to
+        // the music-note tile without it.
+        cover_url: String::new(),
+        position_sec,
+        duration_sec,
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn detect_media_info() -> MediaInfo {
-    MediaInfo::default()
+    media_info_macos()
+}
+
+#[cfg(target_os = "linux")]
+pub fn detect_media_info() -> MediaInfo {
+    media_info_linux()
 }
