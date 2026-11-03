@@ -3199,10 +3199,32 @@ input:checked + .slider:before {
     border-radius: var(--radius-full);
     background: var(--bg-elevated);
     color: var(--tone, var(--accent-solid));
+    overflow: hidden;
+    position: relative;
 }
 
-.md-tile__badge svg { width: 52%; height: 52%; }
+.md-tile__badge svg {
+    width: 52%;
+    height: 52%;
+    display: block;
+}
 
+.md-tile__badge img,
+.md-tile__badge .badge-app-icon {
+    width: 70%;
+    height: 70%;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+    border-radius: 4px;
+    pointer-events: none;
+}
+
+.md-tile__badge.has-img {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
 .md-tile__state,
 .md-tile__chev {
     display: inline-flex;

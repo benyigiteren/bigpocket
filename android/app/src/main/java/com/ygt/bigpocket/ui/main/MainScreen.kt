@@ -5465,9 +5465,10 @@ private fun DeckActionCard(
                 AsyncImage(
                     model = customUrl,
                     contentDescription = button.label,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .size(18.dp)
-                        .clip(CircleShape)
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(4.dp))
                 )
             } else {
                 Icon(

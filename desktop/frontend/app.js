@@ -4058,8 +4058,9 @@ function renderStreamDeckButtons() {
 
         // Icon handling
         let displayIcon = getSvgIcon(btn.icon);
-        if (isExtractedIconValue(btn.icon)) {
-            displayIcon = `<img src="${iconAssetUrl(btn.icon.substring(7))}" alt="" />`;
+        const isExtracted = isExtractedIconValue(btn.icon);
+        if (isExtracted) {
+            displayIcon = `<img src="${iconAssetUrl(btn.icon.substring(7))}" alt="" class="badge-app-icon" onerror="this.style.display='none';" />`;
         }
 
         // Custom body preview based on widget type
@@ -4463,7 +4464,7 @@ function renderStreamDeckButtons() {
             bodyContent = `
                 <div class="md-tile ${isOn ? 'is-on' : ''}">
                     <div class="md-tile__top">
-                        <span class="md-tile__badge">${displayIcon}</span>
+                        <span class="md-tile__badge ${isExtracted ? 'has-img' : ''}">${displayIcon}</span>
                         ${btn.type === 'toggle'
                             ? `<span class="md-tile__state">${isOn ? 'Açık' : 'Kapalı'}</span>`
                             : `<span class="md-tile__chev">${mdIcon('right', 13)}</span>`}
