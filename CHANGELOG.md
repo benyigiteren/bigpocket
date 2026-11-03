@@ -3,6 +3,32 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
+## v1.5.4
+
+### 🚀 Evrensel Çoklu Platform Desteği (Windows, macOS, Linux)
+- **Çapraz Platform Pano & Bildirimler:** macOS ve Linux için yerel pano senkronizasyonu (`arboard`) ve yerel masaüstü bildirimleri (`notify-rust`) entegre edildi.
+- **Sistem Kontrolleri:** macOS'ta AppleScript ve Linux'ta PipeWire/PulseAudio (`wpctl`/`pactl`) ile yerel ses kontrolü; macOS ve Linux için donanımsal ekran parlaklığı desteği sağlandı.
+- **Medya Takibi:** macOS (Spotify / Apple Music) ve Linux (MPRIS / `playerctl`) üzerinden çalan şarkı ve medya kontrolü bağlandı.
+- **Tek Örnek Koruması:** Windows harici sistemlerde kilit dosyası tabanlı (`fs2`) çakışmasız tek uygulama güvencesi eklendi.
+
+### 📱 Android 16 (API 36) Tam Uyumluluk & Temiz Açılış
+- **Android 16 Desteği:** `targetSdk` 36'ya yükseltildi; modern edge-to-edge ve sistem kurallarına tam uyum sağlandı.
+- **Açılışta Sıfır İzin Dayatması (On-Demand):** İlk açılışta ekrana fırlatılan kamera ve mikrofon izin pop-up'ları kaldırıldı; izinler yalnızca kullanıcı ilgili özelliği (QR Kod veya Ses/Kamera Yayını) açtığında talep edilir.
+- **Yeni Bildirim Çubuğu İkonu:** Bildirim çekmecesindeki eski telefon simgesi yerine BigPocket'in modern cep silüeti ikonu yerleştirildi.
+- **Android 7 - 15 Kapsamlı Kararlılık:** Android 10-14 arka plan servis kısıtlamaları (`ForegroundServiceStartNotAllowedException`), depolama izinleri ve Wi-Fi düşük gecikme kilidi (`WIFI_MODE_FULL_LOW_LATENCY`) kusursuz hale getirildi.
+
+### 🤖 Model Context Protocol (MCP) & Yapay Zeka Entegrasyonu
+- **32/32 MCP Aracı Canlı:** Claude, Cursor ve harici yapay zeka ajanlarının BigPocket'i tam yetkiyle yönetebilmesi için `/mcp` JSON-RPC 2.0 rotası ve tüm sistem araçları aktifleştirildi.
+- **Atomik Stream Deck API'si:** Ajanların tüm ayar dosyasını ezmeden tekil buton eklemesini, güncellemesini ve silmesini sağlayan `/api/deck/button` endpoint'i, çakışma önleyici ve otomatik hücre yerleştirici yazıldı.
+- **Windows Kilitle & Kapat Butonları:** Stream Deck Ana Sayfası'na tek dokunuşla çalışan Windows Kilitleme (`meta+l`) ve Bilgisayarı Kapatma butonları entegre edildi.
+
+### 📦 Profil Paylaşımı & Hazır Şablonlar
+- **Dışa & İçe Aktarma (Zip):** Stream Deck butonları ve özel ikonları tek tıkla `.zip` paketi olarak dışa aktarılabilir (`/api/deck/profile/export`) ve başka cihazlara yüklenebilir.
+- **5 Hazır Şablon:** Pro Studio, Media Lounge, Gaming / OBS, Developer ve System Control hazır şablonları eklendi.
+
+### 🔍 Çoklu Alt Ağ (Subnet) Keşif & Otomatik Tarama
+- Tüm aktif ağ kartlarına (Wi-Fi, Ethernet, USB Tethering) eş zamanlı alt ağ yayını ve AP Isolation engeline karşı otomatik alt ağ taraması eklendi.
+
 ## v1.5.3-beta
 
 ### 🛡️ Android 10 (API 29) & Genel Android Kararlılığı

@@ -11,7 +11,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Android-4285F4?logo=android&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%7C%20Android-blue)](https://github.com/benyigiteren/bigpocket)
-[![Release](https://img.shields.io/badge/Release-v1.5.3--beta-green)](https://github.com/benyigiteren/bigpocket/releases)
+[![Release](https://img.shields.io/badge/Release-v1.5.4-green)](https://github.com/benyigiteren/bigpocket/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Telefonunuzu Windows için Sanal 2. Monitör, Sanal Mikrofon, Stream Deck, Webcam ve Dosya Aktarım Merkezine Dönüştürün.**
