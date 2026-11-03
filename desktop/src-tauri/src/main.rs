@@ -6,6 +6,7 @@ mod config;
 mod deck_api;
 mod discovery;
 mod flow;
+mod icon_extractor;
 mod mcp_handler;
 mod profile;
 mod server;

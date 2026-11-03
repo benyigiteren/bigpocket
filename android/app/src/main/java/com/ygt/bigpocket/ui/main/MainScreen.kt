@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -73,6 +74,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.animation.core.*
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.pointerInput
@@ -258,7 +260,9 @@ data class StreamDeckPageInfo(
 
 data class InstalledAppInfo(
     val name: String,
-    val path: String
+    val path: String,
+    /** Relative icon path (e.g. `icons/app_chrome.png`) when the PC already cached the logo, else null. */
+    val icon: String? = null
 )
 
 private fun fetchInstalledApps(
@@ -302,7 +306,13 @@ private fun fetchInstalledApps(
                         val item = appsArray.getJSONObject(i)
                         list.add(InstalledAppInfo(
                             name = item.getString("name"),
-                            path = item.getString("path")
+                            path = item.getString("path"),
+                            // The PC has answered with any of these three keys over time; the web UI
+                            // accepts all of them, so mirror that instead of trusting one spelling.
+                            icon = item.optString("icon", "")
+                                .ifBlank { item.optString("icon_url", "") }
+                                .ifBlank { item.optString("icon_path", "") }
+                                .takeIf { it.isNotBlank() }
                         ))
                     }
                     onSuccess(list)
@@ -314,6 +324,64 @@ private fun fetchInstalledApps(
         }
     })
 }
+
+/**
+ * Normalises whatever the PC reports as an app/button logo into the `custom:` token the deck
+ * renderer understands. The server is allowed to answer either `icons/app_x.png` (its raw form)
+ * or `custom:icons/app_x.png` (the form the web UI stores), so both round-trip identically.
+ */
+private fun normalizeCustomIconToken(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return trimmed
+    return "custom:" + trimmed.removePrefix("custom:")
+}
+
+/** Absolute URL Coil must load for a `custom:` icon token, or null when [icon] is not one. */
+private fun customIconUrl(icon: String, ip: String, password: String): String? {
+    if (!icon.startsWith("custom:") || icon.length <= 7) return null
+    val iconPath = icon.substring(7)
+    return "http://$ip:8085/$iconPath?password=${Uri.encode(password)}"
+}
+
+/**
+ * Asks the PC to extract the real logo of the application at [appPath] and caches it server-side.
+ * Returns the `custom:` token to store on the button, or null when the PC could not produce one
+ * (unknown file type, unsupported platform, offline). Never throws: a failed extraction must leave
+ * the caller free to keep its fallback icon.
+ */
+private suspend fun requestIconExtraction(ip: String, password: String, appPath: String): String? =
+    withContext(Dispatchers.IO) {
+        try {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                // Extraction may shell out to PowerShell/`sips`, so allow a generous read window.
+                .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val payload = JSONObject().put("path", appPath).toString()
+            val request = Request.Builder()
+                .url("http://$ip:8085/extract_icon")
+                .addHeader("X-Password", password)
+                .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.e("MainScreen", "Icon extraction failed: HTTP ${response.code}")
+                    return@withContext null
+                }
+                val body = response.body?.string() ?: return@withContext null
+                val json = JSONObject(body)
+                if (!json.optBoolean("success", true)) return@withContext null
+                json.optString("icon", "")
+                    .ifBlank { json.optString("icon_url", "") }
+                    .takeIf { it.isNotBlank() }
+                    ?.let { normalizeCustomIconToken(it) }
+            }
+        } catch (e: Exception) {
+            Log.e("MainScreen", "Icon extraction request failed", e)
+            null
+        }
+    }
 
 private fun fetchStreamDeckConfig(
     ip: String,
@@ -1778,6 +1846,12 @@ fun MainScreen(
             var editSliderStyle by remember(currentBtn) { mutableStateOf(currentBtn.sliderStyle.ifBlank { "apple" }) }
             var editSliderOrientation by remember(currentBtn) { mutableStateOf(currentBtn.sliderOrientation.ifBlank { "auto" }) }
             var appSearchQuery by remember(currentBtn) { mutableStateOf("") }
+            var iconSearchQuery by remember(currentBtn) { mutableStateOf("") }
+            var iconCategory by remember(currentBtn) { mutableStateOf(IconCategoryAll) }
+            // Path of the application whose logo is currently being extracted on the PC, or null.
+            // Holding the path (not just a boolean) also guards against a slow first extraction
+            // overwriting the logo of an app the user picked afterwards.
+            var extractingIconPath by remember(currentBtn) { mutableStateOf<String?>(null) }
             LaunchedEffect(streamDeckButtons) {
                 val updatedBtn = streamDeckButtons.find { it.id == currentBtn.id }
                 if (updatedBtn != null) {
@@ -2127,26 +2201,73 @@ fun MainScreen(
                                     Text("Uygulama bulunamadı.", fontSize = 11.sp, color = MinimalistSecondary, modifier = Modifier.padding(vertical = 4.dp))
                                 } else {
                                     for (app in filteredApps.take(15)) {
-                                        Box(
+                                        // The PC reports a cached logo path for apps it already
+                                        // extracted; the row shows it instead of the generic glyph.
+                                        val cachedIconToken = app.icon?.takeIf { it.isNotBlank() }?.let { normalizeCustomIconToken(it) }
+                                        val appIconUrl = cachedIconToken?.let { customIconUrl(it, ipAddress, password) }
+                                        Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clickable {
                                                     editValue = app.path
                                                     editLabel = app.name
-                                                    editIcon = when {
-                                                        app.name.contains("chrome", ignoreCase = true) || app.name.contains("browser", ignoreCase = true) -> "web"
-                                                        app.name.contains("music", ignoreCase = true) || app.name.contains("spotify", ignoreCase = true) -> "play"
-                                                        app.name.contains("volume", ignoreCase = true) || app.name.contains("sound", ignoreCase = true) -> "volup"
-                                                        app.name.contains("mic", ignoreCase = true) -> "mic"
-                                                        app.name.contains("lock", ignoreCase = true) -> "lock"
-                                                        app.name.contains("task", ignoreCase = true) || app.name.contains("manager", ignoreCase = true) -> "task"
-                                                        app.name.contains("settings", ignoreCase = true) -> "settings"
-                                                        else -> "star"
+                                                    if (cachedIconToken != null) {
+                                                        editIcon = cachedIconToken
+                                                    } else {
+                                                        // Show a generic glyph now, then swap in the real
+                                                        // logo the moment the PC finishes extracting it.
+                                                        editIcon = "apps"
+                                                        extractingIconPath = app.path
+                                                        coroutineScope.launch(Dispatchers.Main) {
+                                                            val extracted = requestIconExtraction(ipAddress, password, app.path)
+                                                            if (extractingIconPath == app.path) {
+                                                                if (extracted != null) editIcon = extracted
+                                                                extractingIconPath = null
+                                                            }
+                                                        }
                                                     }
                                                 }
-                                                .padding(vertical = 6.dp, horizontal = 4.dp)
+                                                .padding(vertical = 6.dp, horizontal = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(app.name, fontSize = 12.sp)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(MinimalistSurfaceElevated),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (appIconUrl != null) {
+                                                    AsyncImage(
+                                                        model = appIconUrl,
+                                                        contentDescription = app.name,
+                                                        contentScale = ContentScale.Fit,
+                                                        modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp))
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Apps,
+                                                        contentDescription = null,
+                                                        tint = MinimalistSecondary,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = app.name,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            if (extractingIconPath == app.path) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(14.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MinimalistPrimary
+                                                )
+                                            }
                                         }
                                         Divider(color = MinimalistBorder)
                                     }
@@ -2270,39 +2391,136 @@ fun MainScreen(
 
                         Text("Simge Seçin", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val selectedIconUrl = customIconUrl(editIcon, ipAddress, password)
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MinimalistSurfaceElevated)
+                                    .border(1.dp, MinimalistPrimary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                when {
+                                    extractingIconPath != null -> CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MinimalistPrimary
+                                    )
+                                    selectedIconUrl != null -> AsyncImage(
+                                        model = selectedIconUrl,
+                                        contentDescription = "Özel Simge",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
+                                    )
+                                    else -> Icon(
+                                        imageVector = getVectorIcon(editIcon),
+                                        contentDescription = "Simge Önizleme",
+                                        tint = MinimalistPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Seçili Simge", fontSize = 11.sp, color = MinimalistSecondary)
+                                Text(
+                                    text = when {
+                                        extractingIconPath != null -> "Uygulama simgesi çıkarılıyor..."
+                                        selectedIconUrl != null -> "Özel görsel"
+                                        DeckIconByName[editIcon] != null -> DeckIconByName[editIcon]!!.label + "  ·  " + editIcon
+                                        editIcon.isBlank() -> "Seçilmedi"
+                                        else -> editIcon
+                                    },
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MinimalistPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = iconSearchQuery,
+                            onValueChange = { iconSearchQuery = it },
+                            label = { Text("İkonlarda Ara... (ses, kilit, web, saat...)") },
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 13.sp),
+                            leadingIcon = {
+                                Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                            },
+                            trailingIcon = {
+                                if (iconSearchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { iconSearchQuery = "" },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Aramayı temizle",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            val builtInIcons = listOf(
-                                "keyboard", "clock", "timer", "mic", "volume", "volup", "voldown", "bright",
-                                "play", "skip", "prev", "spotify", "headphones", "speaker", "calc", "web",
-                                "lock", "task", "terminal", "folder", "camera", "monitor", "cpu", "ram",
-                                "disk", "gpu", "speed", "weather", "thermometer", "paint", "copy", "bell",
-                                "wifi", "settings", "info", "refresh", "star", "add", "close"
-                            )
-                            for (iconName in builtInIcons) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(if (editIcon == iconName) MinimalistPrimary.copy(alpha = 0.2f) else MinimalistSurfaceElevated)
-                                        .border(
-                                            1.dp,
-                                            if (editIcon == iconName) MinimalistPrimary else MinimalistBorder,
-                                            RoundedCornerShape(12.dp)
-                                        )
-                                        .clickable { editIcon = iconName }
-                                        .padding(8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = getVectorIcon(iconName),
-                                        contentDescription = iconName,
-                                        tint = if (editIcon == iconName) MinimalistPrimary else MinimalistSecondary,
-                                        modifier = Modifier.size(24.dp)
+                            for (category in DeckIconCategories) {
+                                FilterChip(
+                                    selected = iconCategory == category,
+                                    onClick = { iconCategory = category },
+                                    label = { Text(category, fontSize = 11.sp) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = MinimalistSurfaceElevated,
+                                        labelColor = MinimalistSecondary,
+                                        selectedContainerColor = MinimalistPrimary.copy(alpha = 0.22f),
+                                        selectedLabelColor = MinimalistPrimary
                                     )
+                                )
+                            }
+                        }
+                        val filteredIcons = remember(iconSearchQuery, iconCategory) {
+                            DeckIconCatalog.filter { def ->
+                                (iconCategory == IconCategoryAll || def.category == iconCategory) &&
+                                    matchesIconQuery(def, iconSearchQuery)
+                            }
+                        }
+                        Text(
+                            text = if (filteredIcons.isEmpty()) "Eşleşen ikon yok." else "${filteredIcons.size} ikon",
+                            fontSize = 11.sp,
+                            color = MinimalistSecondary
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            for (iconRow in filteredIcons.chunked(IconGridColumns)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    for (def in iconRow) {
+                                        DeckIconTile(
+                                            def = def,
+                                            selected = editIcon == def.name,
+                                            onClick = { editIcon = def.name },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    repeat(IconGridColumns - iconRow.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
                                 }
                             }
                         }
@@ -2322,39 +2540,6 @@ fun MainScreen(
                             Icon(Icons.Default.Add, contentDescription = "Upload", modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Galeriden Özel Görsel Yükle", fontSize = 12.sp)
-                        }
-
-                        Divider(color = MinimalistBorder)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Aktif Simge Önizleme:", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MinimalistSurfaceElevated)
-                                    .border(1.dp, MinimalistPrimary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (editIcon.startsWith("custom:") && editIcon.length > 7) {
-                                    val iconPath = editIcon.substring(7)
-                                    val imageUrl = "http://$ipAddress:8085/$iconPath?password=${Uri.encode(password)}"
-                                    AsyncImage(
-                                        model = imageUrl,
-                                        contentDescription = "Custom Icon",
-                                        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = getVectorIcon(editIcon),
-                                        contentDescription = "Icon Preview",
-                                        tint = MinimalistPrimary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
                         }
                     }
                 },
@@ -3242,56 +3427,345 @@ fun ConnectionTab(
     }
 }
 
-// Map standard config string icons to compose Vector drawables
-private fun getVectorIcon(iconName: String): androidx.compose.ui.graphics.vector.ImageVector {
+// ---------------------------------------------------------------------------
+// Built-in icon library
+// ---------------------------------------------------------------------------
+
+/** One entry of the icon library offered by the button editor's searchable picker. */
+private data class DeckIconDef(
+    /** Stable token persisted in the button's `icon` field and shared with the PC deck config. */
+    val name: String,
+    val category: String,
+    /** Short Turkish caption drawn under the tile. */
+    val label: String,
+    val imageVector: ImageVector,
+    /** Lowercase Turkish + English search keywords (never rendered). */
+    val tags: String
+)
+
+private const val IconCategoryAll = "Tümü"
+private const val IconCategoryMedia = "Medya & Ses"
+private const val IconCategorySystem = "Sistem & Güç"
+private const val IconCategoryDevice = "Cihazlar & Donanım"
+private const val IconCategoryApp = "Uygulamalar & Web"
+private const val IconCategoryNav = "Navigasyon & Oklar"
+
+/** Filter chips shown above the icon grid, in order. */
+private val DeckIconCategories = listOf(
+    IconCategoryAll,
+    IconCategoryMedia,
+    IconCategorySystem,
+    IconCategoryDevice,
+    IconCategoryApp,
+    IconCategoryNav
+)
+
+/**
+ * The deck's whole built-in icon library. Every token here is a real, hand-picked Material symbol
+ * so a button configured on Android renders identically on the PC deck (the same tokens are the
+ * PC's `.deck-btn` icon keys) — nothing is generated or mapped to a placeholder.
+ *
+ * Tiles all come from the filled family so they keep the same optical weight at the 20dp tile size;
+ * direction-sensitive arrows are taken from AutoMirrored so RTL layouts mirror correctly.
+ */
+private val DeckIconCatalog: List<DeckIconDef> = listOf(
+    // ---- Medya & Ses ----
+    DeckIconDef("play", IconCategoryMedia, "Oynat", Icons.Filled.PlayArrow, "oynat başlat play start music müzik medya"),
+    DeckIconDef("pause", IconCategoryMedia, "Duraklat", Icons.Filled.Pause, "duraklat bekle dur pause hold"),
+    DeckIconDef("stop", IconCategoryMedia, "Durdur", Icons.Filled.Stop, "durdur kes son stop end"),
+    DeckIconDef("volume", IconCategoryMedia, "Ses", Icons.Filled.VolumeUp, "ses seviye yüksek volume level loud"),
+    DeckIconDef("volume_up", IconCategoryMedia, "Ses Artır", Icons.AutoMirrored.Filled.VolumeUp, "ses artır yükselt volume up increase"),
+    DeckIconDef("volume_down", IconCategoryMedia, "Ses Azalt", Icons.Filled.VolumeDown, "ses azalt düşür volume down decrease"),
+    DeckIconDef("mute", IconCategoryMedia, "Sessiz", Icons.Filled.VolumeMute, "sessiz sustur mute silent"),
+    DeckIconDef("volume_off", IconCategoryMedia, "Ses Kapalı", Icons.Filled.VolumeOff, "ses kapalı kısık volume off"),
+    DeckIconDef("mic", IconCategoryMedia, "Mikrofon", Icons.Filled.Mic, "mikrofon ses kayıt mic record voice"),
+    DeckIconDef("mic_off", IconCategoryMedia, "Mik Kapalı", Icons.Filled.MicOff, "mikrofon kapalı sustur mic off"),
+    DeckIconDef("headphones", IconCategoryMedia, "Kulaklık", Icons.Filled.Headphones, "kulaklık müzik dinle headphones listen"),
+    DeckIconDef("headset", IconCategoryMedia, "Kulaklık + Mik", Icons.Filled.Headset, "kulaklık mikrofon headset mic destek"),
+    DeckIconDef("speaker", IconCategoryMedia, "Hoparlör", Icons.Filled.Speaker, "hoparlör ses speaker audio"),
+    DeckIconDef("speaker_group", IconCategoryMedia, "Ses Sistemi", Icons.Filled.SpeakerGroup, "hoparlör grup ses speaker group system"),
+    DeckIconDef("music", IconCategoryMedia, "Müzik", Icons.Filled.MusicNote, "müzik şarkı nota music song note"),
+    DeckIconDef("radio", IconCategoryMedia, "Radyo", Icons.Filled.Radio, "radyo yayın fm radio broadcast"),
+    DeckIconDef("podcast", IconCategoryMedia, "Podcast", Icons.Filled.Podcasts, "podcast yayın dinle podcast"),
+    DeckIconDef("shuffle", IconCategoryMedia, "Karıştır", Icons.Filled.Shuffle, "karıştır rastgele shuffle random"),
+    DeckIconDef("repeat", IconCategoryMedia, "Tekrar", Icons.Filled.Repeat, "tekrar döngü repeat loop"),
+    DeckIconDef("repeat_one", IconCategoryMedia, "Tek Şarkı", Icons.Filled.RepeatOne, "tek şarkı tekrar repeat one loop"),
+    DeckIconDef("equalizer", IconCategoryMedia, "Ekolayzer", Icons.Filled.Equalizer, "ekolayzer ses ayarı bands equalizer"),
+    DeckIconDef("playlist", IconCategoryMedia, "Çalma Listesi", Icons.Filled.QueueMusic, "çalma listesi kuyruk playlist queue"),
+    DeckIconDef("album", IconCategoryMedia, "Albüm", Icons.Filled.Album, "albüm kapak album cover"),
+    DeckIconDef("library_music", IconCategoryMedia, "Müzik Arşivi", Icons.Filled.LibraryMusic, "kütüphane arşiv müzik library music"),
+    DeckIconDef("movie", IconCategoryMedia, "Film", Icons.Filled.Movie, "film sinema video movie cinema"),
+    DeckIconDef("videocam", IconCategoryMedia, "Video Kaydı", Icons.Filled.Videocam, "video kamera kayıt videocam record"),
+    DeckIconDef("live_tv", IconCategoryMedia, "Canlı TV", Icons.Filled.LiveTv, "canlı tv yayın live tv"),
+    DeckIconDef("skip", IconCategoryMedia, "Sonraki", Icons.Filled.SkipNext, "sonraki ileri parça skip next track"),
+    DeckIconDef("prev", IconCategoryMedia, "Önceki", Icons.Filled.SkipPrevious, "önceki geri parça prev previous track"),
+    DeckIconDef("fast_forward", IconCategoryMedia, "Hızlı İleri", Icons.Filled.FastForward, "hızlı ileri sarma forward"),
+    DeckIconDef("rewind", IconCategoryMedia, "Hızlı Geri", Icons.Filled.FastRewind, "hızlı geri sarma rewind"),
+    DeckIconDef("slow_motion", IconCategoryMedia, "Ağır Çekim", Icons.Filled.SlowMotionVideo, "ağır çekim yavaş slow motion"),
+
+    // ---- Sistem & Güç ----
+    DeckIconDef("power", IconCategorySystem, "Güç", Icons.Filled.PowerSettingsNew, "güç aç kapat power on off"),
+    DeckIconDef("shutdown", IconCategorySystem, "Kapat", Icons.Filled.Power, "kapat kapanma shutdown power"),
+    DeckIconDef("restart", IconCategorySystem, "Yeniden Başlat", Icons.Filled.RestartAlt, "yeniden başlat restart reboot"),
+    DeckIconDef("lock", IconCategorySystem, "Kilitle", Icons.Filled.Lock, "kilit kilitle güvenlik lock security"),
+    DeckIconDef("unlock", IconCategorySystem, "Kilidi Aç", Icons.Filled.LockOpen, "kilit aç unlock open"),
+    DeckIconDef("sleep", IconCategorySystem, "Uyku", Icons.Filled.Bedtime, "uyku uyutma bekleme sleep night"),
+    DeckIconDef("settings", IconCategorySystem, "Ayarlar", Icons.Filled.Settings, "ayar ayarlar dişli settings config"),
+    DeckIconDef("task", IconCategorySystem, "Görev", Icons.Filled.Task, "görev yöneticisi task manager"),
+    DeckIconDef("terminal", IconCategorySystem, "Terminal", Icons.Filled.Terminal, "terminal komut konsol cmd shell"),
+    DeckIconDef("cpu", IconCategorySystem, "İşlemci", Icons.Filled.Memory, "işlemci cpu çip chip processor"),
+    DeckIconDef("gpu", IconCategorySystem, "Ekran Kartı", Icons.Filled.DeveloperBoard, "ekran kartı gpu grafik chip"),
+    DeckIconDef("battery", IconCategorySystem, "Pil", Icons.Filled.BatteryFull, "pil batarya dolu battery full"),
+    DeckIconDef("battery_charging", IconCategorySystem, "Pil Şarj", Icons.Filled.BatteryChargingFull, "pil şarj charging battery"),
+    DeckIconDef("battery_saver", IconCategorySystem, "Pil Tasarrufu", Icons.Filled.BatterySaver, "pil tasarruf güç battery saver"),
+    DeckIconDef("storage", IconCategorySystem, "Depolama", Icons.Filled.Storage, "depolama disk sürücü storage drive"),
+    DeckIconDef("info", IconCategorySystem, "Bilgi", Icons.Filled.Info, "bilgi hakkında info about"),
+    DeckIconDef("refresh", IconCategorySystem, "Yenile", Icons.Filled.Refresh, "yenile güncelle refresh reload"),
+    DeckIconDef("update", IconCategorySystem, "Güncelleme", Icons.Filled.SystemUpdate, "güncelleme sürüm update version"),
+    DeckIconDef("shield", IconCategorySystem, "Kalkan", Icons.Filled.Shield, "kalkan koruma güvenlik shield protection"),
+    DeckIconDef("security", IconCategorySystem, "Güvenlik", Icons.Filled.Security, "güvenlik koruma gizlilik security privacy"),
+    DeckIconDef("bug", IconCategorySystem, "Hata Kaydı", Icons.Filled.BugReport, "hata böcek rapor bug report debug"),
+    DeckIconDef("build", IconCategorySystem, "Araçlar", Icons.Filled.Build, "araç alet ayar build tools wrench"),
+    DeckIconDef("construction", IconCategorySystem, "Yapım", Icons.Filled.Construction, "yapım bakım tamir construction repair"),
+    DeckIconDef("recycle_empty", IconCategorySystem, "Çöp Boşalt", Icons.Filled.DeleteSweep, "geri dönüşüm boşalt çöp sil empty recycle bin trash"),
+    DeckIconDef("recycle", IconCategorySystem, "Geri Dönüşüm", Icons.Filled.Recycling, "geri dönüşüm çöp recycle"),
+    DeckIconDef("hourglass", IconCategorySystem, "Kum Saati", Icons.Filled.HourglassEmpty, "kum saati bekleme hourglass waiting"),
+    DeckIconDef("schedule", IconCategorySystem, "Zaman", Icons.Filled.Schedule, "saat zaman takvim schedule time clock"),
+    DeckIconDef("timer", IconCategorySystem, "Zamanlayıcı", Icons.Filled.Timer, "zamanlayıcı kronometre pomodoro timer stopwatch"),
+    DeckIconDef("calendar", IconCategorySystem, "Takvim", Icons.Filled.CalendarToday, "takvim tarih calendar date"),
+    DeckIconDef("dashboard", IconCategorySystem, "Panel", Icons.Filled.Dashboard, "panel kontrol merkez dashboard control"),
+    DeckIconDef("sync", IconCategorySystem, "Eşitle", Icons.Filled.Sync, "eşitle senkron sync"),
+    DeckIconDef("dns", IconCategorySystem, "Sunucu", Icons.Filled.Dns, "sunucu dns server network"),
+    DeckIconDef("thermometer", IconCategorySystem, "Sıcaklık", Icons.Filled.DeviceThermostat, "sıcaklık ısı termometre thermometer temperature"),
+    DeckIconDef("speed", IconCategorySystem, "Hız", Icons.Filled.Speed, "hız performans ağ speed network"),
+    DeckIconDef("brightness", IconCategorySystem, "Parlaklık", Icons.Filled.LightMode, "parlaklık ışık güneş brightness light sun"),
+    DeckIconDef("monitor_heart", IconCategorySystem, "İzleme", Icons.Filled.MonitorHeart, "izleme nabız sağlık monitor heart health"),
+
+    // ---- Cihazlar & Donanım ----
+    DeckIconDef("monitor", IconCategoryDevice, "Monitör", Icons.Filled.Monitor, "monitör ekran display monitor screen"),
+    DeckIconDef("desktop", IconCategoryDevice, "Masaüstü", Icons.Filled.DesktopWindows, "masaüstü bilgisayar windows desktop pc"),
+    DeckIconDef("tv", IconCategoryDevice, "Televizyon", Icons.Filled.Tv, "televizyon tv ekran screen"),
+    DeckIconDef("phone", IconCategoryDevice, "Telefon", Icons.Filled.Smartphone, "telefon akıllı cep phone mobile"),
+    DeckIconDef("tablet", IconCategoryDevice, "Tablet", Icons.Filled.Tablet, "tablet dokunmatik tablet"),
+    DeckIconDef("keyboard", IconCategoryDevice, "Klavye", Icons.Filled.Keyboard, "klavye tuş yazı kısayol keyboard hotkey type"),
+    DeckIconDef("mouse", IconCategoryDevice, "Fare", Icons.Filled.Mouse, "fare imleç mouse cursor"),
+    DeckIconDef("gamepad", IconCategoryDevice, "Oyun Kolu", Icons.Filled.SportsEsports, "oyun kol gamepad joystick controller"),
+    DeckIconDef("camera", IconCategoryDevice, "Kamera", Icons.Filled.CameraAlt, "kamera fotoğraf çek camera photo"),
+    DeckIconDef("camera_rear", IconCategoryDevice, "Webcam", Icons.Filled.CameraRear, "webcam arka kamera camera"),
+    DeckIconDef("print", IconCategoryDevice, "Yazıcı", Icons.Filled.Print, "yazıcı yazdır printer print"),
+    DeckIconDef("usb", IconCategoryDevice, "USB", Icons.Filled.Usb, "usb bağlantı port usb"),
+    DeckIconDef("bluetooth", IconCategoryDevice, "Bluetooth", Icons.Filled.Bluetooth, "bluetooth kablosuz eşleştir wireless"),
+    DeckIconDef("wifi", IconCategoryDevice, "Wi-Fi", Icons.Filled.Wifi, "wifi kablosuz ağ internet wireless network"),
+    DeckIconDef("lan", IconCategoryDevice, "Kablo Ağ", Icons.Filled.Lan, "ethernet kablo ağ lan cable network"),
+    DeckIconDef("router", IconCategoryDevice, "Yönlendirici", Icons.Filled.Router, "modem yönlendirici router network"),
+    DeckIconDef("cast", IconCategoryDevice, "Yansıt", Icons.Filled.Cast, "yansıt ekran paylaş cast mirror"),
+    DeckIconDef("sd_card", IconCategoryDevice, "Hafıza Kartı", Icons.Filled.SdStorage, "hafıza kartı sd storage card"),
+    DeckIconDef("sim", IconCategoryDevice, "SIM Kart", Icons.Filled.SimCard, "sim kart gsm sim"),
+    DeckIconDef("smartwatch", IconCategoryDevice, "Akıllı Saat", Icons.Filled.Watch, "akıllı saat kol saati smartwatch watch"),
+    DeckIconDef("headset_mic", IconCategoryDevice, "Mikrofonlu Kulaklık", Icons.Filled.HeadsetMic, "mikrofon kulaklık headset mic"),
+    DeckIconDef("scanner", IconCategoryDevice, "Tarayıcı", Icons.Filled.Scanner, "tarayıcı belge scanner scan"),
+    DeckIconDef("airplay", IconCategoryDevice, "AirPlay", Icons.Filled.Airplay, "airplay yayın apple cast"),
+    DeckIconDef("qr_code", IconCategoryDevice, "QR Kod", Icons.Filled.QrCode, "qr kod tara barkod scan code"),
+    DeckIconDef("devices", IconCategoryDevice, "Cihazlar", Icons.Filled.Devices, "cihazlar donanım devices hardware"),
+
+    // ---- Uygulamalar & Web ----
+    DeckIconDef("web", IconCategoryApp, "Web", Icons.Filled.Public, "web internet tarayıcı site browser globe"),
+    DeckIconDef("language", IconCategoryApp, "Dil", Icons.Filled.Language, "dil dünya language world"),
+    DeckIconDef("chat", IconCategoryApp, "Sohbet", Icons.Filled.Chat, "sohbet mesaj chat message"),
+    DeckIconDef("mail", IconCategoryApp, "E-posta", Icons.Filled.Mail, "eposta mail gönder email"),
+    DeckIconDef("code", IconCategoryApp, "Kod", Icons.Filled.Code, "kod programlama yazılım code develop"),
+    DeckIconDef("folder", IconCategoryApp, "Klasör", Icons.Filled.Folder, "klasör dizin dosya folder directory"),
+    DeckIconDef("folder_open", IconCategoryApp, "Açık Klasör", Icons.Filled.FolderOpen, "klasör açık dizin folder open"),
+    DeckIconDef("file", IconCategoryApp, "Dosya", Icons.Filled.InsertDriveFile, "dosya belge file document"),
+    DeckIconDef("doc", IconCategoryApp, "Belge", Icons.Filled.Description, "belge metin dosya doc text"),
+    DeckIconDef("calc", IconCategoryApp, "Hesap Makinesi", Icons.Filled.Calculate, "hesap makinesi matematik calc calculator"),
+    DeckIconDef("brush", IconCategoryApp, "Boyama", Icons.Filled.Brush, "boya fırça çizim resim paint brush draw"),
+    DeckIconDef("edit", IconCategoryApp, "Düzenle", Icons.Filled.Edit, "düzenle kalem yaz edit pencil write"),
+    DeckIconDef("download", IconCategoryApp, "İndir", Icons.Filled.Download, "indir indirme download"),
+    DeckIconDef("upload", IconCategoryApp, "Yükle", Icons.Filled.Upload, "yükle gönder upload send"),
+    DeckIconDef("cloud", IconCategoryApp, "Bulut", Icons.Filled.Cloud, "bulut hava durumu cloud weather"),
+    DeckIconDef("cloud_done", IconCategoryApp, "Bulut Yedek", Icons.Filled.CloudDone, "bulut yedek tamam cloud done backup"),
+    DeckIconDef("cloud_off", IconCategoryApp, "Bulut Kapalı", Icons.Filled.CloudOff, "bulut kapalı çevrimdışı cloud off offline"),
+    DeckIconDef("apps", IconCategoryApp, "Uygulamalar", Icons.Filled.Apps, "uygulama program apps application"),
+    DeckIconDef("widgets", IconCategoryApp, "Widget", Icons.Filled.Widgets, "widget bileşen widgets grid"),
+    DeckIconDef("store", IconCategoryApp, "Mağaza", Icons.Filled.Storefront, "mağaza dükkan store shop"),
+    DeckIconDef("link", IconCategoryApp, "Bağlantı", Icons.Filled.Link, "bağlantı link url zincir share"),
+    DeckIconDef("rss", IconCategoryApp, "RSS Akışı", Icons.Filled.RssFeed, "rss akış haber feed news"),
+    DeckIconDef("forum", IconCategoryApp, "Forum", Icons.Filled.Forum, "forum tartışma mesaj discussion"),
+    DeckIconDef("share", IconCategoryApp, "Paylaş", Icons.Filled.Share, "paylaş gönder share send"),
+    DeckIconDef("screen_share", IconCategoryApp, "Ekran Paylaş", Icons.Filled.ScreenShare, "ekran paylaşımı yansıt screen share"),
+    DeckIconDef("api", IconCategoryApp, "API", Icons.Filled.Api, "api servis arayüz service"),
+    DeckIconDef("table", IconCategoryApp, "Tablo", Icons.Filled.TableChart, "tablo veri excel table data spreadsheet"),
+    DeckIconDef("slideshow", IconCategoryApp, "Sunum", Icons.Filled.Slideshow, "sunum slayt slideshow presentation"),
+    DeckIconDef("image", IconCategoryApp, "Görsel", Icons.Filled.Image, "görsel resim fotoğraf image picture"),
+    DeckIconDef("videogame", IconCategoryApp, "Oyun", Icons.Filled.VideogameAsset, "oyun konsol game video game"),
+    DeckIconDef("text_snippet", IconCategoryApp, "Metin", Icons.Filled.TextSnippet, "metin not snippet text note"),
+    DeckIconDef("notes", IconCategoryApp, "Notlar", Icons.Filled.Notes, "not defter yaz notes notebook"),
+    DeckIconDef("copy", IconCategoryApp, "Kopyala", Icons.Filled.ContentCopy, "kopyala çoğalt copy duplicate"),
+    DeckIconDef("paste", IconCategoryApp, "Yapıştır", Icons.Filled.ContentPaste, "yapıştır pano paste clipboard"),
+    DeckIconDef("translate", IconCategoryApp, "Çeviri", Icons.Filled.Translate, "çeviri dil translate language"),
+    DeckIconDef("account", IconCategoryApp, "Hesap", Icons.Filled.AccountCircle, "hesap kullanıcı profil account user"),
+    DeckIconDef("analytics", IconCategoryApp, "Analiz", Icons.Filled.Analytics, "analiz grafik istatistik analytics chart"),
+
+    // ---- Navigasyon & Oklar ----
+    DeckIconDef("home", IconCategoryNav, "Ana Sayfa", Icons.Filled.Home, "ana sayfa ev başlangıç home"),
+    DeckIconDef("back", IconCategoryNav, "Geri", Icons.AutoMirrored.Filled.ArrowBack, "geri dön back previous"),
+    DeckIconDef("forward", IconCategoryNav, "İleri", Icons.AutoMirrored.Filled.ArrowForward, "ileri forward next"),
+    DeckIconDef("up", IconCategoryNav, "Yukarı", Icons.Filled.ArrowUpward, "yukarı yükselt up"),
+    DeckIconDef("down", IconCategoryNav, "Aşağı", Icons.Filled.ArrowDownward, "aşağı indir down"),
+    DeckIconDef("left", IconCategoryNav, "Sol", Icons.AutoMirrored.Filled.ArrowLeft, "sol left"),
+    DeckIconDef("right", IconCategoryNav, "Sağ", Icons.AutoMirrored.Filled.ArrowRight, "sağ right"),
+    DeckIconDef("menu", IconCategoryNav, "Menü", Icons.Filled.Menu, "menü liste hamburger menu list"),
+    DeckIconDef("close", IconCategoryNav, "Kapat", Icons.Filled.Close, "kapat iptal çarpı close cancel"),
+    DeckIconDef("add", IconCategoryNav, "Ekle", Icons.Filled.Add, "ekle artı yeni add plus new"),
+    DeckIconDef("add_circle", IconCategoryNav, "Ekle (Yuvarlak)", Icons.Filled.AddCircle, "ekle artı add circle"),
+    DeckIconDef("check", IconCategoryNav, "Onay", Icons.Filled.Check, "onay tamam işaret check ok done"),
+    DeckIconDef("check_circle", IconCategoryNav, "Onaylandı", Icons.Filled.CheckCircle, "onay tamam başarılı check circle done"),
+    DeckIconDef("star", IconCategoryNav, "Yıldız", Icons.Filled.Star, "yıldız favori puan star favorite"),
+    DeckIconDef("star_border", IconCategoryNav, "Boş Yıldız", Icons.Filled.StarBorder, "yıldız boş favori star empty"),
+    DeckIconDef("search", IconCategoryNav, "Ara", Icons.Filled.Search, "ara arama bul search find"),
+    DeckIconDef("filter", IconCategoryNav, "Filtre", Icons.Filled.FilterList, "filtre süz listele filter list"),
+    DeckIconDef("more_vert", IconCategoryNav, "Daha Fazla", Icons.Filled.MoreVert, "daha fazla seçenek more options vertical"),
+    DeckIconDef("more_horiz", IconCategoryNav, "Diğer", Icons.Filled.MoreHoriz, "diğer yatay more options horizontal"),
+    DeckIconDef("expand_more", IconCategoryNav, "Genişlet", Icons.Filled.ExpandMore, "genişlet aç aşağı expand open"),
+    DeckIconDef("expand_less", IconCategoryNav, "Daralt", Icons.Filled.ExpandLess, "daralt kapat yukarı collapse close"),
+    DeckIconDef("undo", IconCategoryNav, "Geri Al", Icons.AutoMirrored.Filled.Undo, "geri al iptal undo revert"),
+    DeckIconDef("redo", IconCategoryNav, "Yinele", Icons.AutoMirrored.Filled.Redo, "yinele tekrar redo"),
+    DeckIconDef("save", IconCategoryNav, "Kaydet", Icons.Filled.Save, "kaydet disket save disk"),
+    DeckIconDef("exit", IconCategoryNav, "Çıkış", Icons.AutoMirrored.Filled.ExitToApp, "çıkış ayrıl leave exit"),
+    DeckIconDef("login", IconCategoryNav, "Giriş", Icons.AutoMirrored.Filled.Login, "giriş oturum sign in login"),
+    DeckIconDef("logout", IconCategoryNav, "Oturum Kapat", Icons.AutoMirrored.Filled.Logout, "oturum kapat çıkış sign out logout"),
+    DeckIconDef("fullscreen", IconCategoryNav, "Tam Ekran", Icons.Filled.Fullscreen, "tam ekran büyüt fullscreen"),
+    DeckIconDef("fullscreen_exit", IconCategoryNav, "Küçült", Icons.Filled.FullscreenExit, "tam ekran çık küçült fullscreen exit"),
+    DeckIconDef("zoom_in", IconCategoryNav, "Yakınlaştır", Icons.Filled.ZoomIn, "yakınlaştır büyüt zoom in"),
+    DeckIconDef("zoom_out", IconCategoryNav, "Uzaklaştır", Icons.Filled.ZoomOut, "uzaklaştır küçült zoom out"),
+    DeckIconDef("favorite", IconCategoryNav, "Kalp", Icons.Filled.Favorite, "kalp beğeni sevgi favorite heart like"),
+    DeckIconDef("bookmark", IconCategoryNav, "Yer İmi", Icons.Filled.Bookmark, "yer imi kaydet bookmark saved"),
+    DeckIconDef("bell", IconCategoryNav, "Bildirim", Icons.Filled.Notifications, "bildirim uyarı zil bell notification"),
+    DeckIconDef("warning", IconCategoryNav, "Uyarı", Icons.Filled.Warning, "uyarı dikkat warning alert"),
+    DeckIconDef("error", IconCategoryNav, "Hata", Icons.Filled.Error, "hata sorun error problem"),
+    DeckIconDef("help", IconCategoryNav, "Yardım", Icons.AutoMirrored.Filled.Help, "yardım soru destek help question support"),
+    DeckIconDef("sort", IconCategoryNav, "Sırala", Icons.Filled.Sort, "sırala diz sort order"),
+    DeckIconDef("open_in_new", IconCategoryNav, "Yeni Sekme", Icons.AutoMirrored.Filled.OpenInNew, "yeni sekme aç open new tab link"),
+    DeckIconDef("swap", IconCategoryNav, "Değiştir", Icons.AutoMirrored.Filled.CompareArrows, "değiştir takas swap exchange"),
+    DeckIconDef("delete", IconCategoryNav, "Sil", Icons.Filled.Delete, "sil çöp kaldır delete remove trash"),
+    DeckIconDef("pin", IconCategoryNav, "Sabitle", Icons.Filled.PushPin, "sabitle iğne pin stick")
+)
+
+private val DeckIconByName: Map<String, DeckIconDef> = DeckIconCatalog.associateBy { it.name }
+
+/**
+ * Legacy config tokens written by older builds (and by the PC's earliest decks). They still resolve
+ * to a real symbol so an existing deck never falls back to the keyboard placeholder after upgrade.
+ */
+private val DeckIconAliases: Map<String, String> = mapOf(
+    "hotkey" to "keyboard",
+    "key" to "keyboard",
+    "clock" to "schedule",
+    "time" to "schedule",
+    "watch" to "schedule",
+    "apple_minimal" to "schedule",
+    "digital" to "schedule",
+    "pomodoro" to "timer",
+    "stopwatch" to "timer",
+    "paint" to "brush",
+    "net" to "speed",
+    "network" to "speed",
+    "net_speed" to "speed",
+    "temp" to "thermometer",
+    "cpu_temp" to "thermometer",
+    "volup" to "volume_up",
+    "master_volume" to "volume",
+    "voldown" to "volume_down",
+    "sound_mute" to "mute",
+    "volume_mute" to "mute",
+    "bright" to "brightness",
+    "sun" to "brightness",
+    "light" to "brightness",
+    "playpause" to "play",
+    "nexttrack" to "skip",
+    "next" to "skip",
+    "prevtrack" to "prev",
+    "taskmgr" to "task",
+    "ram" to "storage",
+    "disk" to "storage",
+    "globe" to "web",
+    "url" to "link",
+    "spotify" to "music",
+    "now_playing" to "music",
+    "text" to "text_snippet",
+    "virtual_monitor" to "monitor",
+    "weather" to "cloud"
+)
+
+/** Maps a stored icon token (name, legacy alias, or `custom:` upload) to a Compose vector. */
+private fun getVectorIcon(iconName: String): ImageVector {
     val clean = iconName.substringBefore(":").lowercase()
-    return when (clean) {
-        "keyboard", "hotkey", "key" -> Icons.Default.Keyboard
-        "clock", "time", "watch", "apple_minimal", "digital" -> Icons.Default.Schedule
-        "timer", "pomodoro", "stopwatch" -> Icons.Default.Timer
-        "paint", "brush" -> Icons.Default.Brush
-        "speed", "net", "network", "net_speed" -> Icons.Default.Speed
-        "thermometer", "temp", "cpu_temp" -> Icons.Default.DeviceThermostat
-        "mic" -> Icons.Default.Mic
-        "volup", "volume_up" -> Icons.Default.VolumeUp
-        "voldown", "volume_down" -> Icons.Default.VolumeDown
-        "volume_mute", "mute", "sound_mute" -> Icons.Default.VolumeMute
-        "volume", "master_volume" -> Icons.Default.VolumeUp
-        "bright", "brightness", "sun", "light" -> Icons.Default.LightMode
-        "play", "playpause" -> Icons.Default.PlayArrow
-        "skip", "nexttrack", "next" -> Icons.Default.SkipNext
-        "prev", "prevtrack" -> Icons.Default.SkipPrevious
-        "calc" -> Icons.Default.Calculate
-        "web", "globe" -> Icons.Default.Public
-        "lock" -> Icons.Default.Lock
-        "task", "taskmgr" -> Icons.Default.Assessment
-        "settings" -> Icons.Default.Settings
-        "info" -> Icons.Default.Info
-        "refresh" -> Icons.Default.Refresh
-        "cpu" -> Icons.Default.Memory
-        "ram" -> Icons.Default.Storage
-        "monitor", "desktop", "virtual_monitor" -> Icons.Default.Tv
-        "camera" -> Icons.Default.CameraAlt
-        "terminal" -> Icons.Default.Code
-        "home" -> Icons.Default.Home
-        "spotify" -> Icons.Default.MusicNote
-        "link", "url" -> Icons.Default.Share
-        "copy", "text", "text_snippet" -> Icons.Default.ContentCopy
-        "headphones" -> Icons.Default.Headphones
-        "speaker" -> Icons.Default.Speaker
-        "folder" -> Icons.Default.Folder
-        "bell" -> Icons.Default.Notifications
-        "wifi" -> Icons.Default.Wifi
-        "weather", "cloud" -> Icons.Default.Cloud
-        "disk", "storage" -> Icons.Default.Storage
-        "gpu" -> Icons.Default.Memory
-        "now_playing", "music" -> Icons.Default.MusicNote
-        "add" -> Icons.Default.Add
-        "delete" -> Icons.Default.Delete
-        "edit" -> Icons.Default.Edit
-        "close" -> Icons.Default.Close
-        "star" -> Icons.Default.Star
-        else -> Icons.Default.Keyboard
+    DeckIconByName[clean]?.let { return it.imageVector }
+    DeckIconAliases[clean]?.let { alias -> DeckIconByName[alias]?.let { return it.imageVector } }
+    return Icons.Filled.Keyboard
+}
+
+/** Case-insensitive icon search across a definition's token, Turkish caption, category and tags. */
+private fun matchesIconQuery(def: DeckIconDef, query: String): Boolean =
+    query.isBlank() ||
+        def.name.contains(query, ignoreCase = true) ||
+        def.label.contains(query, ignoreCase = true) ||
+        def.category.contains(query, ignoreCase = true) ||
+        def.tags.contains(query, ignoreCase = true)
+
+/**
+ * Column count of the icon grid — five keeps the tiles ~46dp wide inside a phone-width dialog and
+ * still matches the icon-picker density of the PC deck editor.
+ */
+private const val IconGridColumns = 5
+
+/**
+ * Height of one icon tile. Fixed (rather than driven by `aspectRatio`) so the 20dp symbol and the
+ * two caption lines always fit: at five columns the tile is only ~46dp wide, and a square tile would
+ * clip the caption on a narrow phone.
+ */
+private val IconTileHeight = 58.dp
+
+/**
+ * One selectable tile of the button editor's icon grid — symbol plus its short Turkish caption.
+ * Deliberately a plain composable (never a lazy item): the dialog body is already a vertically
+ * scrolling column, and a lazy grid would be measured with an infinite height inside it.
+ */
+@Composable
+private fun DeckIconTile(
+    def: DeckIconDef,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .height(IconTileHeight)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MinimalistPrimary.copy(alpha = 0.2f) else MinimalistSurfaceElevated)
+            .border(1.dp, if (selected) MinimalistPrimary else MinimalistBorder, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 2.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = def.imageVector,
+            contentDescription = def.label,
+            tint = if (selected) MinimalistPrimary else MinimalistSecondary,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = def.label,
+            fontSize = 8.sp,
+            lineHeight = 9.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            color = if (selected) MinimalistPrimary else MinimalistSecondary
+        )
     }
 }
 
@@ -4986,11 +5460,10 @@ private fun DeckActionCard(
                 .background(MinimalistSurfaceElevated),
             contentAlignment = Alignment.Center
         ) {
-            if (button.icon.startsWith("custom:") && button.icon.length > 7) {
-                val iconPath = button.icon.substring(7)
-                val imageUrl = "http://" + ipAddress + ":8085/" + iconPath + "?password=" + Uri.encode(password)
+            val customUrl = customIconUrl(button.icon, ipAddress, password)
+            if (customUrl != null) {
                 AsyncImage(
-                    model = imageUrl,
+                    model = customUrl,
                     contentDescription = button.label,
                     modifier = Modifier
                         .size(18.dp)

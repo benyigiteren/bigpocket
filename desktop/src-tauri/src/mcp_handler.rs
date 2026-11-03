@@ -4,7 +4,7 @@
 //! stdio to `POST /mcp` and relays the answer verbatim, so this module is the
 //! single source of truth for the tool registry and the dispatch table:
 //!
-//! * `tools/list`  → the 32 BigPocket tool definitions (name/description/inputSchema)
+//! * `tools/list`  → the 34 BigPocket tool definitions (name/description/inputSchema)
 //! * `tools/call`  → routed to [`crate::deck_api::handle_mcp_tool`] /
 //!   [`crate::system_api::handle_mcp_tool`], which own the actual behaviour.
 //!
@@ -284,6 +284,10 @@ fn schema(props: Map<String, Value>, required: &[&str]) -> Value {
 /// * `now_playing`      — `value` is `"now_playing"`.
 /// * `media_widget`     — `value` is `"media_control"`.
 /// * `pomodoro`         — `value` is `"pomodoro"`.
+/// * `window_action`    — `value` is `"maximize"`, `"minimize"`, `"restore"`,
+///                        `"snap_left"`, `"snap_right"`, `"snap_top"`, `"close"` or `"next_monitor"`.
+/// * `system_action`    — `value` is `"sleep"`, `"restart"`, `"shutdown"`, `"lock"`,
+///                        `"empty_recycle_bin"` or `"screenshot"`.
 fn widget_props() -> Map<String, Value> {
     let mut props = Map::new();
     props.insert("label".to_string(), prop("string", "Display label shown on the card."));
@@ -306,6 +310,8 @@ fn widget_props() -> Map<String, Value> {
                 "now_playing",
                 "media_widget",
                 "pomodoro",
+                "window_action",
+                "system_action",
             ],
             "Widget/action kind. Determines how `value` is interpreted.",
         ),
@@ -314,7 +320,7 @@ fn widget_props() -> Map<String, Value> {
         "value".to_string(),
         prop(
             "string",
-            "Kind-dependent parameter: hotkey combo ('ctrl+shift+m'), command ('calc.exe'), URL ('https://...'), snippet text, toggle target ('mic_mute'|'sound_mute'|'virtual_monitor'), slider target ('master_volume'|'brightness'), live_info metric ('cpu'|'ram'|'disk'|'gpu'|'cpu_temp'|'net_speed'|'combo'), or widget marker ('clock'|'weather'|'now_playing'|'media_control'|'pomodoro').",
+            "Kind-dependent parameter: hotkey combo ('ctrl+shift+m'), command ('calc.exe'), URL ('https://...'), snippet text, toggle target ('mic_mute'|'sound_mute'|'virtual_monitor'), slider target ('master_volume'|'brightness'), live_info metric ('cpu'|'ram'|'disk'|'gpu'|'cpu_temp'|'net_speed'|'combo'), widget marker ('clock'|'weather'|'now_playing'|'media_control'|'pomodoro'), window action ('maximize'|'minimize'|'restore'|'snap_left'|'snap_right'|'snap_top'|'close'|'next_monitor'), or system action ('sleep'|'restart'|'shutdown'|'lock'|'empty_recycle_bin'|'screenshot').",
         ),
     );
     props.insert(
@@ -378,7 +384,7 @@ fn button_ref(desc: &str) -> Value {
     prop("integer", desc)
 }
 
-/// The 32 tools exposed to MCP clients.
+/// The 34 tools exposed to MCP clients.
 fn tool_definitions() -> Vec<Value> {
     vec![
         json!({
@@ -611,6 +617,54 @@ fn tool_definitions() -> Vec<Value> {
             "name": "get_active_window",
             "description": "Returns the title and process name of the Windows application currently in the foreground.",
             "inputSchema": schema(Map::new(), &[]),
+        }),
+        json!({
+            "name": "window_action",
+            "description": "Runs a window-management action on the current foreground window: maximize, minimize, restore, snap_left, snap_right, snap_top, close or next_monitor.",
+            "inputSchema": schema({
+                let mut p = Map::new();
+                p.insert(
+                    "action".to_string(),
+                    enum_prop(
+                        "string",
+                        &[
+                            "maximize",
+                            "minimize",
+                            "restore",
+                            "snap_left",
+                            "snap_right",
+                            "snap_top",
+                            "close",
+                            "next_monitor",
+                        ],
+                        "Window action to run on the foreground window.",
+                    ),
+                );
+                p
+            }, &["action"]),
+        }),
+        json!({
+            "name": "system_action",
+            "description": "Runs a system power/utility action: sleep, restart, shutdown, lock, empty_recycle_bin or screenshot.",
+            "inputSchema": schema({
+                let mut p = Map::new();
+                p.insert(
+                    "action".to_string(),
+                    enum_prop(
+                        "string",
+                        &[
+                            "sleep",
+                            "restart",
+                            "shutdown",
+                            "lock",
+                            "empty_recycle_bin",
+                            "screenshot",
+                        ],
+                        "System action to run.",
+                    ),
+                );
+                p
+            }, &["action"]),
         }),
         json!({
             "name": "capture_screen",

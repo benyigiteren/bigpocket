@@ -504,27 +504,22 @@
                             <div class="form-group">
                                 <div class="edit-icon-head">
                                     <label>4 · İkon</label>
-                                    <span class="mono-text text-muted" id="selected-icon-preview-label">Aktif: mic</span>
+                                    <div class="edit-icon-current">
+                                        <span class="selected-icon-preview" id="selected-icon-preview"></span>
+                                        <span class="mono-text text-muted" id="selected-icon-preview-label">Aktif: Mikrofon</span>
+                                    </div>
                                 </div>
-                                <select id="edit-icon-select" style="display: none;">
-                                    <option value="mic">Mikrofon</option>
-                                    <option value="volup">Ses Aç</option>
-                                    <option value="voldown">Ses Kıs</option>
-                                    <option value="volume">Ses Seviyesi</option>
-                                    <option value="app_session">Uygulama Sesi</option>
-                                    <option value="play">Oynat / Durdur</option>
-                                    <option value="calc">Hesap Makinesi</option>
-                                    <option value="web">Web Tarayıcısı</option>
-                                    <option value="lock">Ekranı Kilitle</option>
-                                    <option value="task">Görev Yöneticisi</option>
-                                    <option value="cpu">CPU / İşlemci</option>
-                                    <option value="ram">RAM / Bellek</option>
-                                    <option value="clock">Saat &amp; Zaman</option>
-                                    <option value="desktop">Masaüstü</option>
-                                    <option value="link">Web Bağlantısı</option>
-                                    <option value="terminal">Terminal</option>
-                                    <option value="custom">Özel İkon</option>
-                                </select>
+                                <select id="edit-icon-select" style="display: none;"></select>
+                                <div class="icon-search-wrapper">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="icon-search-input" placeholder="İkon ara... (ses, kilit, web, güç)" autocomplete="off">
+                                    <button type="button" class="icon-search-clear" id="icon-search-clear" aria-label="Aramayı temizle" style="display: none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                                </div>
+                                <div class="icon-category-tabs" id="icon-category-tabs"></div>
+                                <div class="icon-picker-meta">
+                                    <span class="mono-text text-muted" id="icon-picker-count"></span>
+                                    <span class="text-muted">Kategori seçin veya arama yapın</span>
+                                </div>
                                 <div class="icon-picker-gallery" id="icon-picker-gallery"></div>
                             </div>
 

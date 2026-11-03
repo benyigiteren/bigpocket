@@ -562,6 +562,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDragAndDrop();
     setupPCClipboardSync();
     setupStreamDeck();
+    setupIconPicker();
     initDeckStage();
     setupMonitorManager();
     setupMicDriverManager();
@@ -986,83 +987,248 @@ let editingButtonId = null;
 // Size picked in the sade kart penceresi (1×1 / 2×1 / 1×2 / 2×2)
 let editSizeSpans = { col: 1, row: 1 };
 
+// Curated icon artwork: one stroke-based 24×24 glyph body per key. Deck cards,
+// widget previews and the icon picker all render through getSvgIcon(), so a
+// glyph is defined exactly once.
+const SVG_ICON_BODIES = {
+    // ---- Medya ----
+    play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+    pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+    stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+    next: '<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>',
+    prev: '<polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/>',
+    playpause: '<polygon points="6 4 13 12 6 20 6 4"/><rect x="16" y="4" width="3" height="16" rx="1.5"/>',
+    rewind: '<polygon points="11 19 2 12 11 5 11 19"/><polygon points="22 19 13 12 22 5 22 19"/>',
+    fastforward: '<polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/>',
+    shuffle: '<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>',
+    repeat: '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+    volup: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+    volume: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+    voldown: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="12" x2="17" y2="12"/>',
+    mute: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>',
+    mic: '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
+    mic_off: '<line x1="2" y1="2" x2="22" y2="22"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><path d="M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>',
+    headphones: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
+    speaker: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="12" cy="14" r="3.5"/><circle cx="12" cy="7.5" r="1.2"/>',
+    music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+    radio: '<circle cx="12" cy="12" r="2"/><path d="M7.76 16.24a6 6 0 0 1 0-8.48"/><path d="M16.24 7.76a6 6 0 0 1 0 8.48"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+    video: '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>',
+    film: '<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="17" y1="17" x2="22" y2="17"/>',
+    youtube: '<rect x="2" y="5" width="20" height="14" rx="4"/><polygon points="10 9 15 12 10 15 10 9"/>',
+    tv: '<rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/>',
+    camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+    camera_off: '<line x1="2" y1="2" x2="22" y2="22"/><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+    equalizer: '<line x1="4" y1="21" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="3"/><circle cx="4" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="20" cy="7" r="2"/>',
+    playlist: '<path d="M21 15V6"/><circle cx="18.5" cy="15.5" r="2.5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/>',
+    record: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/>',
+    cast: '<path d="M2 16.1A5 5 0 0 1 5.9 20"/><path d="M2 12.05A9 9 0 0 1 9.95 20"/><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><line x1="2" y1="20" x2="2.01" y2="20"/>',
+    app_session: '<line x1="6" y1="4" x2="6" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><circle cx="6" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="18" cy="7" r="2"/>',
+
+    // ---- Sistem ----
+    power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
+    shutdown: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="6.5" x2="12" y2="12"/>',
+    restart: '<path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
+    sleep: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    logoff: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+    lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    unlock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 20 3"/><path d="M18 5l2 2"/><path d="M15 8l2 2"/>',
+    eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+    eye_off: '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>',
+    terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+    code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+    bug: '<path d="M8 2l1.88 1.88M14.12 3.88 16 2"/><path d="M9 7.13v-1a3 3 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>',
+    cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>',
+    ram: '<path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><rect x="2" y="5" width="20" height="11" rx="2"/>',
+    gpu: '<rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="12" cy="12" r="2.5"/><line x1="6" y1="17" x2="6" y2="20"/>',
+    harddrive: '<line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>',
+    disk: '<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
+    usb: '<line x1="12" y1="3" x2="12" y2="14"/><polyline points="8 6 12 2 16 6"/><rect x="9" y="14" width="6" height="8" rx="1.5"/>',
+    printer: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+    network: '<rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><line x1="12" y1="8" x2="12" y2="14"/><path d="M5 16v-2h14v2"/>',
+    wifi: '<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>',
+    wifi_off: '<line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>',
+    ethernet: '<rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 13V6h12v7"/><line x1="6" y1="17" x2="6.01" y2="17"/><line x1="10" y1="17" x2="10.01" y2="17"/><line x1="14" y1="17" x2="14.01" y2="17"/><line x1="18" y1="17" x2="18.01" y2="17"/>',
+    server: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+    cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+    weather: '<path d="M12 2v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="M20 12h2"/><path d="m19.07 4.93-1.41 1.41"/><path d="M15.947 12.65a4 4 0 0 0-5.925-4.128"/><path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6z"/>',
+    thermometer: '<path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>',
+    database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+    refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+    sync: '<path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+    save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+    recycle: '<path d="M7 19H4.8a1.8 1.8 0 0 1-1.56-2.75l1.87-3.1"/><path d="M11 4.5a2 2 0 0 1 2.42 1.34l1.43 4.14"/><path d="M13.7 8.7l5.6 1.6a1.83 1.83 0 0 1 .8 3l-1.6 2.7"/><path d="M9.5 3.6 7 6.5 9.5 9.4"/><path d="M11 19h6"/><path d="m13 21-2-2 2-2"/>',
+    bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+    bell_off: '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>',
+    alert: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+    help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+    check: '<polyline points="20 6 9 17 4 12"/>',
+    close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+    clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    history: '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+    alarm: '<circle cx="12" cy="13" r="8"/><path d="M12 9.5V13l2.5 2"/><path d="M5 3 3 5"/><path d="M19 3l2 2"/>',
+    sliders: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+    palette: '<circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125 0-.94.72-1.686 1.648-1.686H16c3.314 0 6-2.686 6-6 0-4.97-4.5-9-10-9z"/>',
+    brush: '<path d="M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/>',
+    tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+    puzzle: '<path d="M19 14h2.5a2.5 2.5 0 0 0 0-5H19V6a2 2 0 0 0-2-2h-3V2.5a2.5 2.5 0 0 0-5 0V4H6a2 2 0 0 0-2 2v3H2.5a2.5 2.5 0 0 0 0 5H4v3a2 2 0 0 0 2 2h3v1.5a2.5 2.5 0 0 0 5 0V19h3a2 2 0 0 0 2-2z"/>',
+    layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+    flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
+    star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    heart: '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>',
+    bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+    rocket: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
+    brain: '<path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z"/>',
+    robot: '<rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="9" cy="14" r="1.5"/><circle cx="15" cy="14" r="1.5"/><line x1="12" y1="5" x2="12" y2="8"/><circle cx="12" cy="3.5" r="1.2"/><path d="M2 12v4"/><path d="M22 12v4"/>',
+    wand: '<path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M17.8 6.2 19 5"/><path d="M3 21l9-9"/><path d="M12.2 6.2 11 5"/><path d="M15 9h.01"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    bright: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+    battery: '<rect x="1" y="6" width="18" height="12" rx="2" ry="2"/><line x1="23" y1="13" x2="23" y2="11"/>',
+    battery_charging: '<path d="M5 18H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3"/><path d="M15 6h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3"/><line x1="23" y1="13" x2="23" y2="11"/><polyline points="11 6 7 12 13 12 9 18"/>',
+    ai: '<path d="M12 3v18M3 12h18M6 6l12 12M18 6L6 18"/>',
+    custom: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8"/>',
+
+    // ---- Cihazlar ----
+    monitor: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+    desktop: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>',
+    laptop: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/>',
+    smartphone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+    tablet: '<rect x="4" y="2" width="16" height="20" rx="2.5"/><line x1="12" y1="18" x2="12.01" y2="18"/>',
+    watch: '<circle cx="12" cy="12" r="6"/><path d="M9 3h6"/><path d="M9 21h6"/><path d="M12 9.5V12l1.8 1.8"/>',
+    keyboard: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/>',
+    mouse: '<rect x="6" y="2" width="12" height="20" rx="6"/><line x1="12" y1="6" x2="12" y2="10"/>',
+    gamepad: '<path d="M6 12h4"/><path d="M8 10v4"/><circle cx="15.5" cy="13.5" r="1"/><circle cx="18" cy="11" r="1"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>',
+    vr: '<path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4l-3-3-3 3H5a2 2 0 0 1-2-2z"/>',
+    projector: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2.5"/><path d="M14 10h5"/><path d="M14 14h5"/><path d="M6 18v2"/><path d="M18 18v2"/>',
+    router: '<rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/><line x1="10" y1="17.5" x2="10.01" y2="17.5"/><path d="M12 14v-4"/><path d="M8.5 6.5a5 5 0 0 1 7 0"/><path d="M5.5 3.5a9 9 0 0 1 13 0"/>',
+    scanner: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="3" y1="12" x2="21" y2="12"/>',
+    bulb: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2z"/>',
+    thermostat: '<rect x="2" y="6" width="20" height="12" rx="3"/><path d="M7 12h5"/><path d="M16 10v4"/>',
+    air_conditioner: '<rect x="2" y="4" width="20" height="8" rx="2"/><line x1="5" y1="8" x2="14" y2="8"/><path d="M6 14c0 2 1 3 1 5"/><path d="M11 14c0 2 1 3 1 5"/><path d="M16 14c0 2 1 3 1 5"/>',
+    smart_home: '<path d="M5 10.5 12 5l7 5.5V19a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><circle cx="12" cy="13" r="1.5"/><path d="M9.5 10.8a4 4 0 0 1 5 0"/><path d="M7.5 8.6a7 7 0 0 1 9 0"/>',
+    sd_card: '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M9 6v4"/><path d="M12 6v4"/><path d="M15 6v4"/>',
+    webcam: '<circle cx="12" cy="10" r="6"/><circle cx="12" cy="10" r="2"/><path d="M8 21h8"/><path d="M12 16v5"/>',
+    remote: '<rect x="6" y="2" width="12" height="20" rx="3"/><circle cx="12" cy="7" r="1.6"/><path d="M9 12h6"/><path d="M9 15h6"/><path d="M9 18h6"/>',
+
+    // ---- Uygulama ----
+    web: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    external_link: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+    mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/>',
+    chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="8.01" y2="9"/><line x1="12" y1="9" x2="12.01" y2="9"/><line x1="16" y1="9" x2="16.01" y2="9"/>',
+    message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    phone_call: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>',
+    contacts: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    calc: '<rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="18"/><path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01"/>',
+    notes: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>',
+    notepad: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v18"/><line x1="11" y1="8" x2="17" y2="8"/><line x1="11" y1="12" x2="17" y2="12"/><line x1="11" y1="16" x2="15" y2="16"/>',
+    document: '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>',
+    pdf: '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><path d="M9 18v-5h1.6a1.5 1.5 0 0 1 0 3H9"/>',
+    spreadsheet: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>',
+    presentation: '<line x1="2" y1="3" x2="22" y2="3"/><path d="M4 3v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3"/><path d="M12 15v6"/><path d="M8 21h8"/>',
+    folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    folder_open: '<path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v2"/><path d="M2 20l3.5-8H22l-3.5 8z"/>',
+    archive: '<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="12" x2="14" y2="12"/>',
+    store: '<path d="M3 9l1.5-6h15L21 9"/><path d="M3 9h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/>',
+    shopping: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+    cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>',
+    wallet: '<path d="M20 12V8H6a2 2 0 0 1 0-4h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4z"/>',
+    credit_card: '<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>',
+    map: '<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>',
+    compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+    pin: '<path d="M12 21s-7-5.7-7-11a7 7 0 1 1 14 0c0 5.3-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M5 5.5c3 2.5 11 2.5 14 0"/><path d="M5 18.5c3-2.5 11-2.5 14 0"/><line x1="12" y1="2" x2="12" y2="22"/>',
+    translate: '<path d="M4 5h10"/><path d="M9 3v2c0 5-2 8-6 10"/><path d="M5 9c1.5 3.5 4 5.5 7 6.5"/><path d="M13 20l4-9 4 9"/><path d="M14.5 17h5"/>',
+    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+    graduation: '<path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12.5V17c0 1.5 2.7 3 6 3s6-1.5 6-3v-4.5"/>',
+    pencil: '<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+    edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/>',
+    briefcase: '<rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+    task: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+    kanban: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>',
+    chart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="3" y1="20" x2="21" y2="20"/>',
+    analytics: '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+    trophy: '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5a2.5 2.5 0 0 0 2.5 5"/><path d="M17 6h2.5a2.5 2.5 0 0 1-2.5 5"/>',
+    game: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1"/><circle cx="15.5" cy="8.5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="8.5" cy="15.5" r="1"/><circle cx="15.5" cy="15.5" r="1"/>',
+
+    // ---- Navigasyon ----
+    arrow_up: '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>',
+    arrow_down: '<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>',
+    arrow_left: '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+    arrow_right: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>',
+    chevron_up: '<polyline points="18 15 12 9 6 15"/>',
+    chevron_down: '<polyline points="6 9 12 15 18 9"/>',
+    chevron_left: '<polyline points="15 18 9 12 15 6"/>',
+    chevron_right: '<polyline points="9 18 15 12 9 6"/>',
+    back: '<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+    forward: '<polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
+    home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
+    grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
+    list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+    target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    crosshair: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>',
+    maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/>',
+    minimize: '<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/>',
+    restore: '<rect x="3" y="8" width="13" height="13" rx="2"/><path d="M8 8V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-3"/>',
+    snap_left: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="10" y1="4" x2="10" y2="20"/><polyline points="6.5 9 3.5 12 6.5 15"/><line x1="3.5" y1="12" x2="8" y2="12"/>',
+    snap_right: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="14" y1="4" x2="14" y2="20"/><polyline points="17.5 9 20.5 12 17.5 15"/><line x1="16" y1="12" x2="20.5" y2="12"/>',
+    window: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="6.5" y1="6.5" x2="6.51" y2="6.5"/><line x1="9" y1="6.5" x2="9.01" y2="6.5"/>',
+    move: '<polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>',
+    expand: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>',
+    collapse: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>',
+    zoom_in: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>',
+    zoom_out: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/>',
+    swap: '<polyline points="17 4 21 8 17 12"/><polyline points="7 12 3 16 7 20"/><line x1="21" y1="8" x2="3" y2="8"/><line x1="3" y1="16" x2="21" y2="16"/>',
+    rotate: '<path d="M21.5 12a9.5 9.5 0 1 1-3-6.9"/><polyline points="21 2 21 7 16 7"/>',
+    undo: '<polyline points="9 14 4 9 9 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+    redo: '<polyline points="15 14 20 9 15 4"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
+    layout: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="12" y1="9" x2="12" y2="21"/>',
+    crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+    snip: '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/>'
+};
+
+// Keys used by older configs, widget defaults and platform commands resolve to
+// a catalog glyph instead of duplicating artwork.
+const LEGACY_ICON_ALIASES = {
+    volumeup: 'volup',
+    volumedown: 'voldown',
+    volume_up: 'volup',
+    volume_down: 'voldown',
+    volume_mute: 'mute',
+    sound_mute: 'mute',
+    mic_mute: 'mic_off',
+    skip: 'next',
+    nexttrack: 'next',
+    prevtrack: 'prev',
+    temp: 'thermometer',
+    gear: 'settings',
+    fullscreen: 'maximize',
+    exit_fullscreen: 'minimize',
+    printscreen: 'snip',
+    screenshot: 'snip',
+    file: 'document',
+    picture: 'image',
+    taskmgr: 'task',
+    icon: 'custom'
+};
+
 function getSvgIcon(iconName, strokeColor = "currentColor") {
-    switch (iconName) {
-        case "mic":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
-        case "volup":
-        case "volume":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
-        case "voldown":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`;
-        case "app_session":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="4" x2="6" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><circle cx="6" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="18" cy="7" r="2"/></svg>`;
-        case "play":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
-        case "calc":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="18"/><path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01"/></svg>`;
-        case "web":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
-        case "lock":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
-        case "task":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`;
-        case "cpu":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>`;
-        case "ram":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><rect x="2" y="5" width="20" height="11" rx="2"/></svg>`;
-        case "clock":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-        case "bright":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
-        case "desktop":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>`;
-        case "link":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
-        case "terminal":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
-        case "headphones":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`;
-        case "speaker":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
-        case "folder":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-        case "copy":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-        case "refresh":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
-        case "bell":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
-        case "wifi":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>`;
-        case "camera":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
-        case "monitor":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
-        case "music":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
-        case "trash":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`;
-        case "weather":
-        case "cloud":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.31-1.7A4.5 4.5 0 0 0 6.5 19z"/></svg>`;
-        case "thermometer":
-        case "temp":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>`;
-        case "disk":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>`;
-        case "gpu":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="12" cy="12" r="2.5"/><line x1="6" y1="17" x2="6" y2="20"/></svg>`;
-        case "ai":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M6 6l12 12M18 6L6 18"/></svg>`;
-        case "youtube":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="4"/><polygon points="10 9 15 12 10 15 10 9"/></svg>`;
-        case "power":
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
-        case "custom":
-        default:
-            return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8"/></svg>`;
-    }
+    const key = LEGACY_ICON_ALIASES[iconName] || iconName;
+    const body = SVG_ICON_BODIES[key] || SVG_ICON_BODIES.custom;
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 }
 
 const iconMapUnicode = new Proxy({}, {
@@ -1380,27 +1546,9 @@ function setupStreamDeck() {
         syncCommandCustomRow();
         highlightActiveChip('command-preset-chips', 'data-command', appSelect.value);
 
-        // Icon follows the picked application
-        const name = selectedOption.textContent.toLowerCase();
-        const iconSelect = document.getElementById('edit-icon-select');
-        if (name.includes("chrome") || name.includes("browser") || name.includes("edge") || name.includes("firefox")) {
-            iconSelect.value = "web";
-        } else if (name.includes("music") || name.includes("spotify") || name.includes("player")) {
-            iconSelect.value = "play";
-        } else if (name.includes("volume") || name.includes("ses")) {
-            iconSelect.value = "volup";
-        } else if (name.includes("mic") || name.includes("mikrofon")) {
-            iconSelect.value = "mic";
-        } else if (name.includes("lock") || name.includes("kilit")) {
-            iconSelect.value = "lock";
-        } else if (name.includes("task") || name.includes("görev") || name.includes("manager")) {
-            iconSelect.value = "task";
-        } else if (name.includes("calc") || name.includes("hesap")) {
-            iconSelect.value = "calc";
-        } else {
-            iconSelect.value = "custom";
-        }
-        renderIconPickerGallery(iconSelect.value);
+        // Icon follows the picked application: the real logo when the backend
+        // can produce one, the name-based heuristic only as a fallback.
+        applyAppLogoForSelection(appSelect.value, selectedOption.textContent);
     });
 
     // Per-app volume card: the live WASAPI session list drives the target picker
@@ -1415,8 +1563,6 @@ function setupStreamDeck() {
             const prettyLabel = (session && session.title) || selected.textContent.replace(/\s*\(.*\)$/, '');
             const currentLabel = labelInput.value.trim();
             if (!currentLabel || currentLabel === 'Uygulama Sesi') labelInput.value = prettyLabel;
-            const iconSelect = document.getElementById('edit-icon-select');
-            if (iconSelect) iconSelect.value = 'app_session';
             renderIconPickerGallery('app_session');
         });
     }
@@ -3912,11 +4058,8 @@ function renderStreamDeckButtons() {
 
         // Icon handling
         let displayIcon = getSvgIcon(btn.icon);
-        if (btn.icon && btn.icon.startsWith("custom:") && btn.icon.length > 7) {
-            const path = btn.icon.substring(7);
-            const password = getAuthPassword();
-            const authQuery = password ? `?password=${encodeURIComponent(password)}` : '';
-            displayIcon = `<img src="${path}${authQuery}" alt="" />`;
+        if (isExtractedIconValue(btn.icon)) {
+            displayIcon = `<img src="${iconAssetUrl(btn.icon.substring(7))}" alt="" />`;
         }
 
         // Custom body preview based on widget type
@@ -4814,8 +4957,7 @@ function loadAudioSessionsForPicker(force = false) {
             if (labelInput && (!currentLabel || currentLabel === 'Uygulama Sesi')) {
                 labelInput.value = first.title || prettyAppLabel(first.name);
             }
-            const iconSelect = document.getElementById('edit-icon-select');
-            if (iconSelect) iconSelect.value = 'app_session';
+            renderIconPickerGallery('app_session');
         }
     });
 }
@@ -5375,80 +5517,519 @@ function openEditButtonModal(id) {
 
     applyEditTypeHints(btn.type || 'hotkey');
     setEditSizePills(btn.col_span || 1, btn.row_span || 1);
+    resetIconPickerFilters();
     renderIconPickerGallery(btn.icon);
 
     document.getElementById('edit-button-modal').classList.add('active');
     setTimeout(() => document.getElementById('edit-label').focus(), 60);
 }
-const AVAILABLE_ICONS = [
-    { key: 'mic', name: 'Mikrofon' },
-    { key: 'volup', name: 'Ses Aç' },
-    { key: 'voldown', name: 'Ses Kıs' },
-    { key: 'volume', name: 'Ses Seviyesi' },
-    { key: 'app_session', name: 'Uygulama Sesi' },
-    { key: 'play', name: 'Oynat/Durdur' },
-    { key: 'music', name: 'Müzik' },
-    { key: 'headphones', name: 'Kulaklık' },
-    { key: 'speaker', name: 'Hoparlör' },
-    { key: 'desktop', name: 'Masaüstü' },
-    { key: 'link', name: 'Web Bağlantısı' },
-    { key: 'terminal', name: 'Terminal / CMD' },
-    { key: 'task', name: 'Görev Yöneticisi' },
-    { key: 'calc', name: 'Hesap Makinesi' },
-    { key: 'web', name: 'Tarayıcı' },
-    { key: 'lock', name: 'Kilit' },
-    { key: 'cpu', name: 'İşlemci (CPU)' },
-    { key: 'ram', name: 'Bellek (RAM)' },
-    { key: 'clock', name: 'Saat' },
-    { key: 'bright', name: 'Parlaklık' },
-    { key: 'copy', name: 'Kopyala / Metin' },
-    { key: 'folder', name: 'Dosya Gezgini' },
-    { key: 'refresh', name: 'Yenile' },
-    { key: 'bell', name: 'Bildirim' },
-    { key: 'wifi', name: 'Kablosuz Ağ' },
-    { key: 'camera', name: 'Kamera' },
-    { key: 'monitor', name: 'Ekran' },
-    { key: 'weather', name: 'Hava Durumu' },
-    { key: 'thermometer', name: 'Sıcaklık' },
-    { key: 'disk', name: 'Disk' },
-    { key: 'gpu', name: 'Ekran Kartı' },
-    { key: 'ai', name: 'Yapay Zeka' },
-    { key: 'youtube', name: 'YouTube' },
-    { key: 'trash', name: 'Çöp Kutusu' },
-    { key: 'power', name: 'Güç / Kapat' },
-    { key: 'custom', name: 'Özel / Diğer' }
+// Searchable icon catalog: every entry carries its Turkish label, the category
+// chip it shows under and the keywords a user may type to find it.
+const ICON_CATEGORIES = [
+    { id: 'all', label: 'Tümü' },
+    { id: 'media', label: 'Medya' },
+    { id: 'system', label: 'Sistem' },
+    { id: 'devices', label: 'Cihazlar' },
+    { id: 'apps', label: 'Uygulama' },
+    { id: 'nav', label: 'Navigasyon' }
 ];
 
-function renderIconPickerGallery(selectedIcon) {
-    const gallery = document.getElementById('icon-picker-gallery');
-    if (!gallery) return;
-    gallery.innerHTML = '';
-    const currentKey = (selectedIcon || 'custom').replace(/^custom:/, '');
-    const previewLabel = document.getElementById('selected-icon-preview-label');
-    if (previewLabel) {
-        previewLabel.textContent = `Aktif: ${currentKey}`;
+const AVAILABLE_ICONS = [
+    // ---- Medya ----
+    { key: 'play', name: 'Oynat', category: 'media', tags: 'oynat, play, başlat, müzik, video, medya, çal' },
+    { key: 'pause', name: 'Duraklat', category: 'media', tags: 'duraklat, pause, bekle, durdur, müzik, ara ver' },
+    { key: 'stop', name: 'Durdur', category: 'media', tags: 'durdur, stop, bitir, kes, medya' },
+    { key: 'next', name: 'Sonraki Parça', category: 'media', tags: 'sonraki, ileri, next, atla, müzik, şarkı' },
+    { key: 'prev', name: 'Önceki Parça', category: 'media', tags: 'önceki, geri, prev, müzik, şarkı' },
+    { key: 'playpause', name: 'Oynat / Duraklat', category: 'media', tags: 'oynat, duraklat, play pause, medya, tek buton' },
+    { key: 'rewind', name: 'Geri Sar', category: 'media', tags: 'geri sar, rewind, geri al, medya, sarma' },
+    { key: 'fastforward', name: 'İleri Sar', category: 'media', tags: 'ileri sar, fast forward, hızlı, medya, sarma' },
+    { key: 'shuffle', name: 'Karıştır', category: 'media', tags: 'karıştır, shuffle, rastgele, müzik, karışık' },
+    { key: 'repeat', name: 'Tekrarla', category: 'media', tags: 'tekrarla, repeat, döngü, loop, müzik' },
+    { key: 'volume', name: 'Ses Seviyesi', category: 'media', tags: 'ses, volume, seviye, ses ayarı, hoparlör' },
+    { key: 'volup', name: 'Ses Aç', category: 'media', tags: 'ses aç, ses arttır, volume up, yüksek ses, hoparlör' },
+    { key: 'voldown', name: 'Ses Kıs', category: 'media', tags: 'ses kıs, ses azalt, volume down, kısık ses, hoparlör' },
+    { key: 'mute', name: 'Sessiz', category: 'media', tags: 'sessiz, mute, sesi kapat, sustur, sessize al' },
+    { key: 'mic', name: 'Mikrofon', category: 'media', tags: 'mikrofon, mic, ses kaydı, konuşma, kayıt' },
+    { key: 'mic_off', name: 'Mikrofon Kapalı', category: 'media', tags: 'mikrofon kapat, mute mic, sustur, sessiz mikrofon' },
+    { key: 'headphones', name: 'Kulaklık', category: 'media', tags: 'kulaklık, headphones, müzik dinle, ses, kulak' },
+    { key: 'speaker', name: 'Hoparlör', category: 'media', tags: 'hoparlör, speaker, ses çıkışı, kabin, ses' },
+    { key: 'music', name: 'Müzik', category: 'media', tags: 'müzik, music, şarkı, nota, melodi' },
+    { key: 'radio', name: 'Radyo', category: 'media', tags: 'radyo, radio, yayın, fm, canlı, dalga' },
+    { key: 'video', name: 'Video', category: 'media', tags: 'video, klip, oynatıcı, film, kamera' },
+    { key: 'film', name: 'Film', category: 'media', tags: 'film, sinema, video, şerit, medya' },
+    { key: 'youtube', name: 'YouTube', category: 'media', tags: 'youtube, video, izle, kanal, yayın' },
+    { key: 'tv', name: 'Televizyon', category: 'media', tags: 'tv, televizyon, yayın, izle, ekran' },
+    { key: 'camera', name: 'Kamera', category: 'media', tags: 'kamera, fotoğraf, çek, webcam, görüntü' },
+    { key: 'camera_off', name: 'Kamera Kapalı', category: 'media', tags: 'kamera kapat, kamera kapalı, gizlilik, webcam kapat' },
+    { key: 'image', name: 'Resim', category: 'media', tags: 'resim, fotoğraf, image, görsel, png' },
+    { key: 'equalizer', name: 'Ekolayzer', category: 'media', tags: 'ekolayzer, equalizer, ses ayarı, frekans, bass' },
+    { key: 'playlist', name: 'Çalma Listesi', category: 'media', tags: 'çalma listesi, playlist, sıra, müzik listesi' },
+    { key: 'record', name: 'Kayıt', category: 'media', tags: 'kayıt, record, ekran kaydı, rec, çekim' },
+    { key: 'cast', name: 'Yayınla (Cast)', category: 'media', tags: 'cast, yayınla, ekrana gönder, aktar, yansıt' },
+    { key: 'app_session', name: 'Uygulama Sesi', category: 'media', tags: 'uygulama sesi, per app ses, uygulama ses, miks, mixer' },
+
+    // ---- Sistem ----
+    { key: 'power', name: 'Güç / Kapat', category: 'system', tags: 'güç, kapat, power, enerji, bilgisayarı kapat' },
+    { key: 'shutdown', name: 'Kapatma', category: 'system', tags: 'kapatma, shutdown, sistemi kapat, güç düğmesi' },
+    { key: 'restart', name: 'Yeniden Başlat', category: 'system', tags: 'yeniden başlat, restart, reboot, sistem, reset' },
+    { key: 'sleep', name: 'Uyku', category: 'system', tags: 'uyku, sleep, uyku modu, ekranı kapat, ay' },
+    { key: 'logoff', name: 'Oturumu Kapat', category: 'system', tags: 'oturumu kapat, logoff, çıkış, sign out, hesap' },
+    { key: 'lock', name: 'Ekranı Kilitle', category: 'system', tags: 'kilit, lock, ekranı kilitle, güvenlik, şifre' },
+    { key: 'unlock', name: 'Kilidi Aç', category: 'system', tags: 'kilit aç, unlock, güvenlik, şifre, giriş' },
+    { key: 'settings', name: 'Ayarlar', category: 'system', tags: 'ayarlar, settings, yapılandırma, dişli, tercihler' },
+    { key: 'shield', name: 'Kalkan', category: 'system', tags: 'kalkan, koruma, antivirüs, güvenlik, savunma' },
+    { key: 'key', name: 'Anahtar', category: 'system', tags: 'anahtar, şifre, parola, key, güvenlik' },
+    { key: 'eye', name: 'Göster', category: 'system', tags: 'göster, görünür, göz, parola göster, görünürlük' },
+    { key: 'eye_off', name: 'Gizle', category: 'system', tags: 'gizle, gizli, göz kapalı, parola gizle, maskeli' },
+    { key: 'terminal', name: 'Terminal / CMD', category: 'system', tags: 'terminal, cmd, komut satırı, konsol, kabuk' },
+    { key: 'code', name: 'Kod', category: 'system', tags: 'kod, code, geliştirici, programlama, ide' },
+    { key: 'bug', name: 'Hata Ayıklama', category: 'system', tags: 'hata, bug, debug, yazılım, düzeltme' },
+    { key: 'cpu', name: 'İşlemci (CPU)', category: 'system', tags: 'işlemci, cpu, performans, yonga, sensör' },
+    { key: 'ram', name: 'Bellek (RAM)', category: 'system', tags: 'bellek, ram, hafıza, sistem, sensör' },
+    { key: 'gpu', name: 'Ekran Kartı', category: 'system', tags: 'ekran kartı, gpu, grafik, nvidia, amd' },
+    { key: 'harddrive', name: 'Sabit Disk', category: 'system', tags: 'sabit disk, hdd, harddrive, depolama, sürücü' },
+    { key: 'disk', name: 'Disk Doluluk', category: 'system', tags: 'disk, doluluk, depolama, alan, kullanım' },
+    { key: 'usb', name: 'USB', category: 'system', tags: 'usb, usb bellek, tak çıkar, aygıt, flash' },
+    { key: 'printer', name: 'Yazıcı', category: 'system', tags: 'yazıcı, printer, yazdır, belge, çıktı' },
+    { key: 'network', name: 'Ağ', category: 'system', tags: 'ağ, network, bağlantı, topoloji, internet' },
+    { key: 'wifi', name: 'Kablosuz Ağ', category: 'system', tags: 'kablosuz, wifi, internet, ağ, sinyal' },
+    { key: 'wifi_off', name: 'Kablosuz Kapalı', category: 'system', tags: 'wifi kapat, internet kapalı, uçak modu, bağlantı kes' },
+    { key: 'ethernet', name: 'Kablolu Ağ', category: 'system', tags: 'kablolu, ethernet, lan, kablo, ağ' },
+    { key: 'server', name: 'Sunucu', category: 'system', tags: 'sunucu, server, hosting, veri merkezi, makine' },
+    { key: 'cloud', name: 'Bulut', category: 'system', tags: 'bulut, cloud, senkron, depolama, yedek' },
+    { key: 'weather', name: 'Hava Durumu', category: 'system', tags: 'hava durumu, weather, güneş, bulut, tahmin' },
+    { key: 'thermometer', name: 'Sıcaklık', category: 'system', tags: 'sıcaklık, termometre, ısı, sensör, derece' },
+    { key: 'database', name: 'Veritabanı', category: 'system', tags: 'veritabanı, database, sql, kayıt, veri' },
+    { key: 'refresh', name: 'Yenile', category: 'system', tags: 'yenile, refresh, güncelle, tekrar yükle, reload' },
+    { key: 'sync', name: 'Senkronize', category: 'system', tags: 'senkron, sync, eşitle, bulut, aktar' },
+    { key: 'download', name: 'İndir', category: 'system', tags: 'indir, download, aşağı, kaydet, veri' },
+    { key: 'upload', name: 'Yükle', category: 'system', tags: 'yükle, upload, gönder, paylaş, veri' },
+    { key: 'save', name: 'Kaydet', category: 'system', tags: 'kaydet, save, disket, dosya kaydet, sakla' },
+    { key: 'trash', name: 'Çöp Kutusu', category: 'system', tags: 'çöp, sil, trash, geri dönüşüm, kaldır' },
+    { key: 'recycle', name: 'Geri Dönüşüm', category: 'system', tags: 'geri dönüşüm, çöp kutusunu boşalt, recycle, temizle, boşalt' },
+    { key: 'bell', name: 'Bildirim', category: 'system', tags: 'bildirim, zil, uyarı, notification, alarm' },
+    { key: 'bell_off', name: 'Bildirim Kapalı', category: 'system', tags: 'bildirim kapat, sessiz, rahatsız etme, sessize al' },
+    { key: 'alert', name: 'Uyarı', category: 'system', tags: 'uyarı, alert, dikkat, ünlem, hata' },
+    { key: 'info', name: 'Bilgi', category: 'system', tags: 'bilgi, info, açıklama, detay, yardım' },
+    { key: 'help', name: 'Yardım', category: 'system', tags: 'yardım, help, soru, destek, nasıl' },
+    { key: 'check', name: 'Onay', category: 'system', tags: 'onay, tik, tamam, check, doğru' },
+    { key: 'close', name: 'Kapat', category: 'system', tags: 'kapat, çarpı, iptal, close, x' },
+    { key: 'search', name: 'Ara', category: 'system', tags: 'ara, search, büyüteç, bul, sorgu' },
+    { key: 'filter', name: 'Filtre', category: 'system', tags: 'filtre, filter, süz, sırala, ayıkla' },
+    { key: 'clipboard', name: 'Pano', category: 'system', tags: 'pano, clipboard, kopyala yapıştır, tampon, metin' },
+    { key: 'copy', name: 'Kopyala', category: 'system', tags: 'kopyala, copy, çoğalt, metin, kopyalama' },
+    { key: 'history', name: 'Geçmiş', category: 'system', tags: 'geçmiş, history, son kullanılan, zaman, kayıt' },
+    { key: 'calendar', name: 'Takvim', category: 'system', tags: 'takvim, calendar, tarih, plan, ajanda' },
+    { key: 'alarm', name: 'Alarm', category: 'system', tags: 'alarm, çalar saat, uyandır, zaman, hatırlatıcı' },
+    { key: 'sliders', name: 'İnce Ayar', category: 'system', tags: 'slider, ince ayar, kontrol, ayar çubuğu, seviye' },
+    { key: 'palette', name: 'Palet', category: 'system', tags: 'palet, tema, renk, tasarım, stil' },
+    { key: 'brush', name: 'Fırça', category: 'system', tags: 'fırça, tasarım, çizim, boya, sanat' },
+    { key: 'tag', name: 'Etiket', category: 'system', tags: 'etiket, tag, kategori, işaret, sınıflandır' },
+    { key: 'puzzle', name: 'Yapboz', category: 'system', tags: 'yapboz, eklenti, plugin, entegrasyon, puzzle' },
+    { key: 'layers', name: 'Katman', category: 'system', tags: 'katman, layers, seviye, yığın, düzen' },
+    { key: 'flag', name: 'Bayrak', category: 'system', tags: 'bayrak, işaret, flag, önemli, direk' },
+    { key: 'star', name: 'Yıldız', category: 'system', tags: 'yıldız, favori, beğeni, star, önemli' },
+    { key: 'heart', name: 'Kalp', category: 'system', tags: 'kalp, beğen, favori, aşk, sağlık' },
+    { key: 'bookmark', name: 'Yer İmi', category: 'system', tags: 'yer imi, bookmark, kaydet, favori, sayfa' },
+    { key: 'rocket', name: 'Roket', category: 'system', tags: 'roket, başlat, fırlat, hızlı, performans' },
+    { key: 'brain', name: 'Yapay Zeka (Beyin)', category: 'system', tags: 'yapay zeka, beyin, ai, zeka, öğrenme' },
+    { key: 'robot', name: 'Robot', category: 'system', tags: 'robot, bot, otomasyon, asistan, ai' },
+    { key: 'wand', name: 'Sihir Değneği', category: 'system', tags: 'sihir, otomatik, hızlı işlem, asistan, pratik' },
+    { key: 'clock', name: 'Saat', category: 'system', tags: 'saat, zaman, clock, dijital saat, saat widget' },
+    { key: 'bright', name: 'Parlaklık', category: 'system', tags: 'parlaklık, ışık, güneş, ekran, aydınlatma' },
+    { key: 'battery', name: 'Pil', category: 'system', tags: 'pil, batarya, şarj, güç, enerji' },
+    { key: 'battery_charging', name: 'Şarj', category: 'system', tags: 'şarj, charging, pil doldurma, enerji, adaptör' },
+    { key: 'ai', name: 'Yapay Zeka Yıldızı', category: 'system', tags: 'yapay zeka, ai, parıltı, zeka, otomasyon' },
+    { key: 'custom', name: 'Özel / Diğer', category: 'system', tags: 'özel, custom, diğer, resim yükle, logo, kendi ikonum' },
+
+    // ---- Cihazlar ----
+    { key: 'monitor', name: 'Monitör', category: 'devices', tags: 'monitör, ekran, display, harici ekran, görüntü' },
+    { key: 'desktop', name: 'Masaüstü', category: 'devices', tags: 'masaüstü, desktop, çalışma alanı, pencere, düzen' },
+    { key: 'laptop', name: 'Dizüstü', category: 'devices', tags: 'dizüstü, laptop, notebook, bilgisayar' },
+    { key: 'smartphone', name: 'Telefon', category: 'devices', tags: 'telefon, akıllı telefon, android, mobil, cep' },
+    { key: 'tablet', name: 'Tablet', category: 'devices', tags: 'tablet, ipad, dokunmatik, mobil, ekran' },
+    { key: 'watch', name: 'Akıllı Saat', category: 'devices', tags: 'saat, akıllı saat, bileklik, wearable, spor' },
+    { key: 'keyboard', name: 'Klavye', category: 'devices', tags: 'klavye, keyboard, tuşlar, yazma, kısayol' },
+    { key: 'mouse', name: 'Fare', category: 'devices', tags: 'fare, mouse, imleç, tıklama, işaretçi' },
+    { key: 'gamepad', name: 'Oyun Kolu', category: 'devices', tags: 'oyun kolu, gamepad, joystick, kontrolcü, oyun' },
+    { key: 'vr', name: 'VR Gözlük', category: 'devices', tags: 'vr, sanal gerçeklik, gözlük, headset, 3d' },
+    { key: 'projector', name: 'Projektör', category: 'devices', tags: 'projektör, yansıtıcı, sunum, perde, görüntü' },
+    { key: 'router', name: 'Modem / Router', category: 'devices', tags: 'modem, router, yönlendirici, internet, kablosuz' },
+    { key: 'scanner', name: 'Tarayıcı', category: 'devices', tags: 'tarayıcı, scanner, belge tarama, kopyalama, tarama' },
+    { key: 'bulb', name: 'Ampul', category: 'devices', tags: 'ampul, akıllı ev, ışık, aydınlatma, lamba' },
+    { key: 'thermostat', name: 'Termostat', category: 'devices', tags: 'termostat, klima, ısıtma, akıllı ev, sıcaklık' },
+    { key: 'air_conditioner', name: 'Klima', category: 'devices', tags: 'klima, soğutma, ısıtma, ac, havalandırma' },
+    { key: 'smart_home', name: 'Akıllı Ev', category: 'devices', tags: 'akıllı ev, ev otomasyonu, iot, akıllı cihaz, bağlantı' },
+    { key: 'sd_card', name: 'SD Kart', category: 'devices', tags: 'sd kart, hafıza kartı, depolama, microsd, veri' },
+    { key: 'webcam', name: 'Web Kamerası', category: 'devices', tags: 'web kamerası, webcam, görüntülü görüşme, canlı, yayın' },
+    { key: 'remote', name: 'Kumanda', category: 'devices', tags: 'kumanda, remote, uzaktan, kontrol, tv' },
+
+    // ---- Uygulama ----
+    { key: 'web', name: 'Tarayıcı', category: 'apps', tags: 'tarayıcı, web, internet, browser, chrome, site' },
+    { key: 'link', name: 'Web Bağlantısı', category: 'apps', tags: 'bağlantı, link, url, zincir, web, adres' },
+    { key: 'external_link', name: 'Dış Bağlantı', category: 'apps', tags: 'dış bağlantı, link, yeni sekme, aç, url' },
+    { key: 'mail', name: 'E-posta', category: 'apps', tags: 'e-posta, mail, gmail, posta, mektup' },
+    { key: 'chat', name: 'Sohbet', category: 'apps', tags: 'sohbet, chat, mesaj, konuşma, balon' },
+    { key: 'message', name: 'Mesaj', category: 'apps', tags: 'mesaj, sms, message, ileti, metin' },
+    { key: 'phone_call', name: 'Telefon Araması', category: 'apps', tags: 'arama, telefon, call, sesli görüşme, hat' },
+    { key: 'contacts', name: 'Kişiler', category: 'apps', tags: 'kişiler, rehber, contacts, adres, kişi' },
+    { key: 'calc', name: 'Hesap Makinesi', category: 'apps', tags: 'hesap makinesi, hesaplama, matematik, calc, işlem' },
+    { key: 'notes', name: 'Notlar', category: 'apps', tags: 'not, notlar, notes, yazı, fikir' },
+    { key: 'notepad', name: 'Not Defteri', category: 'apps', tags: 'not defteri, metin editörü, txt, notepad, yazı' },
+    { key: 'document', name: 'Belge', category: 'apps', tags: 'belge, doküman, word, metin, dosya' },
+    { key: 'pdf', name: 'PDF', category: 'apps', tags: 'pdf, belge, okuma, dosya, e-kitap' },
+    { key: 'spreadsheet', name: 'Tablo', category: 'apps', tags: 'tablo, excel, tablolama, hesaplama, veri' },
+    { key: 'presentation', name: 'Sunum', category: 'apps', tags: 'sunum, sunu, powerpoint, slayt, toplantı' },
+    { key: 'folder', name: 'Dosya Gezgini', category: 'apps', tags: 'klasör, dizin, folder, dosya gezgini, explorer' },
+    { key: 'folder_open', name: 'Açık Klasör', category: 'apps', tags: 'açık klasör, dosya gezgini, dizin, içerik, klasör' },
+    { key: 'archive', name: 'Arşiv', category: 'apps', tags: 'arşiv, zip, rar, sıkıştırılmış, paket' },
+    { key: 'store', name: 'Mağaza', category: 'apps', tags: 'mağaza, store, uygulama indir, market, satış' },
+    { key: 'shopping', name: 'Alışveriş', category: 'apps', tags: 'alışveriş, market, çanta, shopping, sipariş' },
+    { key: 'cart', name: 'Sepet', category: 'apps', tags: 'sepet, alışveriş arabası, sipariş, e-ticaret, satın al' },
+    { key: 'wallet', name: 'Cüzdan', category: 'apps', tags: 'cüzdan, bakiye, ödeme, finans, hesap' },
+    { key: 'credit_card', name: 'Kredi Kartı', category: 'apps', tags: 'kredi kartı, ödeme, banka, finans, kart' },
+    { key: 'map', name: 'Harita', category: 'apps', tags: 'harita, map, konum, yol, gezi' },
+    { key: 'compass', name: 'Pusula', category: 'apps', tags: 'pusula, yön, kuzey, seyahat, rota' },
+    { key: 'pin', name: 'Konum', category: 'apps', tags: 'konum, pin, yer, adres, harita, nokta' },
+    { key: 'globe', name: 'Dünya', category: 'apps', tags: 'dünya, küre, ülke, dil, global, küresel' },
+    { key: 'translate', name: 'Çeviri', category: 'apps', tags: 'çeviri, translate, dil, tercüme, yabancı' },
+    { key: 'book', name: 'Kitap', category: 'apps', tags: 'kitap, okuma, ders, kütüphane, sayfa' },
+    { key: 'graduation', name: 'Eğitim', category: 'apps', tags: 'eğitim, okul, üniversite, ders, mezuniyet' },
+    { key: 'pencil', name: 'Kalem', category: 'apps', tags: 'kalem, yaz, düzenle, çiz, imza' },
+    { key: 'edit', name: 'Düzenle', category: 'apps', tags: 'düzenle, edit, değiştir, kalem, form' },
+    { key: 'briefcase', name: 'İş', category: 'apps', tags: 'iş, çanta, ofis, proje, business' },
+    { key: 'task', name: 'Görev Yöneticisi', category: 'apps', tags: 'görev, task, yönetici, taskmgr, performans' },
+    { key: 'kanban', name: 'Pano / Kanban', category: 'apps', tags: 'pano, kanban, proje, planlama, sütun' },
+    { key: 'chart', name: 'Grafik', category: 'apps', tags: 'grafik, chart, bar, istatistik, rapor' },
+    { key: 'analytics', name: 'Analiz', category: 'apps', tags: 'analiz, analytics, trend, veri, rapor' },
+    { key: 'trophy', name: 'Kupa', category: 'apps', tags: 'kupa, ödül, başarı, kazanmak, birincilik' },
+    { key: 'game', name: 'Oyun', category: 'apps', tags: 'oyun, zar, game, eğlence, şans' },
+
+    // ---- Navigasyon ----
+    { key: 'arrow_up', name: 'Yukarı', category: 'nav', tags: 'yukarı, yukarı ok, up, arttır, yükselt' },
+    { key: 'arrow_down', name: 'Aşağı', category: 'nav', tags: 'aşağı, aşağı ok, down, azalt, düşür' },
+    { key: 'arrow_left', name: 'Sol', category: 'nav', tags: 'sol, sol ok, geri, left, sola' },
+    { key: 'arrow_right', name: 'Sağ', category: 'nav', tags: 'sağ, sağ ok, ileri, right, sağa' },
+    { key: 'chevron_up', name: 'Yukarı Oku', category: 'nav', tags: 'yukarı, chevron, katla, aç, üst' },
+    { key: 'chevron_down', name: 'Aşağı Oku', category: 'nav', tags: 'aşağı, chevron, genişlet, kapat, alt' },
+    { key: 'chevron_left', name: 'Geri Oku', category: 'nav', tags: 'geri, chevron sol, önceki sayfa, sola' },
+    { key: 'chevron_right', name: 'İleri Oku', category: 'nav', tags: 'ileri, chevron sağ, sonraki sayfa, sağa' },
+    { key: 'back', name: 'Geri Dön', category: 'nav', tags: 'geri dön, geri, back, önceki, dönüş' },
+    { key: 'forward', name: 'İleri Git', category: 'nav', tags: 'ileri, forward, sonraki, yönlendir' },
+    { key: 'home', name: 'Ana Sayfa', category: 'nav', tags: 'ana sayfa, home, ev, başlangıç, panel' },
+    { key: 'menu', name: 'Menü', category: 'nav', tags: 'menü, hamburger menü, üç çizgi, liste, seçenekler' },
+    { key: 'grid', name: 'Izgara', category: 'nav', tags: 'ızgara, grid, kutular, döşeme, düzen' },
+    { key: 'list', name: 'Liste', category: 'nav', tags: 'liste, list, maddeler, sırala, kayıtlar' },
+    { key: 'more', name: 'Daha Fazla', category: 'nav', tags: 'daha fazla, üç nokta, more, seçenekler, menü' },
+    { key: 'target', name: 'Hedef', category: 'nav', tags: 'hedef, nişan, target, odak, amaç' },
+    { key: 'crosshair', name: 'Nişangah', category: 'nav', tags: 'nişangah, odak, crosshair, seçim, hassas' },
+    { key: 'maximize', name: 'Büyüt / Tam Ekran', category: 'nav', tags: 'büyüt, tam ekran, maximize, pencere, genişlet' },
+    { key: 'minimize', name: 'Küçült', category: 'nav', tags: 'küçült, minimize, simge durumuna getir, pencere, sakla' },
+    { key: 'restore', name: 'Geri Yükle', category: 'nav', tags: 'geri yükle, restore, pencere boyutu, eski boyut, eski haline' },
+    { key: 'snap_left', name: 'Sola Yerleştir', category: 'nav', tags: 'sola yerleştir, sol yarım, pencere, snap left, böl' },
+    { key: 'snap_right', name: 'Sağa Yerleştir', category: 'nav', tags: 'sağa yerleştir, sağ yarım, pencere, snap right, böl' },
+    { key: 'window', name: 'Pencere', category: 'nav', tags: 'pencere, window, uygulama penceresi, başlık çubuğu' },
+    { key: 'move', name: 'Taşı', category: 'nav', tags: 'taşı, hareket ettir, move, sürükle, konumlandır' },
+    { key: 'expand', name: 'Genişlet', category: 'nav', tags: 'genişlet, büyüt, expand, dışa aç, yay' },
+    { key: 'collapse', name: 'Daralt', category: 'nav', tags: 'daralt, küçült, collapse, içe topla, kapat' },
+    { key: 'zoom_in', name: 'Yakınlaştır', category: 'nav', tags: 'yakınlaştır, zoom in, büyüt, artı, detay' },
+    { key: 'zoom_out', name: 'Uzaklaştır', category: 'nav', tags: 'uzaklaştır, zoom out, küçült, eksi, genel bakış' },
+    { key: 'swap', name: 'Değiştir', category: 'nav', tags: 'değiştir, takas, swap, yer değiştir, çevir' },
+    { key: 'rotate', name: 'Döndür', category: 'nav', tags: 'döndür, rotate, çevir, yön değiştir, döndürme' },
+    { key: 'undo', name: 'Geri Al', category: 'nav', tags: 'geri al, undo, iptal, eski haline, düzelt' },
+    { key: 'redo', name: 'Yinele', category: 'nav', tags: 'yinele, ileri al, redo, tekrar, yeniden' },
+    { key: 'layout', name: 'Düzen', category: 'nav', tags: 'düzen, layout, yerleşim, bölmeli, tasarım' },
+    { key: 'crop', name: 'Kırp', category: 'nav', tags: 'kırp, crop, kes, alan seç, düzenle' },
+    { key: 'snip', name: 'Ekran Görüntüsü', category: 'nav', tags: 'ekran görüntüsü, alıntı, snip, snipping tool, screenshot, kes' }
+];
+
+const ICON_SEARCH_FOLD = {
+    'ı': 'i', 'İ': 'i', 'ş': 's', 'Ş': 's', 'ğ': 'g', 'Ğ': 'g', 'ü': 'u', 'Ü': 'u',
+    'ö': 'o', 'Ö': 'o', 'ç': 'c', 'Ç': 'c', 'â': 'a', 'Â': 'a', 'î': 'i', 'û': 'u'
+};
+
+// "Ses Aç" finds "ses ac" and vice versa: search is diacritic- and case-free.
+function normalizeIconSearch(text) {
+    return (text || '')
+        .toLocaleLowerCase('tr')
+        .replace(/[ıİşŞğĞüÜöÖçÇâÂîû]/g, ch => ICON_SEARCH_FOLD[ch] || ch)
+        .trim();
+}
+
+// Lowercased/diacritic-free haystack per catalog entry, built once.
+const ICON_SEARCH_INDEX = AVAILABLE_ICONS.map(item => ({
+    item,
+    haystack: normalizeIconSearch(`${item.key} ${item.name} ${item.tags}`)
+}));
+
+// Picker state survives re-renders; the search box, the category chips and the
+// header preview all mirror it.
+const iconPickerState = { category: 'all', query: '', selected: 'custom' };
+
+// "icons/button_3.png" → "/icons/button_3.png?password=…" for <img> tags.
+function iconAssetUrl(path) {
+    const password = getAuthPassword();
+    const authQuery = password ? `?password=${encodeURIComponent(password)}` : '';
+    return `${path}${authQuery}`;
+}
+
+function isExtractedIconValue(iconValue) {
+    return typeof iconValue === 'string' && iconValue.startsWith('custom:') && iconValue.length > 7;
+}
+
+function customIconValue(icon) {
+    const raw = String(icon || '').replace(/^custom:/, '');
+    return raw ? `custom:${raw}` : 'custom';
+}
+
+// Mirrors the current icon into the header preview: extracted app logos render
+// as <img>, catalog icons as inline SVG.
+function setSelectedIconPreview(iconValue) {
+    const previewEl = document.getElementById('selected-icon-preview');
+    const labelEl = document.getElementById('selected-icon-preview-label');
+    if (!previewEl && !labelEl) return;
+
+    if (isExtractedIconValue(iconValue)) {
+        if (previewEl) {
+            const img = document.createElement('img');
+            img.alt = '';
+            img.src = iconAssetUrl(iconValue.substring(7));
+            img.addEventListener('error', () => {
+                previewEl.innerHTML = getSvgIcon('custom');
+                if (labelEl) labelEl.textContent = 'Aktif: Özel ikon (logo alınamadı)';
+            }, { once: true });
+            previewEl.innerHTML = '';
+            previewEl.appendChild(img);
+        }
+        if (labelEl) labelEl.textContent = 'Aktif: Uygulama Logosu';
+        return;
     }
 
+    if (previewEl) previewEl.innerHTML = getSvgIcon(iconValue || 'custom');
+    if (labelEl) {
+        const item = AVAILABLE_ICONS.find(entry => entry.key === iconValue);
+        labelEl.textContent = `Aktif: ${item ? item.name : (iconValue || 'custom')}`;
+    }
+}
+
+// The hidden <select> is the value carrier the save path reads; it mirrors the
+// catalog plus any extracted app-logo values picked up at runtime.
+function buildIconSelectOptions() {
+    const selectEl = document.getElementById('edit-icon-select');
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
     AVAILABLE_ICONS.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.key;
+        opt.textContent = item.name;
+        selectEl.appendChild(opt);
+    });
+}
+
+function ensureIconSelectOption(iconValue) {
+    const selectEl = document.getElementById('edit-icon-select');
+    if (!selectEl || !iconValue) return;
+    if (Array.from(selectEl.options).some(opt => opt.value === iconValue)) return;
+    const opt = document.createElement('option');
+    opt.value = iconValue;
+    opt.textContent = isExtractedIconValue(iconValue) ? 'Uygulama Logosu' : iconValue;
+    selectEl.appendChild(opt);
+}
+
+function syncIconCategoryTabs() {
+    document.querySelectorAll('#icon-category-tabs .icon-category-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.getAttribute('data-category') === iconPickerState.category);
+    });
+}
+
+function clearIconSearch() {
+    iconPickerState.query = '';
+    const searchInput = document.getElementById('icon-search-input');
+    if (searchInput) searchInput.value = '';
+    const clearBtn = document.getElementById('icon-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+}
+
+// Every open of the card editor starts from a clean picker: no query, "Tümü".
+function resetIconPickerFilters() {
+    iconPickerState.category = 'all';
+    clearIconSearch();
+    syncIconCategoryTabs();
+}
+
+function buildIconCategoryTabs() {
+    const tabs = document.getElementById('icon-category-tabs');
+    if (!tabs) return;
+    tabs.innerHTML = '';
+    ICON_CATEGORIES.forEach(category => {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'icon-category-tab';
+        tab.setAttribute('data-category', category.id);
+        tab.textContent = category.label;
+        tab.addEventListener('click', () => {
+            iconPickerState.category = category.id;
+            renderIconPickerGallery(iconPickerState.selected);
+        });
+        tabs.appendChild(tab);
+    });
+}
+
+function setupIconPicker() {
+    if (!document.getElementById('icon-picker-gallery')) return;
+    buildIconSelectOptions();
+    buildIconCategoryTabs();
+    resetIconPickerFilters();
+
+    const searchInput = document.getElementById('icon-search-input');
+    const clearBtn = document.getElementById('icon-search-clear');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            iconPickerState.query = searchInput.value;
+            if (clearBtn) clearBtn.style.display = searchInput.value ? 'flex' : 'none';
+            renderIconPickerGallery(iconPickerState.selected);
+        });
+    }
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            clearIconSearch();
+            renderIconPickerGallery(iconPickerState.selected);
+            if (searchInput) searchInput.focus();
+        });
+    }
+}
+
+function renderIconPickerGallery(selectedIcon, filterQuery, selectedCategory) {
+    const gallery = document.getElementById('icon-picker-gallery');
+    if (!gallery) return;
+
+    if (typeof selectedIcon === 'string' && selectedIcon) iconPickerState.selected = selectedIcon;
+    if (typeof filterQuery === 'string') iconPickerState.query = filterQuery;
+    if (typeof selectedCategory === 'string') iconPickerState.category = selectedCategory;
+
+    const selectedValue = iconPickerState.selected || 'custom';
+    const extractedLogo = isExtractedIconValue(selectedValue);
+    const queryTokens = normalizeIconSearch(iconPickerState.query).split(/\s+/).filter(Boolean);
+    const category = iconPickerState.category || 'all';
+
+    // Keep the search box in step when the picker is driven programmatically.
+    const searchInput = document.getElementById('icon-search-input');
+    if (searchInput && searchInput.value !== iconPickerState.query) {
+        searchInput.value = iconPickerState.query;
+    }
+    const clearBtn = document.getElementById('icon-search-clear');
+    if (clearBtn) clearBtn.style.display = iconPickerState.query ? 'flex' : 'none';
+
+    syncIconCategoryTabs();
+
+    // The hidden select is what the save path reads, so it always carries the
+    // current selection (catalog key, legacy key or extracted app logo).
+    const selectEl = document.getElementById('edit-icon-select');
+    if (selectEl) {
+        ensureIconSelectOption(selectedValue);
+        selectEl.value = selectedValue;
+    }
+
+    gallery.innerHTML = '';
+
+    const matches = ICON_SEARCH_INDEX.filter(({ item, haystack }) => {
+        if (category !== 'all' && item.category !== category) return false;
+        // Every typed word must appear somewhere in key, name or tags.
+        return queryTokens.every(token => haystack.includes(token));
+    });
+
+    matches.forEach(({ item }) => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'icon-picker-item' + (currentKey === item.key ? ' active' : '');
-        btn.title = item.name;
-        btn.innerHTML = getSvgIcon(item.key);
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.icon-picker-item').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const selectEl = document.getElementById('edit-icon-select');
-            if (selectEl) {
-                selectEl.value = item.key;
-                selectEl.dispatchEvent(new Event('change'));
-            }
-            if (previewLabel) {
-                previewLabel.textContent = `Aktif: ${item.name}`;
-            }
-        });
+        btn.className = 'icon-picker-item' + (!extractedLogo && item.key === selectedValue ? ' active' : '');
+        btn.title = `${item.name} · ${item.key}`;
+        btn.setAttribute('aria-label', item.name);
+        btn.innerHTML = `${getSvgIcon(item.key)}<span class="icon-picker-item-name">${item.name}</span>`;
+        btn.addEventListener('click', () => renderIconPickerGallery(item.key));
         gallery.appendChild(btn);
     });
+
+    if (!matches.length) {
+        const empty = document.createElement('p');
+        empty.className = 'icon-picker-empty';
+        empty.textContent = 'Eşleşen ikon bulunamadı. Farklı bir kelime deneyin.';
+        gallery.appendChild(empty);
+    }
+
+    const countEl = document.getElementById('icon-picker-count');
+    if (countEl) {
+        countEl.textContent = `${matches.length} / ${AVAILABLE_ICONS.length} ikon`;
+    }
+
+    setSelectedIconPreview(selectedValue);
+}
+
+// ---------------------------------------------------------------------------
+// Application logo assignment ("Uygulama Aç")
+// ---------------------------------------------------------------------------
+
+// Name-based fallback for apps whose real logo could not be extracted.
+function heuristicIconForAppName(appName) {
+    const name = (appName || '').toLowerCase();
+    if (name.includes('chrome') || name.includes('browser') || name.includes('edge') || name.includes('firefox')) return 'web';
+    if (name.includes('music') || name.includes('spotify') || name.includes('player')) return 'play';
+    if (name.includes('volume') || name.includes('ses')) return 'volup';
+    if (name.includes('mic') || name.includes('mikrofon')) return 'mic';
+    if (name.includes('lock') || name.includes('kilit')) return 'lock';
+    if (name.includes('task') || name.includes('görev') || name.includes('manager')) return 'task';
+    if (name.includes('calc') || name.includes('hesap')) return 'calc';
+    return 'custom';
+}
+
+// Extracted logos are stored right away so the deck card paints the real logo
+// even if the dialog is closed without pressing Kaydet.
+function persistExtractedIcon(iconValue) {
+    if (editingButtonId === null || !apiConfig || !Array.isArray(apiConfig.stream_deck_buttons)) return;
+    const btn = apiConfig.stream_deck_buttons.find(b => b.id === editingButtonId);
+    if (!btn || btn.icon === iconValue) return;
+    btn.icon = iconValue;
+    renderStreamDeckButtons();
+    saveConfigOnServer();
+}
+
+// Icons already resolved for this app by /installed_apps need no extraction.
+function resolveAppIconFromList(appPath) {
+    const app = installedApps.find(entry => entry.path === appPath);
+    if (!app) return null;
+    const cached = app.icon || app.icon_url || app.icon_path;
+    return cached ? customIconValue(cached) : null;
+}
+
+// Picks the logo for "Uygulama Aç": cached icon from /installed_apps first,
+// otherwise POST /extract_icon for the button being edited.
+function applyAppLogoForSelection(appPath, appName) {
+    const cachedIcon = resolveAppIconFromList(appPath);
+    if (cachedIcon) {
+        renderIconPickerGallery(cachedIcon);
+        persistExtractedIcon(cachedIcon);
+        return;
+    }
+
+    authFetch('/extract_icon', {
+        method: 'POST',
+        body: JSON.stringify({ path: appPath, button_id: editingButtonId })
+    })
+        .then(res => res.json())
+        .then(data => {
+            const extracted = data && data.success ? (data.icon || data.icon_url) : null;
+            if (extracted) {
+                const iconValue = customIconValue(extracted);
+                renderIconPickerGallery(iconValue);
+                persistExtractedIcon(iconValue);
+            } else {
+                renderIconPickerGallery(heuristicIconForAppName(appName));
+            }
+        })
+        .catch(err => {
+            console.error('Uygulama ikonu alınamadı', err);
+            renderIconPickerGallery(heuristicIconForAppName(appName));
+        });
 }
 
 function applyButtonEdit() {
@@ -5544,7 +6125,7 @@ function applyButtonEdit() {
 
     const lowerVal = value.trim().toLowerCase();
     const isAppPath = lowerVal.endsWith('.exe') || lowerVal.endsWith('.lnk') || value.includes('\\') || value.includes('/');
-    if (type === 'command' && value.trim().length > 0 && icon !== 'custom' && isAppPath) {
+    if (type === 'command' && value.trim().length > 0 && !isExtractedIconValue(icon) && icon !== 'custom' && isAppPath) {
         authFetch('/extract_icon', {
             method: 'POST',
             body: JSON.stringify({
@@ -5554,7 +6135,7 @@ function applyButtonEdit() {
         })
         .then(res => res.json())
         .then(data => {
-            if (data.success && data.icon) saveAndClose("custom:" + data.icon);
+            if (data.success && data.icon) saveAndClose(customIconValue(data.icon));
             else saveAndClose(icon);
         })
         .catch(err => {

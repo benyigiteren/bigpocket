@@ -3,6 +3,25 @@
 Her sürüm için `## vX.Y.Z` başlığı altına yazılanlar, GitHub Release notu olarak
 uygulamalardaki **"Yeni güncelleme"** penceresinde gösterilir.
 
+## v1.5.5
+
+### 🎨 Zengin İkon Seçici & Otomatik Uygulama Logosu (Masaüstü Web Arayüzü)
+- **198 İkonluk Katalog:** Kart düzenleyicideki ikon seçici 36 simgeden 198 özenle çizilmiş simgeye çıkarıldı; her simge Türkçe adı, kategorisi ve arama etiketleriyle tanımlandı.
+- **Anlık Arama:** "ses, kilit, web, güç" gibi Türkçe veya İngilizce kelimelerle anında filtreleme; çok kelimeli aramalar (örn. "oynat play") ve Türkçe karakter duyarsızlığı (`ses ac` → *Ses Aç*) desteklenir.
+- **Kategori Sekmeleri:** Tümü, Medya, Sistem, Cihazlar, Uygulama ve Navigasyon sekmeleriyle filtreleme, sonuç sayacı ve "eşleşen ikon yok" durumu.
+- **Otomatik Uygulama Logosu:** "Uygulama Aç" için uygulama seçildiğinde gerçek logosu otomatik alınır (`/extract_icon`), ikon seçicide anında gösterilir ve kaydedilir; logo alınamazsa ada göre akıllı simge eşlemesi devreye girer.
+- **Kart Görsel Geri Bildirimi:** Seçili ikon hem düzenleyici başlığında hem de Stream Deck kartında (gerçek logo `<img>` olarak) anında güncellenir.
+
+### 📱 Android: Aranabilir İkon Seçici & Otomatik Uygulama Logosu
+- **172 Simgelik Kütüphane:** Telefon buton düzenleyicisindeki tek satırlık 39 simge, 172 gerçek Material simgesine (Filled + AutoMirrored) çıkarıldı; her simgenin Türkçe adı, kategorisi ve Türkçe/İngilizce arama etiketleri var. Eski kayıtlardaki ikon anahtarları (`volup`, `bright`, `now_playing`…) takma ad haritasıyla aynı simgeye çözümlenmeye devam eder.
+- **Aranabilir Izgara:** "İkonlarda Ara… (ses, kilit, web, saat…)" arama alanı (temizle düğmeli), Tümü / Medya & Ses / Sistem & Güç / Cihazlar & Donanım / Uygulamalar & Web / Navigasyon & Oklar filtre çipleri, 5 sütunlu kaydırılabilir ızgara, sonuç sayacı ve üstte anlık önizleme.
+- **Otomatik Uygulama Logosu:** "PC Uygulamalarında Ara" listesinden bir uygulama seçildiğinde butonun komutu ve başlığı doldurulur; gerçek logo varsa `/installed_apps` önbelleğinden alınır, yoksa `/extract_icon` çağrısıyla bilgisayarda çıkarılır ve diyalog önizlemesinde Coil ile anında gösterilir. Çıkarım sürerken yükleme göstergesi ve geçici simge gösterilir.
+- **Liste Küçük Resimleri:** Uygulama listesi, önbelleğe alınmış gerçek logoları satır küçük resmi olarak gösterir.
+
+### 🪟 Yeni Bileşenler: Pencere Yönetimi & Sistem Güç Eylemleri
+- **Pencere Yönetimi (Window Actions):** Ön plandaki pencereyi tek dokunuşla Tam Ekran Yapma (Maximize), Simge Durumuna Küçültme (Minimize), Geri Yükleme (Restore), Ekranın Soluna/Sağına Yaslama (Snap Left / Right), Kapatma ve Monitörler Arası Geçiş (Next Monitor) aksiyonları eklendi.
+- **Sistem Güç & Hızlı Eylemler (System Actions):** Bilgisayarı Uyutma (Sleep), Yeniden Başlatma (Restart), Bilgisayarı Kapatma (Shutdown), Ekranı Kilitleme (Lock), Geri Dönüşüm Kutusunu Boşaltma ve Ekran Alıntısı Aracı (Snipping Tool) Stream Deck buton türü olarak doğrudan entegre edildi.
+- **34/34 MCP Aracı:** `window_action` ve `system_action` araçları Model Context Protocol (MCP) şemasına da eklenerek yapay zeka ajanlarının kullanımına açıldı.
 ## v1.5.4
 
 ### 🚀 Evrensel Çoklu Platform Desteği (Windows, macOS, Linux)

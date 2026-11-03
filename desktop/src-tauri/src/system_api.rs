@@ -176,6 +176,32 @@ pub async fn handle_mcp_tool(
                 .unwrap_or_else(|err| json!({"success": false, "error": err.to_string()}));
             Some((info.to_string(), false))
         }
+        "window_action" => {
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let requested = action.clone();
+            let performed = tokio::task::spawn_blocking(move || {
+                crate::server::perform_window_action(&action);
+            })
+            .await
+            .is_ok();
+            Some((
+                json!({"success": performed, "action": requested}).to_string(),
+                !performed,
+            ))
+        }
+        "system_action" => {
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            crate::server::run_system_action(state, &action).await;
+            Some((json!({"success": true, "action": action}).to_string(), false))
+        }
         "list_installed_apps" => {
             let text = response_text(crate::server::installed_apps_handler().await).await;
             Some((text, false))

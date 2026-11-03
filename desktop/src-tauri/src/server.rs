@@ -821,6 +821,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/palette/action", post(palette_action))
         .route("/upload_icon", post(upload_icon_handler))
         .route("/extract_icon", post(extract_icon_handler))
+        .route("/api/app_icon", get(app_icon_handler))
         .route("/open_shared_folder", post(open_shared_folder_handler))
         .route("/shutdown", get(shutdown_handler).post(shutdown_handler))
         .route("/api/shutdown", get(shutdown_handler).post(shutdown_handler))
@@ -1564,6 +1565,14 @@ async fn press_button(state: &Arc<AppState>, button_id: i32, toggle: bool, paylo
                     let _ = spawn_detached(&value);
                 }
             }
+        }
+        "window_action" => {
+            // Window helpers may wait on `osascript`/`wmctrl`/`xdotool`.
+            let action = value.clone();
+            let _ = tokio::task::spawn_blocking(move || perform_window_action(&action)).await;
+        }
+        "system_action" => {
+            run_system_action(state, &value).await;
         }
         _ => {}
     }
@@ -4659,6 +4668,534 @@ fn empty_recycle_bin() {
 fn empty_recycle_bin() {}
 
 // ---------------------------------------------------------------------------
+// Window management (`window_action` widget)
+// ---------------------------------------------------------------------------
+
+/// Runs a `window_action` widget (`maximize`, `minimize`, `restore`,
+/// `snap_left`, `snap_right`, `snap_top`, `close`, `next_monitor`) against the
+/// current foreground window.
+///
+/// Shared by the Stream Deck button handler and the `window_action` MCP tool.
+pub(crate) fn perform_window_action(action: &str) {
+    #[cfg(windows)]
+    {
+        windows_window_action(action);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_window_action(action);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        linux_window_action(action);
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = action;
+        tracing::warn!("window_action is unsupported on this platform");
+    }
+}
+
+/// Windows `window_action` implementation, straight through `user32`.
+#[cfg(windows)]
+fn windows_window_action(action: &str) {
+    use std::ffi::c_void;
+
+    type Hwnd = *mut c_void;
+    type Hmonitor = *mut c_void;
+    type Hdc = *mut c_void;
+    type MonitorEnumProc = unsafe extern "system" fn(Hmonitor, Hdc, *mut Rect, isize) -> i32;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[repr(C)]
+    struct MonitorInfo {
+        cb_size: u32,
+        rc_monitor: Rect,
+        rc_work: Rect,
+        flags: u32,
+    }
+
+    const SW_MAXIMIZE: i32 = 3;
+    const SW_MINIMIZE: i32 = 6;
+    const SW_RESTORE: i32 = 9;
+    const WM_CLOSE: u32 = 0x0010;
+    const MONITOR_DEFAULTTONEAREST: u32 = 0x0000_0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+
+    // Same ABI as the `EnumDisplayMonitors` declared in `set_brightness_ddc`;
+    // the lint flags it only because each function-scoped `Rect` is a distinct
+    // nominal type with an identical `#[repr(C)]` layout.
+    #[allow(clashing_extern_declarations)]
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetForegroundWindow() -> Hwnd;
+        fn ShowWindow(hwnd: Hwnd, cmd: i32) -> i32;
+        fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> i32;
+        fn SetWindowPos(hwnd: Hwnd, after: Hwnd, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn GetWindowRect(hwnd: Hwnd, rect: *mut Rect) -> i32;
+        fn MonitorFromWindow(hwnd: Hwnd, flags: u32) -> Hmonitor;
+        fn GetMonitorInfoW(monitor: Hmonitor, info: *mut MonitorInfo) -> i32;
+        fn EnumDisplayMonitors(
+            hdc: Hdc,
+            clip: *mut Rect,
+            callback: MonitorEnumProc,
+            data: isize,
+        ) -> i32;
+    }
+
+    fn empty_monitor_info() -> MonitorInfo {
+        MonitorInfo {
+            cb_size: std::mem::size_of::<MonitorInfo>() as u32,
+            rc_monitor: Rect::default(),
+            rc_work: Rect::default(),
+            flags: 0,
+        }
+    }
+
+    /// `EnumDisplayMonitors` callback collecting every monitor's full rect.
+    unsafe extern "system" fn collect_monitors(
+        monitor: Hmonitor,
+        _hdc: Hdc,
+        _rect: *mut Rect,
+        data: isize,
+    ) -> i32 {
+        let monitors = &mut *(data as *mut Vec<Rect>);
+        let mut info = empty_monitor_info();
+        if GetMonitorInfoW(monitor, &mut info) != 0 {
+            monitors.push(info.rc_monitor);
+        }
+        // Non-zero keeps the enumeration going.
+        1
+    }
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return;
+        }
+
+        match action {
+            "maximize" => {
+                ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+            "minimize" => {
+                ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            "restore" => {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            "close" => {
+                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            }
+            "snap_left" | "snap_right" | "snap_top" => {
+                let mut info = empty_monitor_info();
+                let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                if GetMonitorInfoW(monitor, &mut info) == 0 {
+                    return;
+                }
+                let work = info.rc_work;
+                let width = (work.right - work.left).max(1);
+                let height = (work.bottom - work.top).max(1);
+                // A maximized window cannot be repositioned; restore it first.
+                ShowWindow(hwnd, SW_RESTORE);
+                let (x, y, w, h) = match action {
+                    "snap_left" => (work.left, work.top, width / 2, height),
+                    "snap_right" => (work.left + width / 2, work.top, width - width / 2, height),
+                    _ => (work.left, work.top, width, height / 2),
+                };
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    x,
+                    y,
+                    w,
+                    h,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            "next_monitor" => {
+                let mut monitors: Vec<Rect> = Vec::new();
+                EnumDisplayMonitors(
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    collect_monitors,
+                    &mut monitors as *mut Vec<Rect> as isize,
+                );
+                if monitors.len() < 2 {
+                    return;
+                }
+
+                let mut current = empty_monitor_info();
+                let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                if GetMonitorInfoW(monitor, &mut current) == 0 {
+                    return;
+                }
+                let same = |a: &Rect, b: &Rect| {
+                    a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom
+                };
+                let index = monitors
+                    .iter()
+                    .position(|rect| same(rect, &current.rc_monitor))
+                    .unwrap_or(0);
+                let target = monitors[(index + 1) % monitors.len()];
+
+                let mut window = Rect::default();
+                if GetWindowRect(hwnd, &mut window) == 0 {
+                    return;
+                }
+                let width = (window.right - window.left).min(target.right - target.left);
+                let height = (window.bottom - window.top).min(target.bottom - target.top);
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    target.left,
+                    target.top,
+                    width,
+                    height,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Runs an AppleScript snippet through `osascript`. Returns whether it exited
+/// successfully.
+#[cfg(target_os = "macos")]
+fn run_osascript(script: &str) -> bool {
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// macOS `window_action` implementation.
+///
+/// Window geometry is driven through System Events (accessibility), the only
+/// scripting bridge that can move and resize arbitrary foreground windows.
+#[cfg(target_os = "macos")]
+fn macos_window_action(action: &str) {
+    // `bounds of window of desktop` yields {left, top, width, height}; snapping
+    // uses its width/height halves.
+    const DESKTOP_BOUNDS: &str = "tell application \"Finder\" to set b to bounds of window of desktop\n\
+set sw to item 3 of b\n\
+set sh to item 4 of b\n";
+    let tell_front = "tell application \"System Events\" to tell (first process whose frontmost is true)";
+
+    let script: String = match action {
+        "maximize" => format!(
+            "{tell_front}\n\
+\t\tset value of attribute \"AXFullScreen\" of window 1 to true\n\
+\tend tell"
+        ),
+        "restore" => format!(
+            "{tell_front}\n\
+\t\tset value of attribute \"AXMinimized\" of window 1 to false\n\
+\t\tset value of attribute \"AXFullScreen\" of window 1 to false\n\
+\tend tell"
+        ),
+        "minimize" => format!(
+            "{tell_front}\n\
+\t\tset value of attribute \"AXMinimized\" of window 1 to true\n\
+\tend tell"
+        ),
+        "close" => "tell application \"System Events\" to keystroke \"w\" using command down".to_string(),
+        "snap_left" => format!(
+            "{DESKTOP_BOUNDS}{tell_front}\n\
+\t\tset position of window 1 to {{0, 0}}\n\
+\t\tset size of window 1 to {{sw div 2, sh}}\n\
+\tend tell"
+        ),
+        "snap_right" => format!(
+            "{DESKTOP_BOUNDS}{tell_front}\n\
+\t\tset position of window 1 to {{sw div 2, 0}}\n\
+\t\tset size of window 1 to {{sw - (sw div 2), sh}}\n\
+\tend tell"
+        ),
+        "snap_top" => format!(
+            "{DESKTOP_BOUNDS}{tell_front}\n\
+\t\tset position of window 1 to {{0, 0}}\n\
+\t\tset size of window 1 to {{sw, sh div 2}}\n\
+\tend tell"
+        ),
+        other => {
+            tracing::warn!("window_action {other:?} is not supported on macOS");
+            return;
+        }
+    };
+
+    if !run_osascript(&script) {
+        tracing::warn!("window_action {action:?}: osascript failed (accessibility permission?)");
+    }
+}
+
+/// Runs `program args…`, waiting for it to finish, and reports whether it
+/// succeeded. A missing binary simply reports `false` so the caller can try the
+/// next fallback.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn run_quiet(program: &str, args: &[&str]) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// Linux `window_action` implementation — `wmctrl` first, `xdotool` fallback.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_window_action(action: &str) {
+    let (wmctrl, xdotool): (Option<&[&str]>, Option<&[&str]>) = match action {
+        "maximize" => (
+            Some(&["-r", ":ACTIVE:", "-b", "add,maximized_vert,maximized_horz"]),
+            Some(&["key", "--clearmodifiers", "super+Up"]),
+        ),
+        "minimize" => (
+            Some(&["-r", ":ACTIVE:", "-b", "add,hidden"]),
+            Some(&["getactivewindow", "windowminimize"]),
+        ),
+        "restore" => (
+            Some(&["-r", ":ACTIVE:", "-b", "remove,maximized_vert,maximized_horz"]),
+            Some(&["key", "--clearmodifiers", "super+Down"]),
+        ),
+        "close" => (
+            Some(&["-c", ":ACTIVE:"]),
+            Some(&["key", "--clearmodifiers", "alt+F4"]),
+        ),
+        "snap_left" => (None, Some(&["key", "--clearmodifiers", "super+Left"])),
+        "snap_right" => (None, Some(&["key", "--clearmodifiers", "super+Right"])),
+        "snap_top" => (None, Some(&["key", "--clearmodifiers", "super+Up"])),
+        "next_monitor" => (None, Some(&["key", "--clearmodifiers", "super+shift+Right"])),
+        _ => (None, None),
+    };
+
+    if let Some(args) = wmctrl {
+        if run_quiet("wmctrl", args) {
+            return;
+        }
+    }
+    if let Some(args) = xdotool {
+        if run_quiet("xdotool", args) {
+            return;
+        }
+    }
+    tracing::warn!("window_action {action:?}: neither wmctrl nor xdotool succeeded");
+}
+
+// ---------------------------------------------------------------------------
+// System power & utility (`system_action` widget)
+// ---------------------------------------------------------------------------
+
+/// Runs a `system_action` widget (`sleep`, `restart`, `shutdown`, `lock`,
+/// `empty_recycle_bin`, `screenshot`).
+///
+/// Shared by the Stream Deck button handler and the `system_action` MCP tool.
+pub(crate) async fn run_system_action(state: &Arc<AppState>, action: &str) {
+    match action {
+        "screenshot" => screenshot_action(state).await,
+        // These calls block until the OS responds (and `sleep` until the machine
+        // resumes), so they must not run on an async worker thread.
+        "lock" => {
+            let _ = tokio::task::spawn_blocking(lock_screen).await;
+        }
+        "empty_recycle_bin" => {
+            let _ = tokio::task::spawn_blocking(empty_recycle_bin).await;
+        }
+        "sleep" => {
+            let _ = tokio::task::spawn_blocking(suspend_system).await;
+        }
+        "restart" => {
+            let _ = tokio::task::spawn_blocking(restart_system).await;
+        }
+        "shutdown" => {
+            let _ = tokio::task::spawn_blocking(shutdown_system).await;
+        }
+        _ => {}
+    }
+}
+
+/// Locks the workstation/session.
+pub(crate) fn lock_screen() {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn LockWorkStation() -> i32;
+        }
+        unsafe {
+            LockWorkStation();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // CGSession is undocumented but is the supported way to lock the screen.
+        let _ = std::process::Command::new("/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession")
+            .arg("-suspend")
+            .spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for (program, args) in [
+            ("loginctl", &["lock-session"][..]),
+            ("xdg-screensaver", &["lock"][..]),
+            ("gnome-screensaver-command", &["-l"][..]),
+        ] {
+            if run_quiet(program, args) {
+                return;
+            }
+        }
+        tracing::warn!("lock: no supported screen locker found");
+    }
+    #[cfg(not(any(windows, unix)))]
+    tracing::warn!("lock is unsupported on this platform");
+}
+
+/// Suspends the machine (`system_action` `sleep`).
+pub(crate) fn suspend_system() {
+    #[cfg(windows)]
+    {
+        #[link(name = "powrprof")]
+        extern "system" {
+            fn SetSuspendState(hibernate: i32, force: i32, disable_wake: i32) -> u8;
+        }
+        // `hibernate = 0` requests sleep; `force = 0` lets applications veto.
+        let ok = unsafe { SetSuspendState(0, 0, 0) };
+        if ok == 0 {
+            let _ = spawn_detached("rundll32.exe powrprof.dll,SetSuspendState 0,1,0");
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !run_osascript("tell application \"System Events\" to sleep") {
+            let _ = std::process::Command::new("pmset").arg("sleepnow").spawn();
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for (program, args) in [
+            ("systemctl", &["suspend"][..]),
+            ("loginctl", &["suspend"][..]),
+        ] {
+            if run_quiet(program, args) {
+                return;
+            }
+        }
+        tracing::warn!("sleep: neither systemctl nor loginctl could suspend");
+    }
+    #[cfg(not(any(windows, unix)))]
+    tracing::warn!("sleep is unsupported on this platform");
+}
+
+/// Restarts the machine (`system_action` `restart`).
+pub(crate) fn restart_system() {
+    #[cfg(windows)]
+    {
+        let _ = spawn_detached("shutdown /r /t 0");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = run_osascript("tell application \"System Events\" to restart");
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for (program, args) in [
+            ("systemctl", &["reboot"][..]),
+            ("loginctl", &["reboot"][..]),
+        ] {
+            if run_quiet(program, args) {
+                return;
+            }
+        }
+        tracing::warn!("restart: neither systemctl nor loginctl could reboot");
+    }
+    #[cfg(not(any(windows, unix)))]
+    tracing::warn!("restart is unsupported on this platform");
+}
+
+/// Powers the machine off (`system_action` `shutdown`).
+pub(crate) fn shutdown_system() {
+    #[cfg(windows)]
+    {
+        let _ = spawn_detached("shutdown /s /t 0");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = run_osascript("tell application \"System Events\" to shut down");
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for (program, args) in [
+            ("systemctl", &["poweroff"][..]),
+            ("loginctl", &["poweroff"][..]),
+        ] {
+            if run_quiet(program, args) {
+                return;
+            }
+        }
+        tracing::warn!("shutdown: neither systemctl nor loginctl could power off");
+    }
+    #[cfg(not(any(windows, unix)))]
+    tracing::warn!("shutdown is unsupported on this platform");
+}
+
+/// Opens the OS screenshot capture UI (`system_action` `screenshot`).
+///
+/// Windows triggers the Snipping Tool overlay (Win+Shift+S); macOS/Linux launch
+/// their native capture tool.
+async fn screenshot_action(state: &Arc<AppState>) {
+    #[cfg(windows)]
+    {
+        with_input(state, |controller| controller.simulate_hotkey("meta+shift+s")).await;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = state;
+        if std::process::Command::new("screencapture").arg("-i").spawn().is_err() {
+            tracing::warn!("screenshot: could not launch screencapture");
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = state;
+        if !spawn_program("gnome-screenshot", &["-i"])
+            && !spawn_program("spectacle", &["-r"])
+            && !spawn_program("scrot", &[])
+        {
+            tracing::warn!("screenshot: no capture utility found (tried gnome-screenshot, spectacle, scrot)");
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = state;
+    }
+}
+
+/// Launches `program args…` without waiting for it (interactive utilities such
+/// as screenshot grabbers must not block the async runtime).
+#[cfg(all(unix, not(target_os = "macos")))]
+fn spawn_program(program: &str, args: &[&str]) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
+// ---------------------------------------------------------------------------
 // Notifications (Shell_NotifyIconW balloon on a hidden message window)
 // ---------------------------------------------------------------------------
 
@@ -5333,14 +5870,7 @@ async fn palette_action(
             json_response(StatusCode::OK, json!({"success": true, "message": "Ses kapatıldı/açıldı."}))
         }
         "lock_screen" => {
-            #[cfg(windows)]
-            {
-                #[link(name = "user32")]
-                extern "system" {
-                    fn LockWorkStation() -> i32;
-                }
-                unsafe { LockWorkStation(); }
-            }
+            lock_screen();
             json_response(StatusCode::OK, json!({"success": true, "message": "Ekran kilitlendi."}))
         }
         "monitor_toggle" => {
@@ -5462,19 +5992,84 @@ async fn extract_icon_handler(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ExtractIconRequest>,
 ) -> Response {
-    let id = body.button_id.unwrap_or(0);
-    let save_name = format!("button_{id}.png");
-    let icons_dir = frontend_dir().join("icons");
-    let _ = std::fs::create_dir_all(&icons_dir);
-
-    let mut cfg = config::load_config();
-    if let Some(btn) = cfg.stream_deck_buttons.iter_mut().find(|b| b.id == id) {
-        btn.icon = format!("icons/{save_name}");
-        let _ = config::save_config(&cfg);
-        state.broadcast(json!({"type": "config_update", "source": "extract_icon"}));
+    let path = body.path.trim().to_string();
+    if path.is_empty() {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"success": false, "error": "path missing"}),
+        );
     }
 
-    json_response(StatusCode::OK, json!({"success": true, "icon": format!("icons/{save_name}")}))
+    let Some(relative) = extract_icon_blocking(path).await else {
+        return json_response(
+            StatusCode::OK,
+            json!({"success": false, "error": "Bu uygulamanın simgesi alınamadı."}),
+        );
+    };
+    let icon = format!("custom:{relative}");
+
+    if let Some(id) = body.button_id {
+        let mut cfg = config::load_config();
+        if let Some(btn) = cfg.stream_deck_buttons.iter_mut().find(|b| b.id == id) {
+            btn.icon = icon.clone();
+            let _ = config::save_config(&cfg);
+            state.broadcast(json!({"type": "config_update", "source": "extract_icon"}));
+        }
+    }
+
+    json_response(StatusCode::OK, json!({"success": true, "icon": icon}))
+}
+
+/// Extracts (or reuses) the icon of an application, off the async workers: the
+/// shell and GDI work is blocking, and the first call for an application is the
+/// only one that actually draws anything — later calls hit the disk cache.
+async fn extract_icon_blocking(app_path: String) -> Option<String> {
+    let frontend = frontend_dir();
+    tokio::task::spawn_blocking(move || {
+        crate::icon_extractor::get_or_extract_icon(&app_path, &frontend)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// `GET /api/app_icon?path=…` — serves an application's icon as PNG bytes,
+/// extracting it on first use.
+async fn app_icon_handler(Query(params): Query<HashMap<String, String>>) -> Response {
+    let Some(path) = params
+        .get("path")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"success": false, "error": "path missing"}),
+        );
+    };
+
+    let Some(relative) = extract_icon_blocking(path).await else {
+        return json_response(
+            StatusCode::NOT_FOUND,
+            json!({"success": false, "error": "Bu uygulamanın simgesi bulunamadı."}),
+        );
+    };
+
+    match tokio::fs::read(frontend_dir().join(relative)).await {
+        Ok(bytes) => {
+            let mut response = (StatusCode::OK, bytes).into_response();
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+            response
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "cannot read cached application icon");
+            json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"success": false, "error": "Simge okunamadı."}),
+            )
+        }
+    }
 }
 // ---------------------------------------------------------------------------
 // Windows autostart (HKCU Run key, written through reg.exe)
@@ -5728,6 +6323,9 @@ async fn api_show_window(State(state): State<Arc<AppState>>) -> Response {
 struct InstalledAppItem {
     name: String,
     path: String,
+    /// Frontend-relative path of the application's extracted icon, when one has
+    /// been cached already.
+    icon: Option<String>,
 }
 
 fn get_installed_apps() -> Vec<InstalledAppItem> {
@@ -5758,6 +6356,7 @@ fn get_installed_apps() -> Vec<InstalledAppItem> {
                                 apps.push(InstalledAppItem {
                                     name: stem.to_string(),
                                     path: path.to_string_lossy().to_string(),
+                                    icon: None,
                                 });
                             }
                         }
@@ -5782,6 +6381,7 @@ fn get_installed_apps() -> Vec<InstalledAppItem> {
                                 apps.push(InstalledAppItem {
                                     name: stem.to_string(),
                                     path: path.to_string_lossy().to_string(),
+                                    icon: None,
                                 });
                             }
                         }
@@ -5805,6 +6405,7 @@ fn get_installed_apps() -> Vec<InstalledAppItem> {
                             apps.push(InstalledAppItem {
                                 name: stem.to_string(),
                                 path: path.to_string_lossy().to_string(),
+                                icon: None,
                             });
                         }
                     }
@@ -6076,7 +6677,29 @@ async fn open_sound_settings_handler() -> Response {
 }
 
 pub(crate) async fn installed_apps_handler() -> Response {
-    let apps = get_installed_apps();
+    let frontend = frontend_dir();
+    let apps = tokio::task::spawn_blocking(move || {
+        let mut apps = get_installed_apps();
+        // Only cached icons are reported: a single extraction is a blocking
+        // shell round trip (~130 ms on Windows), and this handler also backs
+        // `/api/apps` and the MCP tool, which must stay immediate. Icons that
+        // are missing are extracted on demand by `/extract_icon` and
+        // `/api/app_icon`, and finished off by one background prewarm pass so
+        // the next listing is complete.
+        for app in &mut apps {
+            app.icon = crate::icon_extractor::cached_icon(&app.path, &frontend);
+        }
+        let pending: Vec<String> = apps
+            .iter()
+            .filter(|app| app.icon.is_none())
+            .map(|app| app.path.clone())
+            .collect();
+        crate::icon_extractor::prewarm_icons(pending, frontend);
+        apps
+    })
+    .await
+    .unwrap_or_default();
+
     json_response(StatusCode::OK, json!({
         "success": true,
         "apps": apps

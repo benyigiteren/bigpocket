@@ -51,10 +51,26 @@ pub struct StreamDeckButton {
     pub id: i32,
     #[serde(default)]
     pub label: String,
-    /// hotkey, command, volume_slider, toggle, live_info, clock_widget, cpu_widget, ram_widget
+    /// Widget kind. One of: `hotkey`, `command`, `url`, `text_snippet`, `toggle`,
+    /// `volume_slider`, `app_volume_slider`, `brightness_slider`, `live_info`,
+    /// `clock_widget`, `weather`, `now_playing`, `media_widget`, `pomodoro`,
+    /// `window_action` (foreground-window management), or `system_action`
+    /// (power/utility: sleep, restart, shutdown, lock, empty_recycle_bin,
+    /// screenshot).
     #[serde(default, rename = "type")]
     pub kind: String,
-    /// keybind, script, volume_slider, mic_mute, sound_mute, cpu, ram
+    /// Kind-dependent parameter.
+    ///
+    /// * `hotkey`        — a key combo, e.g. `"ctrl+shift+m"`.
+    /// * `command`       — an executable/command.
+    /// * `url`           — a link.
+    /// * `text_snippet`  — literal text to type.
+    /// * `toggle`        — `mic_mute`, `sound_mute` or `virtual_monitor`.
+    /// * sliders         — slider target (`master_volume`, `brightness`, …).
+    /// * `live_info`     — metric (`cpu`, `ram`, `disk`, `gpu`, `cpu_temp`, `net_speed`, `combo`).
+    /// * widget kinds    — the widget marker (`clock`, `weather`, `now_playing`, `media_control`, `pomodoro`).
+    /// * `window_action` — `maximize`, `minimize`, `restore`, `snap_left`, `snap_right`, `snap_top`, `close`, `next_monitor`.
+    /// * `system_action` — `sleep`, `restart`, `shutdown`, `lock`, `empty_recycle_bin`, `screenshot`.
     #[serde(default)]
     pub value: String,
     /// Custom SVG path or local image.
